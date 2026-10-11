@@ -19,7 +19,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_CONTENT } from '@puffly/game-content';
 import type { Burst } from '@puffly/game-core';
 import { FIELD_SCALE, intakeBurst } from '../intake';
-import { PUFF_SPREAD } from '../renderer';
+import { PUFF_SPREAD } from '../paint';
 import { ParticlePool } from '../particles';
 import { harness, lit } from '../../../game-core/src/__tests__/harness';
 

@@ -25,10 +25,9 @@
  */
 
 const URL_ARG = process.argv[2] ?? 'http://localhost:5175/';
-// The 3D scene is the default landing now (2026-10-10); the blocks below that judge the *painted*
-// layer say so on the URL rather than relying on the default, so flipping the default never
-// silently re-points an old block at the new renderer.
-const URL_2D = `${URL_ARG}?scene=2d`;
+// The painted layer is gone (2026-10-10): the scene is the only interface, and every block below
+// drives it. The name stays because the blocks' *claims* did not move — only who answers them.
+const URL_2D = URL_ARG;
 const PLAYWRIGHT_SPEC = process.env['PUFFLY_PLAYWRIGHT'] ?? 'playwright';
 const CHROME = process.env['PUFFLY_CHROME'];
 const ENGINE = process.env['PUFFLY_BROWSER'] ?? 'chromium';
@@ -207,22 +206,138 @@ async function waitScene(page, pattern, withinMs = 4000) {
 }
 
 /**
- * A coarse luminance map of the air above the table.
+ * Wait until the engine would actually take a draw.
+ *
+ * §18's rest rule swallows a press that lands inside `restSettleMs` of the previous release, so a
+ * check that presses on a wall-clock timer can be pressing into nothing — and then reports a working
+ * game as a broken one (2026-10-11: seven reds in one run, green in the runs either side of it). The
+ * scene publishes the rule's own inputs on its probe, so waiting on that is waiting on the rule and
+ * not on a duration copied out of it. A miss returns false and lets the check report its own numbers.
+ */
+async function waitPuffReady(page, withinMs = 4000) {
+  const deadline = Date.now() + withinMs;
+  for (;;) {
+    if (await page.evaluate(() => window.__pufflyScene?.puffReady === true)) return true;
+    if (Date.now() >= deadline) return false;
+    await page.waitForTimeout(80);
+  }
+}
+
+/** The probe fields a check can carry across the bridge (the context itself cannot be serialised). */
+const sceneProbe = (page) =>
+  page.evaluate(() => {
+    const p = window.__pufflyScene;
+    return p
+      ? {
+          lip: p.lip,
+          stageRing: p.stageRing,
+          particles: p.particles,
+          lastExhale: p.lastExhale,
+          frames: p.frames,
+          puffReady: p.puffReady,
+        }
+      : null;
+  });
+
+const pressSurface = (page, at, down) =>
+  page.evaluate(
+    ([x, y, isDown]) => {
+      document.querySelector('.hit')?.dispatchEvent(
+        new PointerEvent(isDown ? 'pointerdown' : 'pointerup', {
+          clientX: x,
+          clientY: y,
+          pointerId: 1,
+          pointerType: 'touch',
+          isPrimary: true,
+          bubbles: true,
+        }),
+      );
+    },
+    [at.x, at.y, down],
+  );
+
+/**
+ * One draw, taken the way a finger takes it: aim at the rod where the rod is, hold until the
+ * engine's own clock reaches `minSeconds`, read while held, release, and wait for the exhale.
+ *
+ * Three things this replaces, all measured on 2026-10-11:
+ * - a wall-clock hold with a single read at the end. `advance()` clamps each frame's dt to 64 ms, so
+ *   2.1 s of *simulated* draw can cost 6.6 s of wall time on a starved page; the fixed window gave
+ *   up mid-draw and four checks called the L tier broken on a run the next one passed.
+ * - pressing on a timer. §18's rest window swallows a press that comes too soon after the previous
+ *   release, and a press aimed at a rod that has since travelled to the flame lands on empty air —
+ *   both read as "the draw never happened", with the last draw's action still on the probe.
+ * - one aim for a whole block of draws. The rod moves between them, so the point is re-read each time.
+ *
+ * A press that visibly produced nothing is retried once, and `started` says whether any of them took.
+ */
+async function holdDraw(page, minSeconds) {
+  const attempt = async () => {
+    const aim = await propsOf(page);
+    const at = await stagePoint(page, aim.body.x, aim.body.y);
+    await waitPuffReady(page);
+    await pressSurface(page, at, true);
+    let mid = await sceneProbe(page);
+    const heldUntil = Date.now() + Math.max(minSeconds * 4000, 12000);
+    const gaveUpBy = Date.now() + 900;
+    let sawDraw = false;
+    for (;;) {
+      mid = (await sceneProbe(page)) ?? mid;
+      const seconds = Number(mid?.stageRing?.seconds ?? 0);
+      if (mid?.lip?.visible === true || seconds > 0) sawDraw = true;
+      if (seconds >= minSeconds) break;
+      // The engine ended the draw on its own (its ceiling) — stop waiting for a target it cannot hit.
+      if (sawDraw && mid?.puffReady === true) break;
+      if (!sawDraw && Date.now() >= gaveUpBy) {
+        await pressSurface(page, at, false);
+        return { mid, started: false, retry: true };
+      }
+      if (Date.now() >= heldUntil) break;
+      await page.waitForTimeout(60);
+    }
+    const before = JSON.stringify(mid?.lastExhale ?? null);
+    await pressSurface(page, at, false);
+    let after = await sceneProbe(page);
+    const releasedUntil = Date.now() + Math.max(minSeconds * 2000, 6000);
+    for (;;) {
+      after = (await sceneProbe(page)) ?? after;
+      if (JSON.stringify(after?.lastExhale ?? null) !== before) break;
+      if (Date.now() >= releasedUntil) break;
+      await page.waitForTimeout(60);
+    }
+    return {
+      mid,
+      exhale: after?.lastExhale ?? null,
+      particles: after?.particles ?? -1,
+      started: sawDraw,
+      retry: false,
+    };
+  };
+  const first = await attempt();
+  return first.started ? first : await attempt();
+}
+
+/**
  *
  * What gets compared is *which pixels changed*, not how bright the frame is: a room's own key
  * light fills the same band with bright pixels, and counting those proved nothing about smoke.
  */
-const airSample = (page) =>
-  page.evaluate(() => {
-    const canvas = document.querySelector('canvas');
-    const scale = canvas.width / canvas.clientWidth;
-    const ctx = canvas.getContext('2d');
-    const box = canvas.getBoundingClientRect();
+const airSample = async (page) => {
+  const shot = (await page.screenshot()).toString('base64');
+  return page.evaluate(async (b64) => {
+    const img = new Image();
+    img.src = 'data:image/png;base64,' + b64;
+    await img.decode();
+    const c = document.createElement('canvas');
+    c.width = img.width;
+    c.height = img.height;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0);
     const image = ctx.getImageData(
       0,
-      Math.round(box.height * 0.25 * scale),
-      canvas.width,
-      Math.round(box.height * 0.35 * scale),
+      Math.round(img.height * 0.25),
+      img.width,
+      Math.round(img.height * 0.35),
     );
     const step = 4;
     const lum = [];
@@ -233,7 +348,8 @@ const airSample = (page) =>
       }
     }
     return lum;
-  });
+  }, shot);
+};
 
 /**
  * Where the rod's paper is, read off the drawn canvas rather than off the state.
@@ -266,90 +382,158 @@ const sceneFlip = (page) =>
     return offenders;
   });
 
-const paperMass = (page) =>
-  page.evaluate(() => {
-    const canvas = document.querySelector('canvas');
-    const ctx = canvas.getContext('2d');
-    const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    let n = 0;
-    let sumX = 0;
-    let sumY = 0;
-    let sumXY = 0;
-    for (let y = 0; y < image.height; y += 2) {
-      for (let x = 0; x < image.width; x += 2) {
-        const i = (y * image.width + x) * 4;
-        const r = image.data[i];
-        const g = image.data[i + 1];
-        const b = image.data[i + 2];
-        // Paper: the one large object in the frame that is white in all three channels. The cherry
-        // is orange (blue low) and the pill's glow is too, so neither joins the sample.
-        if (r > 200 && g > 200 && b > 190) {
-          n += 1;
-          sumX += x;
-          sumY += y;
-          sumXY += x * y;
+/**
+ * A tight pixel box around the rod's own body anchor (the resting cigarette on the pack), read as
+ * a centroid, a tilt and a digest. The RTL check compares two locales' boxes: the engine's own
+ * geometry must not mirror, so two identical states paint identical pixels. A full-band colour key
+ * was the old approach; it quietly ended up counting a pill glyph and is gone with the Demo icons.
+ */
+const rodBox = async (page) => {
+  const props = await propsOf(page);
+  const shot = (await page.screenshot()).toString('base64');
+  return page.evaluate(
+    async ({ b64, anchor }) => {
+      const img = new Image();
+      img.src = 'data:image/png;base64,' + b64;
+      await img.decode();
+      const c = document.createElement('canvas');
+      c.width = img.width;
+      c.height = img.height;
+      const ctx = c.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(img, 0, 0);
+      // A 140 × 34 CSS box centred on the body anchor, in device pixels.
+      const bw = 140 * (img.width / window.innerWidth);
+      const bh = 34 * (img.height / window.innerHeight);
+      const cx = anchor.x * img.width;
+      const cy = anchor.y * img.height;
+      const x0 = Math.max(0, Math.round(cx - bw / 2));
+      const y0 = Math.max(0, Math.round(cy - bh / 2));
+      const w = Math.min(Math.round(bw), img.width - x0);
+      const h = Math.min(Math.round(bh), img.height - y0);
+      const image = ctx.getImageData(x0, y0, w, h).data;
+      // Local background = the pack's own dark plate (#191612-ish); the rod is the warm grey thing
+      // in the box that stands clear of it.
+      let n = 0;
+      let sumX = 0;
+      let sumY = 0;
+      let sumXY = 0;
+      // Hash only the keyed rod pixels (not the whole box): drifting dust in the background differs
+      // between two page loads and must not be able to turn an identical rod into a failed digest.
+      let hash = 2166136261;
+      for (let y = 0; y < h; y += 1) {
+        for (let x = 0; x < w; x += 1) {
+          const i = (y * w + x) * 4;
+          const r = image[i];
+          const g = image[i + 1];
+          const b = image[i + 2];
+          if (r >= 55 && r <= 150 && r - b >= 8) {
+            n += 1;
+            sumX += x;
+            sumY += y;
+            sumXY += x * y;
+            hash = Math.imul(hash ^ r, 16777619);
+            hash = Math.imul(hash ^ g, 16777619);
+            hash = Math.imul(hash ^ b, 16777619);
+            hash = Math.imul(hash ^ x, 16777619);
+            hash = Math.imul(hash ^ y, 16777619);
+          }
         }
       }
-    }
-    if (n < 50) return { n, meanX: 0, meanY: 0, tilt: 0 };
-    const meanX = sumX / n;
-    const meanY = sumY / n;
-    return { n, meanX, meanY, tilt: sumXY / n - meanX * meanY };
-  });
+      return {
+        n,
+        meanX: n ? sumX / n : 0,
+        meanY: n ? sumY / n : 0,
+        tilt: n ? sumXY / n - (sumX / n) * (sumY / n) : 0,
+        hash: hash >>> 0,
+        box: [x0, y0, w, h],
+      };
+    },
+    { b64: shot, anchor: props.body },
+  );
+};
 
 /**
- * How the breath in the air is *shaped*, not just how bright it got.
+ * How the breath in the air is *shaped*, measured on the cloud's own contribution to the frame.
  *
- * A cloud can cover the band and still be one flat sheet of haze — which is what the exhale
- * measured before its lobes were re-authored (neighbour-to-neighbour difference 5.17, relative
- * spread 0.234). Structure is what the design's breath has: light and dark inside the same mass
- * (8.44 and 0.294 after). Both are read over the same band `airSample` uses.
+ * Two frames taken one `visible` toggle apart: the room, the chrome and the lighting are identical
+ * between them, so the difference *is* the smoke. That is what makes this the third attempt at this
+ * ruler rather than the second.
+ *
+ * The first version counted every pixel above luminance 90 as cloud, so the key light and the pool
+ * the table sits in joined the set — and because a wide even haze adds mostly interior pairs whose
+ * difference is zero, the score went *down* as more smoke filled the band. Three runs of one build
+ * on 2026-10-11 read 8.93 / 5.35 / 4.23 over 4019 / 8627 / 14634 samples, straddling the 6.5 that
+ * was supposed to separate a flat sheet (5.17) from a structured one (8.44): the check went red on
+ * the run that had *more* breath in it. The second attempt differenced two frames around a draw,
+ * which turned out worse — the ignition vignette and the pool brighten during a hold, so the whole
+ * band counted as cloud (63k of 63k samples) and an idle pair scored higher than a breath did.
+ *
+ * What survives is the variation of the lift within the cloud's own footprint: `spread`. Measured
+ * 2026-10-11 it sits at 0.66–1.03 for every state of the breath, and re-measuring the same frame
+ * against a second, independently taken baseline moves it by <= 0.02 — so 0.5 separates "light and
+ * dark inside the same mass" from a flat sheet (which lifts every pixel by about the same amount and
+ * scores 0) by more than the instrument's own noise. `cloudPx` is reported with it because a spread
+ * over an empty footprint means nothing: the two together are the claim.
  */
-const cloudStructure = (page) =>
-  page.evaluate(() => {
-    const canvas = document.querySelector('canvas');
-    const scale = canvas.width / canvas.clientWidth;
-    const ctx = canvas.getContext('2d');
-    const image = ctx.getImageData(
-      0,
-      Math.round(canvas.getBoundingClientRect().height * 0.25 * scale),
-      canvas.width,
-      Math.round(canvas.getBoundingClientRect().height * 0.35 * scale),
-    );
-    const d = image.data;
-    const lumAt = (row, col) => {
-      const i = (row * image.width + col) * 4;
-      return 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-    };
-    const cloud = [];
-    for (let row = 0; row < image.height; row += 2) {
-      for (let col = 0; col < image.width; col += 2) {
-        const value = lumAt(row, col);
-        if (value > 90) cloud.push(value);
-      }
-    }
-    const mean = cloud.length ? cloud.reduce((a, b) => a + b, 0) / cloud.length : 0;
-    const sd = Math.sqrt(
-      cloud.length ? cloud.reduce((a, b) => a + (b - mean) ** 2, 0) / cloud.length : 0,
-    );
-    let edge = 0;
-    let pairs = 0;
-    for (let row = 0; row < image.height; row += 4) {
-      for (let col = 4; col < image.width; col += 4) {
-        const a = lumAt(row, col);
-        const b = lumAt(row, col - 4);
-        if (a > 90 || b > 90) {
-          edge += Math.abs(a - b);
-          pairs += 1;
+const cloudShape = async (page) => {
+  const band = async () => {
+    const shot = (await page.screenshot()).toString('base64');
+    return page.evaluate(async (b64) => {
+      const img = new Image();
+      img.src = 'data:image/png;base64,' + b64;
+      await img.decode();
+      const c = document.createElement('canvas');
+      c.width = img.width;
+      c.height = img.height;
+      const ctx = c.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(img, 0, 0);
+      const image = ctx.getImageData(
+        0,
+        Math.round(img.height * 0.25),
+        img.width,
+        Math.round(img.height * 0.35),
+      );
+      const step = 4;
+      const lum = [];
+      for (let row = 0; row < image.height; row += step) {
+        for (let col = 0; col < image.width; col += step) {
+          const i = (row * image.width + col) * 4;
+          lum.push(0.299 * image.data[i] + 0.587 * image.data[i + 1] + 0.114 * image.data[i + 2]);
         }
       }
-    }
-    return {
-      cloudSamples: cloud.length,
-      neighbourContrast: pairs ? edge / pairs : 0,
-      spread: mean ? sd / mean : 0,
-    };
-  });
+      return lum;
+    }, shot);
+  };
+  const setCloud = (wanted) =>
+    page.evaluate((visible) => {
+      const ctx = window.__pufflyScene.context;
+      const scene = 'value' in ctx.scene ? ctx.scene.value : ctx.scene;
+      let hit = null;
+      scene.traverse((o) => {
+        if (o.name === 'smoke') hit = o;
+      });
+      if (hit === null) return 0;
+      hit.visible = visible;
+      return hit.count;
+    }, wanted);
+  const instances = await setCloud(false);
+  const off = await band();
+  const on = await band();
+  await setCloud(true);
+  const delta = on.map((value, i) => value - (off[i] ?? value));
+  const lifted = delta.map((value) => value > 4);
+  const cloudPx = lifted.filter(Boolean).length;
+  const mean = cloudPx ? delta.reduce((a, v, i) => (lifted[i] ? a + v : a), 0) / cloudPx : 0;
+  const variance = cloudPx
+    ? delta.reduce((a, v, i) => (lifted[i] ? a + (v - mean) ** 2 : a), 0) / cloudPx
+    : 0;
+  return {
+    instances,
+    cloudPx,
+    share: +(cloudPx / delta.length).toFixed(4),
+    spread: mean ? +(Math.sqrt(variance) / mean).toFixed(3) : 0,
+  };
+};
 
 /** How much of the band a breath actually rewrote. */
 function breathDelta(before, after) {
@@ -621,57 +805,34 @@ const hintCentre = async (page) => {
     `${counted}s counted for a ${ASLEEP_MS / 1000}s sleep (clock ${beforeSleep}s -> ${beforeSleep - counted}s)`,
   );
 
-  // Re-read: the rod is in the hand now, so its anchor is not where it was on the table.
-  const inHandProps = await propsOf(page);
-  const held = await stagePoint(page, inHandProps.body.x, inHandProps.body.y);
+  // Two draws, taken the way a finger takes them: aim at the rod where the rod is, hold until the
+  // engine's own clock reaches a full 单口 (2.3 s of *simulated* time — the deck's 2.0 s inside its
+  // 2.6 s window), read while held, release. This loop used to hold a wall-clock 2300 ms and press
+  // the same point twice without re-aiming; under software WebGL a draw can be swallowed whole by
+  // either, and five of this block's 3D checks went red on one run and were green on the next
+  // (2026-10-11).
+  let words = null;
+  let shape = null;
   for (let round = 0; round < 2; round += 1) {
-    await page.evaluate(
-      ([x, y]) => {
-        document.querySelector('canvas').dispatchEvent(
-          new PointerEvent('pointerdown', {
-            clientX: x,
-            clientY: y,
-            pointerId: 1,
-            pointerType: 'touch',
-            isPrimary: true,
-            bubbles: true,
-          }),
-        );
-      },
-      [held.x, held.y],
-    );
-    // Longer than one full draw, on purpose. The deck's 单口吸入 for the default rod is 2.0 s (S9) and
-    // its own window tops at 2.6, so a hold shorter than that is a sip: the air moves, but only as
-    // much as a half-filled breath moves it. This check's claim is about *a drawn breath*, so the
-    // finger has to outlast the fill — the first version of this line held 800 ms and reported a
-    // shallow breath as a broken picture.
-    await page.waitForTimeout(2300);
-    await page.evaluate(
-      ([x, y]) => {
-        document.querySelector('canvas').dispatchEvent(
-          new PointerEvent('pointerup', {
-            clientX: x,
-            clientY: y,
-            pointerId: 1,
-            pointerType: 'touch',
-            isPrimary: true,
-            bubbles: true,
-          }),
-        );
-      },
-      [held.x, held.y],
-    );
+    await holdDraw(page, 2.3);
+    if (round === 1) {
+      // Both readings are taken while *this* breath is still in the air: the hint word leaves with
+      // the chrome 2.6 s after the last input (§10) and the cloud rises out of the sampled band. The
+      // first version read the shape after the settle wait and got 0.2% of the band (135 cloud
+      // pixels) — a footprint too thin for the statistic to carry a claim.
+      words = await stageWords(page);
+      shape = await cloudShape(page);
+    }
     await page.waitForTimeout(600);
   }
-  // Drawing on the rod left the scene nudging the next gesture, and the hint names it. This reading
-  // is taken *first* among the post-breath checks, and that is the whole point: the chrome folds
-  // itself 2.6 s after the last input (§10, `controlsIdleMs`) and the word goes away with it — a
-  // probe run measured the word holding ~1.6 s and then leaving with the rail (`hints=0 rail=down`)
+  // Drawing on the rod left the scene nudging the next gesture, and the hint names it. Both this and
+  // the cloud's shape are read inside the loop, while the breath is still in the air: the chrome
+  // folds itself 2.6 s after the last input (§10, `controlsIdleMs`) and the word goes away with it —
+  // a probe run measured the word holding ~1.6 s and then leaving with the rail (`hints=0 rail=down`)
   // until a press brought it back. Sampling after two pixel reads put this line across that rule, and
   // it went red once in two runs; waking the chrome instead added a press and a second of waiting,
   // which pushed three later sheet checks off their timing. The word needs three things to be absent
   // (the setting off, the chrome folded, a sheet on top), so `sheets` travels with the reading.
-  const words = await stageWords(page);
   check(
     'the screen carries no prose, and the hint still names the gesture being nudged',
     words.offenders.length === 0 && words.hints === 1 && words.affordance === 'puff',
@@ -685,17 +846,18 @@ const hintCentre = async (page) => {
     `${(breath.movedRatio * 100).toFixed(1)}% of the band changed, mean rise ${breath.meanRise.toFixed(1)}`,
   );
   // Brightness alone would pass on a flat sheet of haze, which is exactly what the exhale used to
-  // be. Both shape signals have to be missing before this calls a failure: one of them drifting on
-  // a different rod or a different canvas width is not the regression, a cloud with no light and
-  // dark inside it is.
-  const shape = await cloudStructure(page);
+  // be. Both halves here are needed and neither is decoration: `spread` alone would pass on one
+  // bright dust mote in an otherwise empty band, and `share` alone would pass on a flat sheet.
+  // Measured 2026-10-11 with the cloud toggled between two frames: spread sits at 0.66–1.03 for every
+  // state of a breath (the 0.5 floor is set against a flat sheet's 0, and re-baselining the same
+  // frame moves it by <= 0.02), and the footprint grows 1% → 2% → 5.6% → 10.7% of the band from idle
+  // through the three tiers.
   check(
-    // STALE: 6.5 and 0.26 were calibrated against the picture this script saw in 2026-10-05, before
-    // the plume was given one shared flow field (SPEC.md §15) — the breath went from a round cloud
-    // to a narrow rising column, so both numbers move and neither has been re-read here.
     'the breath has light and dark inside it, not just brightness',
-    shape.neighbourContrast >= 6.5 || shape.spread >= 0.26,
-    `neighbour difference ${shape.neighbourContrast.toFixed(2)}, relative spread ${shape.spread.toFixed(3)}, ${String(shape.cloudSamples)} cloud samples`,
+    shape.spread >= 0.5 && shape.share >= 0.01,
+    `relative spread ${shape.spread.toFixed(3)} over ${String(shape.cloudPx)} cloud pixels (${(
+      shape.share * 100
+    ).toFixed(1)}% of the band, ${String(shape.instances)} discs)`,
   );
   const inHandAgain = await scenePhase(page);
   check('the rod is still in hand, not in the tray', LIT.test(inHandAgain), inHandAgain);
@@ -759,10 +921,9 @@ const hintCentre = async (page) => {
       x: canvas.x + canvas.width / 2,
       y: Math.max(canvas.y + 12, panelTop - 24),
       onScene:
-        document.elementFromPoint(
-          canvas.x + canvas.width / 2,
-          Math.max(canvas.y + 12, panelTop - 24),
-        )?.tagName === 'CANVAS',
+        document
+          .elementFromPoint(canvas.x + canvas.width / 2, Math.max(canvas.y + 12, panelTop - 24))
+          ?.classList?.contains('hit') === true,
     };
   });
   check(
@@ -1167,10 +1328,13 @@ const hintCentre = async (page) => {
     });
     // Well above the held rod, so the swipe resolves to nothing at all: that is the whole
     // difference between "put the interface away" and "put the cigarette out".
-    canvas.dispatchEvent(new PointerEvent('pointerdown', at(0.05)));
-    canvas.dispatchEvent(new PointerEvent('pointermove', at(0.14)));
-    canvas.dispatchEvent(new PointerEvent('pointermove', at(0.22)));
-    canvas.dispatchEvent(new PointerEvent('pointerup', at(0.24)));
+    // The scene canvas is deaf to pointers (the mask); the surface under it is what a scene press
+    // actually lands on, so that is where the finger is simulated.
+    const surface = document.querySelector('.hit');
+    surface.dispatchEvent(new PointerEvent('pointerdown', at(0.05)));
+    surface.dispatchEvent(new PointerEvent('pointermove', at(0.14)));
+    surface.dispatchEvent(new PointerEvent('pointermove', at(0.22)));
+    surface.dispatchEvent(new PointerEvent('pointerup', at(0.24)));
   });
   await page.waitForTimeout(700);
   const folded = await page.evaluate(() => ({
@@ -1473,10 +1637,14 @@ try {
       return {
         phase: stage?.dataset.phase ?? '',
         affordance: stage?.dataset.affordance ?? 'missing',
-        ring: cell('.ring b') || cell('.ring .mark'),
+        ring: document.querySelector('.ring svg.demo-glyph')?.getAttribute('data-name') ?? '',
         arc: row.querySelector('.arc')?.getAttribute('stroke-dasharray') ?? '',
         primary: cell('[data-hook="break"]'),
         alt: cell('.num.alt'),
+        // §2 puts the figures in the row and the symbol in the ring, so a check that wants one
+        // measurement has to name it by what it reads, not by the slot it happens to sit in this
+        // phase: the pressable slot is the count in 吸入 and the force in 吐烟.
+        figures: [...row.querySelectorAll('.num')].map((el) => el.textContent.trim()),
         pill: (document.querySelector('.pill .word')?.textContent ?? '').trim(),
         lit: [...document.querySelectorAll('.rail .tab')]
           .filter((el) => el.dataset.on === 'true')
@@ -1490,33 +1658,40 @@ try {
   // its legend. Both are read in one sample so a number and a position that disagree cannot pass.
   const readForce = () =>
     page.evaluate(() => {
-      const digits = document.querySelector('.hud .ring .digits')?.textContent?.trim() ?? '';
+      // The one bare number in the row is this draw’s force (§2’s S4: 「62」, no unit, no word).
+      // The ring is deliberately not read here: §2 forbids a digit in it, and `glyph` below is
+      // where that half of the claim is checked.
+      const digits = [...document.querySelectorAll('.hud .num')]
+        .map((el) => (el.textContent ?? '').trim())
+        .filter((text) => /^\d+$/.test(text))
+        .join(' ');
       const bar = document.querySelector('.cta .art.force');
-      const track = bar?.querySelector('.floor');
-      const x1 = Number(track?.getAttribute('x1') ?? '-1');
-      const x2 = Number(track?.getAttribute('x2') ?? '-1');
+      const rects = bar
+        ? [...bar.querySelectorAll('rect')].map((r) => r.getBoundingClientRect().width)
+        : [];
       return {
         phase: document.querySelector('.stage')?.dataset.phase ?? '',
         digits,
-        mark: document.querySelector('.hud .ring .mark')?.textContent?.trim() ?? '',
-        threads: bar ? bar.querySelectorAll('.thread').length : -1,
-        lobes: bar ? bar.querySelectorAll('.lobe').length : -1,
+        glyph: document.querySelector('.hud .ring svg.demo-glyph')?.getAttribute('data-name') ?? '',
+        parts: rects.length,
+        // The filled rect (track, fill, crest): its share of the 342 px track is the draw's force.
+        fillRatio: rects.length >= 2 ? Math.min(...rects) / Math.max(...rects) : -1,
         words: bar ? (bar.textContent ?? '').trim() : '',
-        knob: Number(bar?.querySelector('.knob')?.getAttribute('cx') ?? '-1'),
-        x1,
-        x2,
       };
     });
 
   check(
     'S1: the row reads the stick, the clock and what is left of the rod',
     idle.phase === 'light' &&
-      idle.ring === '1' &&
+      // §2's S1 anatomy: the ring wears the Demo's rod symbol and the three figures it names —
+      // 支数 / 已燃 / 剩余 — are the row's, in that order.
+      idle.ring === 'rod' &&
+      idle.figures.join(' ') === '1 00:00 100%' &&
       // The row reads 已燃, and before anything is lit nothing has burned. The session's own
       // countdown is the stage's `data-break`, which the check above reads as the clock.
       idle.primary === '00:00' &&
       idle.alt === '100%' &&
-      idle.arc.startsWith('94.25') &&
+      idle.arc.startsWith('106.81') &&
       idle.lit.join() === 'light',
     JSON.stringify(idle),
   );
@@ -1550,6 +1725,8 @@ try {
   // Hold the pill: the arc is the draw itself, and the row counts seconds while it runs.
   const box = await page.locator('.pill').boundingBox();
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  // The lighting above pressed up to three times, so the rest window may still be shut.
+  await waitPuffReady(page);
   await page.mouse.down();
   // Wait for the row's OWN clock before letting go: `advance()` runs one step per frame, so on a
   // loaded machine (this session: load 14–20) 900 ms of wall time can be a handful of simulated
@@ -1598,17 +1775,16 @@ try {
   check(
     'S4: the exhale wears that draw’s force in the ring, and the bar says it without a word',
     heldForce.digits === '' &&
-      heldForce.mark === '≡' &&
+      heldForce.glyph === 'airflow' &&
       exhale !== undefined &&
       /^\d+$/.test(exhale.digits) &&
       Number(exhale.digits) >= 1 &&
       Number(exhale.digits) <= 100 &&
-      exhale.threads === 3 &&
-      exhale.lobes === 3 &&
-      exhale.words === '' &&
-      Math.abs(
-        exhale.knob - (exhale.x1 + (Number(exhale.digits) / 100) * (exhale.x2 - exhale.x1)),
-      ) <= 0.7,
+      exhale.glyph === 'swirl-dot' &&
+      exhale.parts >= 3 &&
+      exhale.fillRatio > 0.25 &&
+      exhale.fillRatio <= 1 &&
+      exhale.words === '',
     `held=${JSON.stringify(heldForce)} sighted=${String(sighted)} ` +
       `exhale=${JSON.stringify(exhale ?? null)}`,
   );
@@ -1649,27 +1825,42 @@ try {
   await page.waitForTimeout(520);
 
   const countOf = (text) => Number(/^(\d+)\s*\//.exec(text)?.[1] ?? -1);
+  /** The row’s 「n / m」 figure — the count itself, whichever slot the current phase parks it in. */
+  const drawCount = (read) => countOf(read.figures.find((text) => text.includes('/')) ?? '');
   const beforeCeiling = await chrome();
   const ceilingBox = (await page.locator('.pill').boundingBox()) ?? box;
   await page.mouse.move(ceilingBox.x + ceilingBox.width / 2, ceilingBox.y + ceilingBox.height / 2);
   await page.mouse.down();
-  let stillHeld = beforeCeiling;
+  // The finger never leaves the pill, so the row wearing a bare force number *is* the ceiling
+  // firing on its own (§14's self-release) — and the count is gone from the row by then, because
+  // §2 gives that slot to the force while the smoke is still on screen.
+  let heldRead = beforeCeiling;
+  let selfEnded = false;
   let waitedMs = 0;
-  while (waitedMs < 6000 && countOf(stillHeld.primary) === countOf(beforeCeiling.primary)) {
+  while (waitedMs < 6000 && !selfEnded) {
     await page.waitForTimeout(150);
     waitedMs += 150;
-    stillHeld = await chrome();
+    heldRead = await chrome();
+    selfEnded = heldRead.figures.some((text) => /^\d+$/.test(text));
   }
   await page.mouse.up();
-  await page.waitForTimeout(400);
-  const afterRelease = await chrome();
+  // The release after the self-end must buy nothing: still exactly one draw. The count is back
+  // in the row only once the exhale has cleared, so wait for the figure rather than for a delay.
+  let afterRelease = await chrome();
+  let settledMs = 0;
+  while (settledMs < 4000 && drawCount(afterRelease) < 0) {
+    await page.waitForTimeout(150);
+    settledMs += 150;
+    afterRelease = await chrome();
+  }
   check(
     'a draw held past its ceiling ends itself, and the release afterwards buys nothing',
-    countOf(stillHeld.primary) > countOf(beforeCeiling.primary) &&
-      stillHeld.phase === 'puff' &&
-      countOf(afterRelease.primary) === countOf(stillHeld.primary),
-    `held=${beforeCeiling.primary} → ${stillHeld.primary} after ${String(waitedMs)}ms of wall clock ` +
-      `(the row's own clock read ${stillHeld.alt}), released=${afterRelease.primary}`,
+    selfEnded &&
+      heldRead.phase === 'puff' &&
+      drawCount(afterRelease) === drawCount(beforeCeiling) + 1,
+    `held=${JSON.stringify(beforeCeiling.figures)} → ${JSON.stringify(heldRead.figures)} ` +
+      `after ${String(waitedMs)}ms with the finger still down, released=` +
+      `${JSON.stringify(afterRelease.figures)} after ${String(settledMs)}ms more`,
   );
 
   // S17 and S19 read together: 按住 0.6 秒 opens the card, 松手只收卡片 closes it again, and the
@@ -1976,7 +2167,7 @@ try {
     JSON.stringify(zh),
   );
   const zhHint = await hintCentre(page);
-  const zhScene = await paperMass(page);
+  const zhScene = await rodBox(page);
   const zhAim = await propsOf(page);
 
   await openSheet(page, 'settings');
@@ -2038,7 +2229,7 @@ try {
   // S24's own 反例验证: 「烟本身可以镜像，但『燃烧推进方向』建议保持物理正确，不做镜像，避免用户误判」.
   // Two halves, because a mirror can come from either side of the seam: the state's geometry (which
   // the page publishes) and the pixels (which the web layer is free to restyle).
-  const arScene = await paperMass(page);
+  const arScene = await rodBox(page);
   const arAim = await propsOf(page);
   const zhLean = zhAim.ember.x - zhAim.body.x;
   const arLean = arAim.ember.x - arAim.body.x;
@@ -2052,17 +2243,20 @@ try {
     // The state's own numbers, byte for byte.
     Math.abs(zhLean - arLean) < 1e-4 &&
       zhLean > 0 &&
-      // The drawn rod: the same place, and the same lean rather than its mirror image. A rod lying
-      // at 6° has a tilt this side of a thousand pixels squared, and a flip turns it negative.
-      Math.abs(arScene.meanX - zhScene.meanX) <= 2 &&
-      Math.abs(arScene.meanY - zhScene.meanY) <= 2 &&
+      // The drawn rod, read from the tight box around its own anchor: the same centroid, the same
+      // lean sign and the same pixels rather than a mirrored picture.
+      arScene.n > 200 &&
+      Math.abs(arScene.n - zhScene.n) / zhScene.n < 0.1 &&
+      Math.abs(arScene.meanX - zhScene.meanX) <= 3 &&
+      Math.abs(arScene.meanY - zhScene.meanY) <= 3 &&
+      arScene.tilt !== 0 &&
       Math.sign(arScene.tilt) === Math.sign(zhScene.tilt) &&
-      Math.abs(zhScene.tilt) > 1000 &&
       // The half the buffer cannot see: a stylesheet is allowed to turn the composited picture
       // around, and this is the check that says it may not.
-      (await sceneFlip(page)).length === 0 &&
       (await sceneFlip(page)).length === 0,
-    `lean ${zhLean.toFixed(4)}→${arLean.toFixed(4)}, x ${zhScene.meanX.toFixed(1)}→${arScene.meanX.toFixed(1)}, tilt ${zhScene.tilt.toFixed(0)}→${arScene.tilt.toFixed(0)}, flipped=${JSON.stringify(await sceneFlip(page))}`,
+    `lean ${zhLean.toFixed(4)}→${arLean.toFixed(4)}, n ${zhScene.n}→${arScene.n}, ` +
+      `x ${zhScene.meanX.toFixed(1)}→${arScene.meanX.toFixed(1)}, tilt ${zhScene.tilt.toFixed(0)}→${arScene.tilt.toFixed(0)}, ` +
+      `tilt ${zhScene.tilt.toFixed(0)} vs ${arScene.tilt.toFixed(0)}, flipped=${JSON.stringify(await sceneFlip(page))}`,
   );
 
   // Tier three is a whole interface, not a colour: the same controls, the same positions, no
@@ -2239,6 +2433,18 @@ try {
     desk.bars === 7 && desk.hud !== null && desk.hud.x + desk.hud.w <= desk.rail.x,
     JSON.stringify({ bars: desk.bars, hud: desk.hud, rail: desk.rail }),
   );
+  // §2/§11: at 1440 the wide layout keeps S11's five desk readouts; below 860 they are not allowed.
+  const deskReadouts = await page.evaluate(() => ({
+    all: document.querySelectorAll('.hud .num, .hud .read').length,
+    desk: document.querySelectorAll('.hud .desk .read').length,
+    deskVisible:
+      getComputedStyle(document.querySelector('.hud .desk') ?? document.body).display !== 'none',
+  }));
+  check(
+    'the wide scene keeps the five desk readouts and the phone pair stays hidden',
+    deskReadouts.desk === 5 && deskReadouts.deskVisible && deskReadouts.all <= 8,
+    JSON.stringify(deskReadouts),
+  );
 
   // The desk is the one screen where the head-up row *is* words (S11's five named figures), so this
   // is the pass where the prose rule has to be aimed at the row: on a phone the row's own names are
@@ -2336,7 +2542,9 @@ try {
       return x < sheet.x || x > sheet.x + sheet.width || y < sheet.y || y > sheet.y + sheet.height;
     });
     const [x, y] = free ?? candidates[0];
-    return { x, y, onScene: document.elementFromPoint(x, y)?.tagName === 'CANVAS' };
+    // The scene canvas is deaf (the mask): a press on the bare stage reports the hit surface
+    // under it, and *that* is what "landed on the scene" means now.
+    return { x, y, onScene: document.elementFromPoint(x, y)?.classList?.contains('hit') === true };
   });
   check(
     'S10: the dismissal press lands on the scene, not the panel',
@@ -2697,28 +2905,37 @@ try {
     ringHit === true,
     `ring seen ${String(ringHit)}`,
   );
-  const flameRead = () =>
-    page.evaluate(() => {
-      const ctx = window.__pufflyScene.context;
-      const scene = 'value' in ctx.scene ? ctx.scene.value : ctx.scene;
-      let visible = false;
-      let lid = 0;
-      scene.traverse((o) => {
-        if (o.isMesh && o.material?.map?.image?.width === 2) visible = visible || o.visible;
-        if (o.name === 'lighter-lid') lid = o.rotation.x;
-      });
-      return { visible, lid };
+  const flameSrc = `(() => {
+    const ctx = window.__pufflyScene.context;
+    const scene = 'value' in ctx.scene ? ctx.scene.value : ctx.scene;
+    let visible = false;
+    let lid = 0;
+    scene.traverse((o) => {
+      if (o.isMesh && o.material?.map?.image?.width === 2) visible = visible || o.visible;
+      if (o.name === 'lighter-lid') lid = o.rotation.x;
     });
+    return { visible, lid };
+  })()`;
+  const flameRead = () => page.evaluate(flameSrc);
   const flameIdle = await flameRead();
   await page
     .locator('.pill')
     .click({ timeout: 5000 })
     .catch(() => {});
-  await page.waitForTimeout(220);
+  // Wait for the scene to say the flame is on rather than sampling 220 ms later: `advance()` clamps
+  // each frame's dt to 64 ms, so a page starved to ~5 fps can spend the whole window before the frame
+  // that places the flame runs. The predicate is the same field the assertion reads, so a healthy
+  // page returns on its first poll and the timing-sensitive checks after this are untouched.
+  await page
+    .waitForFunction(`${flameSrc}.visible`, null, { timeout: 6000, polling: 60 })
+    .catch(() => null);
   const flameLit = await flameRead();
   // The flint's sparks arrive on the sim's own clock (~1 s after the strike here), so this waits
   // for the pass rather than sampling at a guessed moment; the streaks themselves were probe-
-  // checked (7 of them, short dashes off the chimney).
+  // checked (7 of them, short dashes off the chimney). The budget is that arrival converted at the
+  // worst frame rate this page has been measured at (~5 fps, so 1 s of sim costs ~3.2 s of wall)
+  // with room for the burst's own life — the 4 s version reddened on a loaded machine while the
+  // runs either side of it were green (2026-10-11).
   const sparksSeen = await page
     .waitForFunction(
       () => {
@@ -2731,7 +2948,7 @@ try {
         return count > 0;
       },
       null,
-      { timeout: 4000, polling: 'raf' },
+      { timeout: 14_000, polling: 60 },
     )
     .then(() => true)
     .catch(() => false);
@@ -2749,54 +2966,66 @@ try {
   // swallows a sustained gesture" — its own control showed restoring `pointer-events: auto` reddens
   // nothing, so the guard claim came out; see §12's correction.)
   // |control|: a `Math.max(1, …)` floor in `placeRod` leaves every ring at the tube's radius.
-  // Two presses on purpose: the chrome folds itself away after ~2.6 s of quiet (the sparks wait
-  // just spent longer than that), and the first press only wakes it — the draw needs the one after.
-  await page
-    .locator('.pill')
-    .click()
-    .catch(() => {});
-  await page.waitForTimeout(300);
-  await page
-    .locator('.pill')
-    .hover({ timeout: 5000 })
-    .catch(() => {});
-  await page.mouse.down();
-  const puffLive = await page
-    .waitForFunction(
-      () => {
-        const ctx = window.__pufflyScene.context;
-        const scene = 'value' in ctx.scene ? ctx.scene.value : ctx.scene;
-        let waist = 0;
-        let ends = 0;
-        let found = false;
-        scene.traverse((o) => {
-          if (o.name === 'rod') {
-            found = true;
-            const pos = o.geometry.getAttribute('position');
-            const len = o.geometry.parameters.height;
-            for (let i = 0; i < pos.count; i += 1) {
-              const t = pos.getY(i) / len + 0.5;
-              const r = Math.hypot(pos.getX(i), pos.getZ(i));
-              if (Math.abs(t - 0.78) < 0.045) waist = Math.max(waist, r);
-              if (t < 0.1 || t > 0.9) ends = Math.max(ends, r);
-            }
-          }
-        });
-        return found && ends > 0 && waist < ends - 0.0005 ? { waist, ends } : null;
-      },
-      null,
-      { timeout: 12_000, polling: 120 },
-    )
-    .then((handle) => handle.jsonValue())
-    .catch(() => null);
+  // Two things can swallow this press, and both were measured on 2026-10-11 as "never pinched" in a
+  // run the ones either side of it passed: the chrome folds itself away 2.6 s after the last input
+  // (§10, and the sparks wait just spent longer than that), so a press aimed at the pill's stale
+  // coordinates lands on empty sky; and §18's rest window swallows a press that comes too soon after
+  // the previous release. So each attempt wakes the very control it is about to press, waits for the
+  // scene's own `puffReady`, and looks for the waist *inside* the draw — an attempt that produced
+  // nothing releases and tries once more. Same total budget as the single 12 s wait this replaces,
+  // spent on conditions instead of on a clock. A failed wake is reported by the check, not thrown:
+  // #114's lesson was that an uncaught error here takes the whole run with it.
+  const pinchSeen = await (async () => {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await wakeChrome(page, '.pill').catch(() => {});
+      await waitPuffReady(page, 3000);
+      const pill = await page
+        .locator('.pill')
+        .boundingBox()
+        .catch(() => null);
+      if (pill === null) continue;
+      await page.mouse.move(pill.x + pill.width / 2, pill.y + pill.height / 2);
+      await page.mouse.down();
+      const found = await page
+        .waitForFunction(
+          () => {
+            const ctx = window.__pufflyScene.context;
+            const scene = 'value' in ctx.scene ? ctx.scene.value : ctx.scene;
+            let waist = 0;
+            let ends = 0;
+            let hasRod = false;
+            scene.traverse((o) => {
+              if (o.name === 'rod') {
+                hasRod = true;
+                const pos = o.geometry.getAttribute('position');
+                const len = o.geometry.parameters.height;
+                for (let i = 0; i < pos.count; i += 1) {
+                  const t = pos.getY(i) / len + 0.5;
+                  const r = Math.hypot(pos.getX(i), pos.getZ(i));
+                  if (Math.abs(t - 0.78) < 0.045) waist = Math.max(waist, r);
+                  if (t < 0.1 || t > 0.9) ends = Math.max(ends, r);
+                }
+              }
+            });
+            return hasRod && ends > 0 && waist < ends - 0.0005 ? { waist, ends } : null;
+          },
+          null,
+          { timeout: 6000, polling: 120 },
+        )
+        .then((handle) => handle.jsonValue())
+        .catch(() => null);
+      await page.mouse.up();
+      if (found !== null) return found;
+    }
+    return null;
+  })();
   check(
     '3D: the paper pinches while the draw is held (S7/S15, at the painter’s WAIST)',
-    puffLive !== null,
-    puffLive === null
+    pinchSeen !== null,
+    pinchSeen === null
       ? 'never pinched'
-      : `waist ${puffLive.waist.toFixed(4)} ends ${puffLive.ends.toFixed(4)}`,
+      : `waist ${pinchSeen.waist.toFixed(4)} ends ${pinchSeen.ends.toFixed(4)}`,
   );
-  await page.mouse.up();
   // The plume's rung on the ladder: the pool's `depth` is simulation (0.25..1), not a z. The first
   // version handed it to the scene right after 0.02, so every puff sat at 0.3..1.0 — in front of
   // the whole chrome ladder (0.034..0.10), and a plume crossing the HUD painted over it, which the
@@ -2825,7 +3054,11 @@ try {
         return { count: node.count, min, max };
       },
       null,
-      { timeout: 8000, polling: 120 },
+      // The plume only exists after a release, and on a page held to ~5 fps the breath that follows
+      // the pinch above can start a second of wall clock later than it did when this budget was
+      // written. Waiting on `count > 0` is the condition; the number is that condition's worst
+      // measured latency with room.
+      { timeout: 14_000, polling: 120 },
     )
     .then((handle) => handle.jsonValue())
     .catch(() => null);
@@ -2889,16 +3122,25 @@ try {
   // column, so a draw goes first and the poll waits for the sim to grow one. |control|: hiding the
   // mesh reads false here.
   // A draw first, so the standing ash and the char front grow: the pill's hold is the draw, and it
-  // is the gesture that needs the wake-first press (its mask was scoped CSS on a canvas
-  // TresJS renders itself — `pointer-events` computed `auto`, fixed into global.css). The pinch
-  // this drill used to assert needs a longer look at the live draw than this slot gives — its own
-  // criterion is owed (task #112).
-  const pillBox = await page.locator('.pill').boundingBox();
+  // goes through the same two gates as the pinch above — the chrome has folded itself away again by
+  // now, and §18's rest window is still open from that release.
+  await wakeChrome(page, '.pill').catch(() => {});
+  await waitPuffReady(page, 3000);
+  const pillBox = await page
+    .locator('.pill')
+    .boundingBox()
+    .catch(() => null);
   if (pillBox !== null) {
     await page.mouse.move(pillBox.x + pillBox.width / 2, pillBox.y + pillBox.height / 2);
-    await page.waitForTimeout(150);
     await page.mouse.down();
-    await page.waitForTimeout(1400);
+    // A draw, measured on the engine's own clock: 1400 ms of wall clock is roughly 0.2 s of sim on
+    // a page at 5 fps (`advance()` clamps dt to 64 ms), which is not a draw by any of the tiers.
+    await page
+      .waitForFunction(() => Number(window.__pufflyScene?.stageRing?.seconds ?? '') >= 0.4, null, {
+        timeout: 9000,
+        polling: 100,
+      })
+      .catch(() => null);
     await page.mouse.up();
   }
   const columnSeen = await page
@@ -2915,7 +3157,7 @@ try {
         );
       },
       null,
-      { timeout: 8000, polling: 120 },
+      { timeout: 12_000, polling: 120 },
     )
     .then(() => true)
     .catch(() => false);
@@ -2923,6 +3165,47 @@ try {
     "3D: the rod wears its standing ash — two ends and a bend into the painter's band (S5)",
     columnSeen,
     `column seen ${String(columnSeen)}`,
+  );
+  // §2's two pieces of ash the picture did not have. The plume's alpha rides its instance colour
+  // (an instanced cloud has no per-instance opacity), and that is only a fade under additive
+  // blending: measured 2026-10-10 on the band above the table, the same breath under the default
+  // source-over left 4458 pixels *below* the same pixels with the cloud hidden — every puff too faint
+  // to see was painted as a dark bead, and the column read as holes. With the cloud additive the
+  // band sits above the smoke-free band instead (+0.35 mean, 212 darkened pixels — the drift and the
+  // cherry's own flicker, which move between the two frames). |control|: `blending` back to
+  // NormalBlending (1) reddens the first line and puts the 4458 back.
+  // The pile's own two arms were measured off-suite against a rod burned 45 s (the core's first
+  // natural collapse, nothing seeded): invisible while the tray was empty, then visible at
+  // 0.3105 × 0.0228 world units in a tray of 0.468 — the Demo's 126×22 in a 190, in the tray's plane.
+  // What is pinned here is the ramp's order, which no earlier frame of this suite ever looked at.
+  const ashMeshes = await page.evaluate(() => {
+    const ctx = window.__pufflyScene.context;
+    const scene = 'value' in ctx.scene ? ctx.scene.value : ctx.scene;
+    let smoke = null;
+    let pile = null;
+    scene.traverse((o) => {
+      if (o.name === 'smoke') smoke = o;
+      if (o.name === 'ash-pile') pile = o;
+    });
+    const ramp = pile?.geometry?.attributes?.color?.array;
+    const at = (i) =>
+      ramp === undefined
+        ? -1
+        : +(0.2126 * ramp[i] + 0.7152 * ramp[i + 1] + 0.0722 * ramp[i + 2]).toFixed(4);
+    return {
+      blending: smoke?.material.blending ?? -1,
+      pile: pile === null ? 'MISSING' : { top: at(0), bottom: at(9) },
+    };
+  });
+  check(
+    '3D: the breath adds light to the room instead of cutting holes in it (§2 S3/S4)',
+    ashMeshes.blending === 2,
+    `smoke blending ${String(ashMeshes.blending)}, 2 = AdditiveBlending`,
+  );
+  check(
+    '3D: the tray’s pile carries §2’s ramp the right way up (light end out, dark end in the tray)',
+    ashMeshes.pile !== 'MISSING' && ashMeshes.pile.top > ashMeshes.pile.bottom,
+    JSON.stringify(ashMeshes.pile),
   );
   // The rod, where the core says: the mesh's own mid sits at the true rod's middle and its built
   // length is that rod's world length. The pair is (0.45-of-the-rod, tip), so the check extrapolates
@@ -2995,7 +3278,7 @@ try {
         );
       },
       null,
-      { timeout: 6000, polling: 120 },
+      { timeout: 10_000, polling: 120 },
     )
     .then(() => true)
     .catch(() => false);
@@ -3153,22 +3436,233 @@ try {
     sheet.nameMax >= 140,
     `name max ${String(sheet.nameMax)}`,
   );
-  // The flip's other half: the escape hatch must still reach the painted layer. Read after every
-  // scene check on purpose — navigating away first would leave the checks above reading the 2D
-  // canvas instead of the scene, which is the one failure this page must not have.
+  // The painted layer retired (2026-10-10), and its escape hatch must have retired with it: the
+  // old query parameter is now inert — no ghost canvas, no second renderer, the scene answers
+  // exactly as on a plain URL.
   await page.goto(`${URL_ARG}?scene=2d`, { waitUntil: 'networkidle' });
-  await page.waitForTimeout(1200);
-  const escape = await page.evaluate(() => ({
+  await page.waitForTimeout(1600);
+  const ghost = await page.evaluate(() => ({
     scene: typeof window.__pufflyScene,
-    sceneCanvas: document.querySelector('.scene3d') !== null,
-    stageCanvas: document.querySelector('.stage canvas') !== null,
+    frames: window.__pufflyScene?.frames ?? -1,
+    paintedCanvas: document.querySelector('.stage > canvas:not(.scene3d)') !== null,
   }));
   check(
-    '?scene=2d still reaches the painted layer (no scene mounted, the stage canvas is there)',
-    escape.scene === 'undefined' && !escape.sceneCanvas && escape.stageCanvas,
-    JSON.stringify(escape),
+    '?scene=2d is inert — the scene mounts and no painted canvas comes back',
+    ghost.scene === 'object' && ghost.frames >= 0 && !ghost.paintedCanvas,
+    JSON.stringify(ghost),
   );
   check('3D: none of it threw', errors.length === 0, errors.slice(0, 2).join(' | '));
+  await context.close();
+}
+
+// §puffAnimations hard constraint: a 品鉴型 rod (savourMs > 0) never gets the lip line or the
+// airflow column, even while a draw is actually held. Every such rod is locked content on a fresh
+// profile, so the probe swaps the rod straight at the engine (the cabinet's own unlock wall is
+// untouched); the engine still rolls the lip action for the mouthed draw, and the breath keeps its
+// slow tier-less branch.
+{
+  const { page, errors, context } = await openPhone({ width: 393, height: 852, dpr: 3 });
+  await page
+    .waitForFunction(() => (window.__pufflyScene?.frames ?? 0) > 10, null, { timeout: 8000 })
+    .catch(() => {});
+  await page.evaluate(() => window.__pufflyScene?.selectCigarette('pipe'));
+  await page.waitForTimeout(300);
+  const p0 = await propsOf(page);
+  const packPoint = await stagePoint(page, p0.body.x, p0.body.y);
+  await page.touchscreen.tap(packPoint.x, packPoint.y);
+  await page.waitForTimeout(300);
+  const p1 = await propsOf(page);
+  const lighterPoint = await stagePoint(page, p1.lighter.x, p1.lighter.y);
+  let litMouthed = '';
+  for (let attempt = 0; attempt < 3 && litMouthed === ''; attempt += 1) {
+    await page.touchscreen.tap(lighterPoint.x, lighterPoint.y);
+    litMouthed = await waitScene(page, LIT);
+  }
+  check('the mouthed rod lights', litMouthed !== '', litMouthed);
+  // The same driver the tier library uses. A mouthed rod's draw has to be *happening* for these
+  // three checks to claim anything, and the fixed 900 ms window with one read at the end was the
+  // shape that swallowed presses under load (2026-10-11): the ring read `frac: 0`, the action read
+  // empty, and the block reported a working product as a broken one.
+  const mouthed = await holdDraw(page, 0.6);
+  const during = mouthed.mid;
+  check(
+    'a mouthed draw never shows the lip line or airflow column',
+    mouthed.started === true &&
+      during?.lip?.visible === false &&
+      during?.lip?.kind === 'savor' &&
+      Boolean(during?.lip?.action),
+    JSON.stringify({ started: mouthed.started, lip: during?.lip }),
+  );
+  check(
+    'the mouthed draw still raises the stage ring (a draw is happening)',
+    during?.stageRing?.visible === true,
+    JSON.stringify(during?.stageRing),
+  );
+  check(
+    'the mouthed breath carries no tier fields (its slow branch is not the tier library)',
+    mouthed.exhale?.tier === null && mouthed.exhale?.spreadRadiusPx === null,
+    JSON.stringify(mouthed.exhale),
+  );
+  check('the mouthed rod threw nothing', errors.length === 0, errors.slice(0, 2).join(' | '));
+  await context.close();
+}
+
+// §puffAnimations / §2 S3·S4: tiered breath, the abstract mouth, the 104 px stage ring and the S4
+// force bar, on their own phone session so the draws do not age the main flow's rod.
+{
+  const { page, errors, context } = await openPhone({ width: 393, height: 852, dpr: 3 });
+  // Take the rod and light it the same way the main flow does.
+  const packProps = await propsOf(page);
+  const packPoint = await stagePoint(page, packProps.body.x, packProps.body.y);
+  await page.touchscreen.tap(packPoint.x, packPoint.y);
+  await page.waitForTimeout(300);
+  let litTier = '';
+  for (let attempt = 0; attempt < 3 && litTier === ''; attempt += 1) {
+    const lp = await propsOf(page);
+    const lighterPoint = await stagePoint(page, lp.lighter.x, lp.lighter.y);
+    await page.touchscreen.tap(lighterPoint.x, lighterPoint.y);
+    litTier = await waitScene(page, LIT);
+  }
+  check('tier phone: the rod lights', litTier !== '', litTier);
+  // §puffAnimations (SmokeRitual-UI-Demo §3/§6.1): the held seconds draw the tier on the breath,
+  // the breath is never random, and the abstract mouth exists only for an inhaled draw. All read
+  // off the scene's own probe, which carries the engine's recipe.
+  // One draw of the tier library, taken through the shared driver: aim, hold to the engine's own
+  // seconds, read while held, release, wait for the exhale.
+  const tierDraw = (seconds) => holdDraw(page, seconds);
+
+  const short = await tierDraw(0.3);
+  check(
+    'S: while held the abstract mouth shows and the 104 px stage ring tracks it',
+    short.mid?.lip?.visible === true &&
+      short.mid?.lip?.kind === 'inhale' &&
+      short.mid?.lip?.tier === 'S' &&
+      typeof short.mid?.lip?.action === 'string' &&
+      short.mid.lip.action.startsWith('S') &&
+      short.mid?.lip?.columnWidthPx > 0 &&
+      short.mid.lip.columnWidthPx < 6 &&
+      short.mid?.stageRing?.visible === true &&
+      short.mid.stageRing.frac > 0.04 &&
+      Number(short.mid.stageRing.seconds) >= 0.25,
+    JSON.stringify({ lip: short.mid?.lip, ring: short.mid?.stageRing }),
+  );
+  check(
+    'S: the released breath is the 8 ml / 24 px / 0.6 s recipe',
+    short.exhale?.tier === 'S' &&
+      short.exhale.volumeMl === 8 &&
+      short.exhale.spreadRadiusPx === 24 &&
+      short.exhale.riseSeconds === 0.6,
+    JSON.stringify(short.exhale),
+  );
+
+  const middle = await tierDraw(1.15);
+  check(
+    'M: the hold crosses into the middle tier',
+    middle.mid?.lip?.tier === 'M' &&
+      middle.mid?.lip?.action?.startsWith('M') &&
+      Number(middle.mid?.stageRing?.seconds) >= 1.1,
+    JSON.stringify({ lip: middle.mid?.lip, ring: middle.mid?.stageRing }),
+  );
+  check(
+    'M: the released breath is the 24 ml / 52 px / 1.2 s recipe',
+    middle.exhale?.tier === 'M' &&
+      middle.exhale.volumeMl === 24 &&
+      middle.exhale.spreadRadiusPx === 52 &&
+      middle.exhale.riseSeconds === 1.2,
+    JSON.stringify(middle.exhale),
+  );
+
+  const long = await tierDraw(2.1);
+  check(
+    'L: a 2.2 s hold draws the deep tier',
+    long.mid?.lip?.tier === 'L' && long.mid?.lip?.action?.startsWith('L'),
+    JSON.stringify({ lip: long.mid?.lip, ring: long.mid?.stageRing }),
+  );
+  check(
+    'L: the released breath is the 35 ml / 86 px / 2.5 s recipe',
+    long.exhale?.tier === 'L' &&
+      long.exhale.volumeMl === 35 &&
+      long.exhale.spreadRadiusPx === 86 &&
+      long.exhale.riseSeconds === 2.5,
+    JSON.stringify(long.exhale),
+  );
+  check(
+    'the tier shapes the visible breath: more discs land for M than S, and more for L than M',
+    middle.particles > short.particles && long.particles > middle.particles,
+    `live particles S=${String(short.particles)} M=${String(middle.particles)} L=${String(long.particles)}`,
+  );
+
+  // Consecutive draws never repeat the same lip action (no-repeat rule, drawn at the moment). The
+  // same driver as above: the action is read while the draw is provably live, not after a wall-clock
+  // window that a loaded machine can spend before the hold is even armed.
+  const draws = [];
+  for (let i = 0; i < 3; i += 1) {
+    const again = await tierDraw(0.3);
+    draws.push({
+      action: again.mid?.lip?.action ?? '',
+      started: again.started === true,
+    });
+  }
+  const actions = draws.map((entry) => entry.action);
+  const repeated = actions.filter((action, i) => i > 0 && action === actions[i - 1]);
+  check(
+    'three draws in a row never show the same lip action twice running',
+    // `started` is not a courtesy: a press the engine never took leaves the *previous* draw's action
+    // on the probe, and that reads exactly like a repeat (2026-10-11: `S2 > S2 > S3` on a run where
+    // one of the three presses had landed off the moving rod). The rule being tested is about
+    // actions the player was shown, so the reading has to come from a draw that happened.
+    draws.every((entry) => entry.started && entry.action !== '') && repeated.length === 0,
+    `${actions.join(' > ')} started=${draws.map((entry) => (entry.started ? 'y' : 'n')).join('')}`,
+  );
+
+  // S4's force bar under the pill fills to the same figure the header ring reads (last draw).
+  // The bar is only mounted while the core reports RESTING, and that window was measured on
+  // 2026-10-11: it appears one frame after the release (so a read at the instant of release is too
+  // early) and is gone when the scene's own `puffReady` flips (so a read on a fixed timer can be too
+  // late — that is exactly how this line went red twice while the runs either side of it passed).
+  // The wait therefore stops at whichever comes first, at 30 ms granularity inside a ~830 ms window;
+  // a window that closes with no bar leaves the read to report `present: false`, which is the honest
+  // answer, not a retry.
+  await page
+    .waitForFunction(
+      () =>
+        document.querySelector('.cta svg.art.force') !== null ||
+        window.__pufflyScene?.puffReady === true,
+      null,
+      { timeout: 1500, polling: 30 },
+    )
+    .catch(() => null);
+  const forceBar = await page.evaluate(() => {
+    const svg = document.querySelector('.cta svg.art.force');
+    const rects = svg
+      ? [...svg.querySelectorAll('rect')].map((r) => r.getBoundingClientRect())
+      : [];
+    return {
+      present: svg !== null,
+      parts: rects.length,
+      // track is the widest rect; the fill is the second-widest (never wider than the track).
+      fillRatio:
+        rects.length >= 2
+          ? Math.min(...rects.map((r) => r.width)) / Math.max(...rects.map((r) => r.width))
+          : 0,
+    };
+  });
+  check(
+    'S4: the 342 × 12 force bar is up under the pill and partially filled by the draw',
+    forceBar.present && forceBar.parts >= 3 && forceBar.fillRatio > 0.25 && forceBar.fillRatio <= 1,
+    JSON.stringify(forceBar),
+  );
+  await page.waitForTimeout(2600);
+
+  // §2: the phone header carries at most the three figures the Demo draws, never the desk five.
+  const phoneReadouts = await page.evaluate(() => document.querySelectorAll('.hud .num').length);
+  check(
+    'the phone header never carries the desktop five readouts',
+    phoneReadouts >= 1 && phoneReadouts <= 3,
+    `${String(phoneReadouts)} readouts`,
+  );
+
+  check('tier phone: nothing threw', errors.length === 0, errors.slice(0, 2).join(' | '));
   await context.close();
 }
 

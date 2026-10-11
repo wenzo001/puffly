@@ -11,7 +11,7 @@
 
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { DIP_SHARE, WAIST } from '@puffly/game-renderer';
+import { DIP_SHARE, WAIST } from '@puffly/game-scene';
 import { dimplePath, hintPictureFor } from '../hintArt';
 
 const APP = readFileSync(new URL('../App.vue', import.meta.url), 'utf8');

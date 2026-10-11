@@ -381,4 +381,14 @@ GPU 路径在，WebGPU 才验得了；本机那份缓存当时是坏的残件，
 的守卫当场把它们全抓了出来）。CI 新起 `smoke` job：装浏览器 →
 构建 → 起服务器 → 跑整条真机套件（服务器产品化成 `tests/smoke/serve.mjs`）。
 
+**旧渲染层退役（这一笔）——「不留双轨」合拢**：`packages/game-renderer` 删除：纯半段先迁进
+game-scene（noise/intake/particles/viewport/effects 整文件；weather/paint/backdrop 成新家；
+props/room 合并承接），7 个"混着画"的源文件随墨退场；`apps/web` 的 2D 路径（usePuffly 的渲染器
+分支、App 的 canvas、`?scene=2d`）拆除，舞台命中面交给 `.hit`（pointer 适配器与"点面板外收起"
+改接它；场景画布依旧失聪）。真机套件的旧块没有第二个渲染器可指了：**像素助手全部改走合成截图**
+（WebGPU 画布 `getImageData` 读不到——这是这次换引擎最实在的一条工具债），派发点改 `.hit`，
+`?scene=2d` 那格改判"参数已失效、场景照常";顺带把 **DPR 上限补回到场景画布**（`TresCanvas :dpr`
+= 手指 2× / 光标 3×；先前只有旧画布吃这条 —— 场景画布在 3× 手机上会顶满，是退役一笔修掉的产品
+回归）。版本 0.4.0 → 0.5.0。
+
 **待推**：本地未推的整段 = `27d2cff…HEAD`（现算：`git rev-list --count origin/main..HEAD`）。

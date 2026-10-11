@@ -22,7 +22,6 @@
       "@puffly/shared": ["${configDir}/packages/shared/src/index.ts"],
       "@puffly/game-core": ["${configDir}/packages/game-core/src/index.ts"],
       "@puffly/game-content": ["${configDir}/packages/game-content/src/index.ts"],
-      "@puffly/game-renderer": ["${configDir}/packages/game-renderer/src/index.ts"],
       "@puffly/game-scene": ["${configDir}/packages/game-scene/src/index.ts"],
       "@puffly/game-audio": ["${configDir}/packages/game-audio/src/index.ts"],
       "@puffly/game-storage": ["${configDir}/packages/game-storage/src/index.ts"],

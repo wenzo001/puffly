@@ -9,7 +9,7 @@ keep that sentence true, rather than merely written down.
                        │
         ┌──────────────┼──────────────┐
         ↓              ↓              ↓
-   game-renderer   game-audio     game-storage      ← adapters (may touch the platform)
+   game-scene      game-audio     game-storage      ← adapters (may touch the platform)
         └──────────────┼──────────────┘
                        ↓
                   game-core                          ← pure TypeScript, no platform APIs
@@ -36,8 +36,8 @@ Two details are deliberate, because both have produced fake green before:
   specifiers live in strings; an earlier version blanked string literals while removing comments,
   which made all twelve import checks pass *nothing*. A guard that cannot fail is decoration, so
   `the scanner itself reports every shape it claims to catch` feeds each matcher text it must
-  report, and the renderer is asserted to *contain* `document.` and `CanvasRenderingContext2D` so
-  the same scanner is proven able to see platform usage at all.
+  report — including the `canvas type` control, which hands the scanner a bare
+  `CanvasRenderingContext2D` and must be reported — so platform usage cannot pass unseen.
 
 `eslint.config.mjs` enforces the same boundary while writing code (`no-restricted-globals`,
 `no-restricted-imports`, `no-restricted-syntax` on the pure packages), so the failure arrives at
@@ -63,12 +63,12 @@ Adapters therefore consume two different things and never mix them:
 
 | | what it is | who reads it |
 | --- | --- | --- |
-| `GameState` | continuous fields, read every frame | renderer, audio (beds), shell chrome |
-| `EngineEvent` | discrete `burst` / `world` / `session` / `transition` / `unlock` | renderer (particles), audio (cues), storage (log) |
+| `GameState` | continuous fields, read every frame | scene, audio (beds), shell chrome |
+| `EngineEvent` | discrete `burst` / `world` / `session` / `transition` / `unlock` | scene (particles), audio (cues), storage (log) |
 
-`GameStateView = DeepReadonly<GameState>` is what the core hands out, so the §48 rule "the renderer
+`GameStateView = DeepReadonly<GameState>` is what the core hands out, so the §48 rule "the scene
 must not modify game state" is a compile error rather than a convention. rendering.test.ts（2026-10-10 随 2D 光栅套件退役） then
-proves it at runtime by handing the renderer a **deep-frozen live snapshot** and driving a whole
+proves it at runtime by handing the scene's reader a **deep-frozen live snapshot** and driving a whole
 break through it: any write would throw a TypeError instead of corrupting the simulation.
 
 ## One copy of every fact
@@ -120,11 +120,12 @@ break through it: any write would throw a TypeError instead of corrupting the si
   the size it actually is — and keep the identity case intact, so a layout that already clears the
   line comes back unchanged and nothing else in the scene, or in §71's replay, moves.
 - A colour layer that reaches only a nearly transparent gradient is a layer nobody can see.
-  `applySkin` wrote a skin's 烟羽 into `view.smoke.tint`, and the only reader of that field was the
-  density veil, whose alpha tops out at 0.033; the plume's colour had already been decided in the
-  core and frozen into each particle when it was born. `skin.test.ts` said "the four layers land"
-  and was right — about the view — and no test could tell the difference between that and a picture
-  that never changed. What measures it instead (`plume-palette.test.ts`): hand the renderer a palette
+  The old `applySkin` wrote a skin's 烟羽 into `view.smoke.tint`, and the only reader of that field
+  was the density veil, whose alpha tops out at 0.033; the plume's colour had already been decided in
+  the core and frozen into each particle when it was born. The raster suite of the day (`skin.test.ts`)
+  said "the four layers land" and was right — about the view — and no test could tell the difference
+  between that and a picture that never changed. What measured it instead (`plume-palette.test.ts`,
+  retired with the raster suites on 2026-10-10): hand the renderer a palette
   whose only non-default layer is the one under test (the other three are copied back from the
   unskinned view), record every colour the renderer asks a sprite for, and compare two runs of the
   same seeded puff index-aligned. Then a difference can only have come from that layer, and "0 of 60
@@ -140,10 +141,9 @@ break through it: any write would throw a TypeError instead of corrupting the si
 - A shape metric can measure travel and call it shape. The elongation that "proved" the shared field
   worked was really measuring how far the cloud had gone: anything that moves fast is stretched. The
   plume passed it while the rendered frame showed something else entirely. What found that was not a
-  better metric but a picture — record the draw list the renderer hands the canvas (the fake context
-  already logs every blit, and a recording sprite provider tags each sprite with the colour and blur
-  it was baked for), composite those discs off-screen, and look. One frame said it: 698 sprites asked
-  for, 50 of them on screen.
+  better metric but a picture — the raster technique of that era recorded every sprite the renderer
+  asked to blit (`sprites.ts` baked them then; both retired on 2026-10-10), composited the discs
+  off-screen, and looked. One frame said it: 698 sprites asked for, 50 of them on screen.
 - One constant shared by two materials is wrong for one of them. Air drag in the particle pool was a
   single 0.9/s, which is about right for a flake of ash and an order of magnitude too gentle for an
   aerosol; terminal velocity is rise/drag, so smoke crossed the whole stage in under two seconds and
@@ -232,20 +232,28 @@ that split from rotting back into an app:
   greys the ring and swaps its digit for `◇`, and the next break starts as easily as the first.
   The scan that watches the language watches this field through the pure layer too, because a
   simulation that obeyed a ceiling would be a lock wearing a statistic's clothes — and the copy
-  table is scanned for the sentences that would praise or threaten.
+  table is scanned for the sentences that would praise or threaten;
+- **the tray's answer to a carried rod is owed, not done (§20, task #134).** The 2D layer drew three
+  readings of it — a lit rim while the rod is being carried toward the tray, a rock when ash lands,
+  a mound that grows with the load — and the 3D scene inherited only the mound's *box* (the Demo's
+  126 × 22, gated on the tray's grams). The retirement counted this: the deleted package's 24 exports
+  that have no name left in the tree are all canvas entry points except that one, whose guard lived
+  in the suites retired with it. So the tray today holds ash and says nothing back, and the honest
+  place to look before re-implementing it is the retirement commit's parent — 本笔父提交即退役前的
+  最后一份 2D 源码 (`git show <那一笔>^:packages/game-renderer/src/props.ts`, `TrayFeedback`).
 
 ## Performance
 
-SPEC.md §54 and §81 (6/9) are why the renderer is structured the way it is:
+SPEC.md §54 and §81 (6/9) are why the interface is kept cheap (the painted layer's own answers
+retired with it on 2026-10-10; the scene inherited the constraints):
 
-- no DOM particles, and Vue never drives a particle: the rAF loop calls `engine.tick(dt)` and
-  `renderer.render(state, dt)`, while a summary is republished to the UI at 5 Hz so components
-  re-render on a human timescale;
+- no DOM particles, and Vue never drives a particle: the scene's own frame loop (`SceneStage`) reads
+  the state each frame, while the shell republishes a summary to the component tree at 5 Hz so
+  components re-render on a human timescale;
 - a single fixed-capacity `ParticlePool` with ring-buffer allocation and zero per-frame allocation;
   over budget, the oldest slot is recycled rather than the frame stalling;
-- smoke sprites are baked once per quantised tint (radial gradients are never built per particle per
-  frame), and `blur` is the sprite's own falloff rather than `ctx.filter`, which is slow and
-  inconsistently supported;
+- the scene draws the pool from one instanced mesh fed by a fixed particle budget — geometry and
+  materials are built once, never per frame;
 - quality tiers set the budget (1400 / 800 / 380, and 160 under `reducedMotion`) — SPEC.md §64;
 - `quality: 'auto'` is measured, not guessed: the shell keeps an exponential average of its own
   frame times and walks the tier down twice as eagerly as it climbs back, and a coarse pointer
@@ -260,11 +268,10 @@ contract rather than an afterthought: `RendererAdapter`, `AudioAdapter`, `InputS
 and `StorageAdapter` (`game-storage`).
 
 - **Desktop pet (SPEC.md §40-44, §78)**: `apps/desktop` would create a transparent, frameless,
-  always-on-top window, put the *same* `createCanvasRenderer` on its canvas, convert native mouse
-  events into `GameInput`, and reuse `game-storage` with a filesystem `StorageAdapter`. No game
-  logic is copied; `game-core` is imported once. This is not a paragraph claim: `game-renderer`'s
-  `platform.test.ts` deletes `document`, `window` and `navigator` from the global object and then
-  plays a whole break through the engine and the renderer. It draws, because it never needed them.
+  always-on-top window, mount the *same* `SceneStage` (TresJS draws whatever surface it is given),
+  convert native mouse events into `GameInput`, and reuse `game-storage` with a filesystem
+  `StorageAdapter`. No game logic is copied; `game-core` is imported once — it has never known which
+  surface was asking.
 - **Renderer swap (§79)**: only if a transparent-window or GPU requirement actually appears does a
   `DesktopRenderer` get added; the core does not change, because it never knew which renderer existed.
 - **New content (§77)**: adding a cigarette, room, lighter, tray, smoke style or sound bed is an
@@ -279,7 +286,7 @@ and `StorageAdapter` (`game-storage`).
   number to a real amplitude. Nothing in `game-core` reads it.
 - **Realism (§S6 「写实度 80 / 20」)**: `Settings.realism` is the second 0..1 knob and shares
   `readSettings`' one level reader with `haptics`, so the two cannot disagree about what a lying field
-  means. It is read by exactly one thing — `cartoonScale` in `game-renderer` — which governs the five
+  means. It is read by exactly one thing — `cartoonScale` in `game-scene` — which governs the five
   feedback surfaces S7 lists: the ignition push-in, its edge vignette, the tray's rock when ash lands,
   how much of a spark's fall the table gives back, and how far the exhaled plume is lifted above the
   alpha Game Core authored for it. The last one goes through `intakeBurst`'s `plumeLift` rather than
@@ -338,6 +345,8 @@ complexity for hypothetical futures (SPEC.md §89, 9-10):
   `apps/web/src/i18n` with the same three-tier fallback, never as a string in a component. `aria-label`
   and the PWA manifest are where prose is allowed to live. The core never sees a word: it publishes
   an affordance, and the shell decides what language, if any, that affordance wears;
-- **no game engine dependency** (§76) — Canvas 2D and `requestAnimationFrame` only;
+- ~~**no game engine dependency** (§76) — Canvas 2D and `requestAnimationFrame` only~~ — overturned
+  by the 3D rewrite: the interface is TresJS + `three/webgpu` in `game-scene` (Canvas 2D retired
+  2026-10-10), and the rule that still holds is the one below it: the *pure* layer names no engine;
 - **no medical claims or recovery percentages** (§84) — `smokeFreeDays` is a count of days on an
   anchor the player sets themselves, and nothing in the UI turns it into a health statement.

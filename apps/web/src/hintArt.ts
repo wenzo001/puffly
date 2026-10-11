@@ -7,7 +7,7 @@
  * Only one gesture has a picture the deck actually names, and it is the hold: the paper collapsing is
  * what the deck tells the player to watch for (S7's silent chain, S14's gesture table, S1's mock).
  */
-import { DIP_SHARE, WAIST } from '@puffly/game-renderer';
+import { DIP_SHARE, WAIST } from '@puffly/game-scene';
 
 export type HintPicture = 'dimple';
 

@@ -1,17 +1,24 @@
 <script setup lang="ts">
 /**
- * The big pill from S1–S5, and the little graphic under it that says what the hand should do.
+ * The big pill from S1–S5, and the little diagram under it that says what the hand should do.
  *
  * It is a handle on the real gesture, not a picture of one: pressing it sends exactly what the
  * space bar sends (§65), aimed at exactly the anchor the engine is nudging, so the scene never
  * has two sources of truth about what "held" means. The label stays in every tier but `icons`
  * because §9.2 keeps a button's short label as the anchor a translation hangs on.
+ *
+ * The icon is the Demo's own 26×26 SVG and there is deliberately no ring around it: §4.2 of the
+ * Demo forbids the ring inside a button — the ring is the header's language. The pill keeps two
+ * visual states, also the Demo's: orange gradient for the two actions that begin a break
+ * (取烟 / 点燃), dark gradient with the orange hairline for the three inside it
+ * (吐烟 / 收烟 / 磕灰).
  */
 import { computed, ref } from 'vue';
 import type { Puffly } from '../composables/usePuffly';
 import { ctaKeyFor } from '../i18n';
 import { isSustained } from '../phase';
-import { FORCE_CLOUD, FORCE_THREADS, FORCE_TRACK, forceKnobX, forceReading } from '../forceArt';
+import { FORCE_BAR, forceFillWidth, forceReading } from '../forceArt';
+import DemoGlyph from './DemoGlyph.vue';
 
 const props = defineProps<{ game: Puffly }>();
 
@@ -32,15 +39,30 @@ const label = computed(() => {
   return key === undefined ? null : copy.value.t(key);
 });
 
-/** The arc around the glyph is the hold itself: how far this draw has come, or the flame coming up. */
-const arc = computed(() => {
-  const state = summary.value.state;
-  if (!state) return 0;
-  if (state.cigarette.puff.active) return state.cigarette.puff.progress;
-  if (state.cigarette.state === 'LIGHTING') return state.lighter.flame;
-  if (state.cigarette.state === 'EXTINGUISHING') return state.cigarette.extinguishProgress;
-  return 0;
+/** The Demo icon each action wears. */
+const glyph = computed(() => {
+  switch (affordance.value) {
+    case 'pick':
+      return 'rod';
+    case 'lighter':
+      return 'flame';
+    case 'puff':
+      return 'exhale-arrow';
+    case 'flick':
+      return 'flick';
+    case 'extinguish':
+      return 'extinguish';
+    case 'discard':
+      return 'ashtray';
+    default:
+      return 'rod';
+  }
 });
+
+/** §4.2's two tiers: the two starters are orange, everything in the break is dark. */
+const tone = computed<'start' | 'cont'>(() =>
+  affordance.value === 'pick' || affordance.value === 'lighter' ? 'start' : 'cont',
+);
 
 function down(): void {
   if (!sustained.value) return;
@@ -59,35 +81,21 @@ function tap(): void {
   props.game.gesture('tap');
 }
 
-/** The graphic the brief names per phase (§9.2), drawn from the same numbers the HUD reads. */
-const wave = computed(() => {
-  const state = summary.value.state;
-  if (!state) return '';
-  const puff = state.cigarette.puff;
-  const strength = puff.active ? puff.intensity : 0.18;
-  const points: string[] = [];
-  for (let step = 0; step <= 24; step += 1) {
-    const x = step * 5;
-    const wobble = Math.sin(step * 1.7 + state.nowMs / 90) * strength * 9;
-    points.push(`${String(x)},${(12 - wobble).toFixed(1)}`);
-  }
-  return points.join(' ');
-});
-
 /**
  * S4's 力度读数: the draw the finger just took, or `null` outside the window the smoke is leaving.
- *
- * The ring wears the same call, so the digits and the knob cannot come from two owners. It is a
- * reading and not a control — the press owns the draw (2026-10-08 拍板 ①), so the bar under the pill
- * never asks for a finger.
+ * The ring wears the same call, and the Demo bar's fill is that figure's own share of 342 px.
  */
 const force = computed(() => {
   const state = summary.value.state;
   return state ? forceReading(state.cigarette) : null;
 });
+const fillWidth = computed(() => forceFillWidth(force.value ?? 0));
+const fillRadius = computed(() => Math.min(FORCE_BAR.fill.radius, fillWidth.value / 2));
 
-/** Where that reading puts the knob, in the band's own units. */
-const knob = computed(() => forceKnobX(force.value ?? 0));
+/** The 品鉴型 have no lung resistance on this design — the wave is theirs to lose, the bar is not. */
+const lungKind = computed(() =>
+  props.game.archive.value?.subject === 'rod' ? props.game.archive.value.kind : 'inhale',
+);
 </script>
 
 <template>
@@ -107,84 +115,88 @@ const knob = computed(() => forceKnobX(force.value ?? 0));
       @pointerleave="up"
       @click="tap"
     >
-      <svg class="arc" viewBox="0 0 44 44" aria-hidden="true">
-        <circle class="track" cx="22" cy="22" r="19" />
-        <circle
-          class="run"
-          cx="22"
-          cy="22"
-          r="19"
-          :stroke-dasharray="`${(arc * 119.4).toFixed(2)} 119.4`"
-        />
-      </svg>
-      <span class="glyph" aria-hidden="true">
-        <template v-if="affordance === 'puff'">—·</template>
-        <template v-else-if="affordance === 'lighter'">△</template>
-        <template v-else-if="affordance === 'flick'">⌁</template>
-        <template v-else-if="affordance === 'extinguish'">◌</template>
-        <template v-else-if="affordance === 'discard'">○</template>
-        <!-- 取烟 is the box: the gesture wears the shape of the thing it now acts on, which is the
-             pack on the table rather than the rod it hands over. `—` stays the rod's own. -->
-        <template v-else-if="affordance === 'pick'">▭</template>
-        <template v-else>—</template>
-      </span>
+      <DemoGlyph class="glyph" :name="glyph" :tone="tone" :size="26" aria-hidden="true" />
       <span v-if="label !== null" class="word">{{ label }}</span>
     </button>
 
-    <!-- 阻力波形条: the lungs' resistance, drawn while the draw is held (§9.2). The window the smoke
-         is leaving belongs to the 力度对照图 below — one bar per moment, never two at once.
-         The 品鉴型 have no lungs in this design's vocabulary — 「雪茄、斗烟、水烟都不是往肺里吸的」 —
-         and the deck rules their feedback must not show a resistance readout. `loadPerPuff` is 0 for
-         them in content, so a bar here would be reporting a quantity the simulation holds at zero. -->
+    <!-- 阻力波形条 (S3): the two pulses that have passed, and the dashed beat still coming. The
+         品鉴型 have no lungs in this design’s vocabulary, so they never get this strip. -->
     <svg
-      v-if="
-        summary.phase === 'puff' &&
-        force === null &&
-        (game.archive.value?.subject === 'rod' ? game.archive.value.kind : 'inhale') !== 'savor'
-      "
+      v-if="summary.phase === 'puff' && force === null && lungKind !== 'savor'"
       class="art wave"
-      viewBox="0 0 120 24"
+      viewBox="0 0 342 30"
       aria-hidden="true"
-      preserveAspectRatio="none"
+      preserveAspectRatio="xMidYMid meet"
     >
-      <polyline :points="wave" />
-      <line class="floor" x1="0" y1="12" x2="120" y2="12" />
+      <rect x="0" y="14" width="342" height="2" rx="1" fill="rgba(255,255,255,0.07)" />
+      <path
+        d="M4 15 L30 15 L40 8 L52 22 L62 15 L96 15"
+        fill="none"
+        stroke="rgba(255,138,61,0.85)"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M104 15 L130 15 L140 8 L152 22 L162 15 L196 15"
+        fill="none"
+        stroke="rgba(255,138,61,0.5)"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M204 15 L338 15"
+        fill="none"
+        stroke="rgba(255,138,61,0.22)"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-dasharray="3 7"
+      />
     </svg>
 
-    <!-- 力度对照图 (S4): the draw the finger just took, read against the smoke it makes. The two ends
-         are 三道丝线 and 三层云朵 — the shapes the deck put where 「小口 · 薄雾」 and 「大口 · 浓团」
-         used to be — and the knob is where this draw landed. Zero words, and nothing to press: the
-         press already decided this one. -->
-    <svg v-else-if="force !== null" class="art force" viewBox="0 0 120 24" aria-hidden="true">
-      <path v-for="thread in FORCE_THREADS" :key="thread" class="thread" :d="thread" />
-      <circle
-        v-for="lobe in FORCE_CLOUD"
-        :key="lobe.cx"
-        class="lobe"
-        :cx="lobe.cx"
-        :cy="lobe.cy"
-        :r="lobe.r"
+    <!-- 力度条 (S4): the Demo’s 342×12 fill bar. The fill is the draw just released, 0–100, and
+         nothing here is a control — the press already decided it. -->
+    <svg
+      v-else-if="force !== null"
+      class="art force"
+      viewBox="0 0 342 12"
+      aria-hidden="true"
+      preserveAspectRatio="xMidYMid meet"
+    >
+      <rect x="0" y="2" width="342" height="8" rx="4" :fill="FORCE_BAR.track.fill" />
+      <rect y="2" :width="fillWidth" height="8" :rx="fillRadius" :fill="FORCE_BAR.fill.colour" />
+      <rect
+        y="2"
+        :width="fillWidth"
+        height="3"
+        :rx="Math.min(FORCE_BAR.crest.radius, fillWidth / 2)"
+        :fill="FORCE_BAR.crest.colour"
       />
-      <line
-        class="floor"
-        :x1="FORCE_TRACK.start"
-        :y1="FORCE_TRACK.y"
-        :x2="FORCE_TRACK.end"
-        :y2="FORCE_TRACK.y"
-      />
-      <circle class="knob" :cx="knob" :cy="FORCE_TRACK.y" r="3.4" />
     </svg>
 
-    <!-- 磕灰演示条: a short tap sends the column off the rod. -->
+    <!-- 磕灰演示条 (S5): the standing column, the piece that just broke away, the arc it travels,
+         and the mound with two grains where it lands. -->
     <svg
       v-else-if="summary.phase === 'tray'"
       class="art flick"
-      viewBox="0 0 120 24"
+      viewBox="0 0 342 26"
       aria-hidden="true"
+      preserveAspectRatio="xMidYMid meet"
     >
-      <line class="floor" x1="6" y1="12" x2="96" y2="12" />
-      <line class="dash" x1="98" y1="12" x2="118" y2="12" />
-      <circle class="dot" cx="14" cy="12" r="3.4" />
+      <rect x="8" y="4" width="46" height="7" rx="3.5" fill="rgba(240,230,214,0.75)" />
+      <rect x="54" y="4" width="12" height="7" rx="2" fill="#8A8078" />
+      <path
+        d="M84 8q10-10 20 0"
+        fill="none"
+        stroke="rgba(255,138,61,0.7)"
+        stroke-width="1.8"
+        stroke-linecap="round"
+        stroke-dasharray="2 4"
+      />
+      <ellipse cx="152" cy="9" rx="34" ry="4" fill="rgba(207,198,188,0.18)" />
+      <circle cx="146" cy="6" r="1.8" fill="rgba(207,198,188,0.7)" />
+      <circle cx="158" cy="5" r="1.4" fill="rgba(207,198,188,0.55)" />
     </svg>
   </div>
 </template>
@@ -199,6 +211,11 @@ const knob = computed(() => forceKnobX(force.value ?? 0));
   flex-direction: column;
   align-items: center;
   gap: 6px;
+  /* §2's `.btn` is `calc(100% - 48px)` inside a 390-wide phone, which is 342 — the same number the
+     Demo writes out itself as the three strips' viewBox. The cap is what keeps a phone's button
+     from becoming a desktop's banner: §2 defines the phone and nothing wider. */
+  width: calc(100% - 48px);
+  max-width: 342px;
   z-index: 2;
 }
 
@@ -207,147 +224,62 @@ const knob = computed(() => forceKnobX(force.value ?? 0));
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  min-height: 58px;
-  /* Generous on purpose: this is the one control meant to be hit with a thumb in the dark. */
-  padding: 0 30px;
+  gap: 12px;
+  width: 100%;
+  min-height: 62px;
+  padding: 0 12px;
   border: 1px solid transparent;
-  border-radius: 30px;
-  background: linear-gradient(
-    100deg,
-    color-mix(in oklab, var(--ember-orange) 88%, var(--deep-charcoal)) 0%,
-    var(--ember-orange) 55%,
-    color-mix(in oklab, var(--ember-core) 70%, var(--ember-orange)) 100%
-  );
-  color: #1a1109;
+  border-radius: 31px;
+  /* §1's --grad-start, and --on-ember for everything drawn on it. */
+  background: linear-gradient(90deg, #ff8533, #de5719);
+  color: #2a1408;
   font: inherit;
-  font-size: calc(15px * var(--text-scale));
+  font-size: calc(17px * var(--text-scale));
+  font-weight: 600;
   letter-spacing: 0.04em;
-  box-shadow: 0 10px 30px -12px color-mix(in oklab, var(--ember-orange) 70%, transparent);
+  box-shadow: 0 10px 28px -6px rgba(217, 87, 25, 0.42);
   touch-action: none;
   -webkit-user-select: none;
   user-select: none;
+  /* The Demo's own press curve, scoped to this press: the global ease stays the rest of the UI's. */
   transition:
-    transform 240ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    transform 180ms cubic-bezier(0.22, 0.61, 0.36, 1),
     box-shadow 200ms var(--ease-out);
 }
 
 .pill:active,
 .cta[data-held='true'] .pill {
-  /* 0.96, not 0.97: the deck's own number for how far a press goes, and the curve above is what
-     makes it come back past itself rather than settling flat (S7, 「缩放回弹」). */
-  transform: scale(0.96);
+  /* §1.3's 按钮按下: scale .98 / 180ms. */
+  transform: scale(0.98);
   box-shadow: 0 4px 16px -8px color-mix(in oklab, var(--ember-orange) 70%, transparent);
 }
 
-/* The non-sustained states are a handle, not a target: keep them quiet until they are the news. */
-.cta:not([data-affordance='puff']) .pill {
-  background: color-mix(in oklab, var(--deep-charcoal) 72%, var(--soft-white) 4%);
-  border-color: color-mix(in oklab, var(--ember-orange) 45%, transparent);
-  color: var(--soft-white);
-}
-
-.arc {
-  position: absolute;
-  inset: 8px auto 8px 12px;
-  width: 42px;
-  height: 42px;
-  transform: rotate(-90deg);
-}
-
-.track {
-  fill: none;
-  stroke: color-mix(in oklab, currentColor 22%, transparent);
-  stroke-width: 2;
-}
-
-.run {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
+/**
+ * §2's two states: the orange gradient begins a break (S1 取烟， S2 点燃）, and the dark one with the
+ * orange hairline carries the three actions inside a break already running (S3 吐烟， S4 收烟，
+ * S5 磕灰）.
+ */
+.cta:not([data-affordance='pick']):not([data-affordance='lighter']) .pill {
+  background: linear-gradient(180deg, #3d3b38, #1f1d1c);
+  border-color: rgba(255, 153, 71, 0.42);
+  color: #e4dcd2;
+  box-shadow: 0 10px 24px -6px rgba(0, 0, 0, 0.5);
 }
 
 .glyph {
-  min-width: 30px;
-  margin-left: 34px;
-  font-size: calc(15px * var(--text-scale));
-  line-height: 1;
+  display: block;
+  flex: none;
 }
 
 .word {
   font-variant-numeric: tabular-nums;
 }
 
+/* The three Demo strips are all 342 wide; their heights arrive with their own viewBoxes. */
 .art {
-  width: min(64vw, 240px);
-  height: 24px;
-  opacity: 0.8;
-}
-
-.wave polyline {
-  fill: none;
-  stroke: var(--ember-orange);
-  stroke-width: 1.6;
-  stroke-linejoin: round;
-}
-
-.flick .floor,
-.wave .floor {
-  stroke: color-mix(in oklab, var(--soft-white) 22%, transparent);
-  stroke-width: 1;
-}
-
-/* The 力度对照图 is read for a position, so its own track is the strongest line in the band and the
-   two pictograms are quieter than it: 三道丝线 taper away from the knob, 三层云朵 pile up behind it. */
-.force .floor {
-  stroke: color-mix(in oklab, var(--soft-white) 55%, transparent);
-  stroke-width: 1.4;
-}
-
-.force .thread {
-  fill: none;
-  stroke: color-mix(in oklab, var(--soft-white) 45%, transparent);
-  stroke-width: 1;
-  stroke-linecap: round;
-}
-
-.force .lobe {
-  fill: color-mix(in oklab, var(--soft-white) 22%, transparent);
-}
-
-.force .knob {
-  fill: var(--soft-white);
-}
-
-.flick .dash {
-  stroke: color-mix(in oklab, var(--soft-white) 40%, transparent);
-  stroke-width: 1;
-  stroke-dasharray: 3 4;
-}
-
-.flick .dot {
-  fill: var(--ember-core);
-  animation: tap-here 1.5s var(--ease-out) infinite;
-}
-
-@keyframes tap-here {
-  0%,
-  55% {
-    transform: translateX(0);
-  }
-  70% {
-    transform: translateX(10px);
-  }
-  85%,
-  100% {
-    transform: translateX(0);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .flick .dot {
-    animation: none;
-  }
+  display: block;
+  width: 100%;
+  height: auto;
+  opacity: 0.85;
 }
 </style>

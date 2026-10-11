@@ -8,7 +8,7 @@
  * `smoke.dispersion`, `smoke.tint`), because a second copy of a recipe is how this repository ended
  * up with a browser layer that reported a working game as eight broken ones.
  */
-import { MAX_SMOKE_RADIUS_PX, PUFF_SPREAD } from '@puffly/game-renderer';
+import { MAX_SMOKE_RADIUS_PX, PUFF_SPREAD } from './paint';
 
 /**
  * How hard still air drags a puff back to rest, per second. Not a number invented here: it is the

@@ -34,6 +34,20 @@ export {
 } from './stateMachine';
 
 export { rollPack } from './packs';
+export {
+  LIP_ACTIONS,
+  PUFF_TIERS,
+  lipActionsFor,
+  pickLipAction,
+  puffTierFor,
+  showsLipLine,
+  type AirflowShape,
+  type LipAction,
+  type LipActionId,
+  type LipShape,
+  type PuffTier,
+  type PuffTierId,
+} from './puffTier';
 
 export {
   ASH,

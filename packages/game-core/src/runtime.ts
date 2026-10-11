@@ -283,6 +283,9 @@ export function createCigaretteSnapshot(
       // Not `Infinity`: that would turn into `null` on the way through JSON, and §51 makes a
       // save file out of this model. One settle-window means "there was no previous puff".
       sinceReleaseMs: TIMING.restSettleMs,
+      lipAction: null,
+      // No draw has happened yet; a short sip is what the tier table starts at.
+      lastTier: 'S',
       count: 0,
       load: 0,
     },

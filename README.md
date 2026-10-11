@@ -30,7 +30,7 @@ operator's page.
 ```bash
 npm install
 npm run dev        # http://localhost:5175
-npm test           # core, renderer, audio, storage, statistics, architecture guards
+npm test           # core, scene, audio, storage, statistics, architecture guards
 npm run build      # typecheck every workspace, then build the PWA into apps/web/dist
 npm run preview    # serve the production build
 npm run lint       # eslint, warnings fail
@@ -109,19 +109,19 @@ Every row is a word and a control, reached from the rail’s `settings` tab. Non
   places this started with were hung on the calendar, and that made an unlock a fact about
   attendance. `grep -n "LEVEL_THRESHOLDS" -A 3 packages/game-core/src/levels.ts` prints the rungs;
   `grep -n "unlock:" packages/game-content/src/environments.ts` prints which room sits on which.
-  Picking one is also measured at the pixel seam rather than assumed: the same state painted with two
-  rooms changes most of the colours the background asks for, and a selection that never reached the
-  state would fail its own test. (That pixel test was scene-change.test.ts（2026-10-10 随 2D 光栅套件退役）, retired with the 2D
-  raster suites on 2026-10-10; the palette path stays guarded by
-  `npx vitest run packages/game-renderer/src/__tests__/skin.test.ts` and the real-device S17 checks.)
+  Picking one is also measured rather than assumed: the same state painted against two rooms changes
+  most of the colours the background asks for, and a selection that never reached the state would
+  fail its own test. (That pixel test, and the 2D suites with it, retired on 2026-10-10; the palette
+  path stays guarded by `npx vitest run apps/web/src/__tests__/skins.test.ts` and the real-device
+  S17 checks.)
 - **All four layers are layers** — a skin is 纸面, 余烬, 烟羽 and 光池, and the third one used to
   reach only the haze behind the smoke, where its alpha tops out at 0.033. That was measured by
   recording every colour the renderer asks a sprite for: with a palette whose only non-default layer
   is 烟羽, 0 of 60 plume sprites changed colour. The plume now takes the skin's colour at the moment
   each puff is born, while the filter, the ash and the dust off the tray keep what the tobacco has.
   What is already in the air when you switch stays as it was for a few seconds — smoke that has left
-  the rod does not get a second colour. Rerun with
-  `npx vitest run packages/game-renderer/src/__tests__/plume-palette.test.ts`.
+  the rod does not get a second colour. (The 0-of-60 reading came from a raster suite that retired
+  on 2026-10-10; the real-device S17 checks are where the claim lives now.)
   A skin may also name one room — the deck's 「外加一个环境预设」, which the brief's own hard
   constraint seemed to forbid until it was ruled in. It is a pointer to a room that already exists
   and only moves the player into one they have already reached: 一套皮肤带来一个地方，但颜色不是钥匙.
@@ -136,7 +136,7 @@ Every row is a word and a control, reached from the rail’s `settings` tab. Non
   back reddens that assertion on the spot (1 red, 81 green in the package). That each puff still traces
   its own path is asserted too, because sharing a field
   is exactly what could have made them repeat. Rerun with
-  `npx vitest run packages/game-renderer/src/__tests__/plume-shape.test.ts`.
+  `npx vitest run packages/game-scene/src/__tests__/plume-shape.test.ts`.
 - **The smoke stays in the room.** Fixing the shape did not fix the picture, so the next step was to
   rasterize a real frame — every sprite the renderer asked to blit, composited with the profile
   `sprites.ts` bakes — and look at it. It showed what no shape metric could: of the 698 sprites in one
@@ -146,14 +146,14 @@ Every row is a word and a control, reached from the rail’s `settings` tab. Non
   the same defect the report described as 烟会到左上角. Smoke now has its own drag (12/s) and ash keeps
   0.9/s, and no recipe number moved — the styles are still distinguishable, from a breath that barely
   stirs to one that crosses a third of the frame. Rerun with
-  `npx vitest run packages/game-renderer/src/__tests__/plume-on-stage.test.ts`.
+  `npx vitest run packages/game-scene/src/__tests__/plume-on-stage.test.ts`.
 - **The thread is one thread.** With the smoke no longer flying off, the column got audited the same
   way: walk from the cherry to the top of the thread and count how much of the way some puff's own
   disc covers, and how tall the thread stands in puffs of its own size. All eleven cigarettes pass at
   1.00 coverage and 5–24 puff-heights, and the two assertions were each proven to bite — thinning the
   emission reddens the height, shrinking the puffs reddens the coverage. The constant 12 itself is the
   fastest drag that keeps every breath on stage: at 8 two styles fail, at 6 four do. Rerun with
-  `npx vitest run packages/game-renderer/src/__tests__/plume-continuity.test.ts`.
+  `npx vitest run packages/game-scene/src/__tests__/plume-continuity.test.ts`.
 - **The button does not sit on the table.** The chrome at the bottom of the screen is fixed pixels, so
   how much of the scene it eats depends on how tall the scene is: 16% of a portrait phone's height,
   34% of the same phone turned sideways, plus a 12px pad so nothing sits flush against it. A constant
@@ -161,25 +161,27 @@ Every row is a word and a control, reached from the rail’s `settings` tab. Non
   behind the pill in landscape and left the tray 1px from it on a 320×568 screen. The clearance line
   is now computed from the stage's pixel height,
   and lifts the whole table when a window is too short for both — a desktop window keeps the table the
-  brief drew. Rerun with `npx vitest run packages/game-renderer/src/__tests__/chrome-band.test.ts`.
+  brief drew. (The measurement was a raster suite that retired on 2026-10-10; the clearance line is
+  asserted on real devices today — the landscape tray check in `tests/smoke/touch-device.mjs`.)
 
 ## Architecture in one paragraph
 
-`game-core` simulates and owns the state; it has never heard of a browser. `game-renderer` turns
-state into pixels and cannot write back — the types forbid it, and a test renders a deep-frozen live
-snapshot to prove it at runtime. `game-audio` does the same for sound. `apps/web` is a thin Vue
-shell that exists to hand a canvas, a pointer and IndexedDB to those three, so a desktop or native
+`game-core` simulates and owns the state; it has never heard of a browser. `game-scene` turns
+state into pixels (TresJS + `three/webgpu`; it absorbed the painted layer's formulas when that layer
+retired on 2026-10-10) and cannot write back — the types forbid it, and a test renders a deep-frozen
+live snapshot to prove it at runtime. `game-audio` does the same for sound. `apps/web` is a thin Vue
+shell that exists to hand a stage, a pointer and IndexedDB to those three, so a desktop or native
 shell replaces only the shell. The rule is enforced rather than documented:
 `tests/architecture.test.ts` fails if a pure package so much as names `window`, `document`,
 `Math.random`, `Date.now` or an AudioContext, and it carries positive controls so the guard cannot
 pass by accident.
 
 ```
-apps/web/                     Vue 3 + Vite shell: canvas, chrome, sheets, PWA
+apps/web/                     Vue 3 + Vite shell: the scene's host, chrome, sheets, PWA
 packages/shared/              math, seeded RNG, colour, clock/calendar, DeepReadonly
 packages/game-core/           state machine, simulation, events, sessions, replay, growth
 packages/game-content/        fictional cigarettes, environments, lighters, trays, smoke, sounds
-packages/game-renderer/       Canvas 2D: particles, ember, ash, environment, viewport
+packages/game-scene/          TresJS + three/webgpu: the interface, its formulas and layers
 packages/game-audio/          Web Audio synthesis, ambient beds, silent fallback
 packages/game-storage/        StorageAdapter, IndexedDB, memory fallback, export/import
 packages/game-statistics/     every number on screen, derived from the session log
@@ -323,7 +325,7 @@ still lets the break start; the ring only goes grey and swaps its digit for `◇
 dialog, nothing locks, and no streak can be broken because there is no streak. The words on that
 page are scanned by a test rather than by review: no line may assert anything about health, and no
 line may tell the player what they should do. The ceiling itself is a preference the simulation is
-not allowed to read — an architecture test fails the build if `game-core` or the renderer ever
+not allowed to read — an architecture test fails the build if `game-core` or the scene ever
 looks at it.
 
 **What the other sheets hold**
@@ -405,11 +407,11 @@ source for this repository — the deploy job cannot change that setting itself.
 
 ## The 3D interface (the default since 2026-10-10)
 
-The chrome, the stage and the four sheets are scene objects now (TresJS + `three/webgpu`, with WebGL2
-as the automatic fallback), the DOM kept only for hit targets and the screen reader. A plain URL
-lands on it; `…/?scene=2d` still reaches the old painted layer (`&gl=1` forces the WebGL2 backend),
-which is kept as the escape hatch while its renderer retires. The contract, the measurements and the
-per-screen ledger live in
+The chrome, the stage and the four sheets are scene objects (TresJS + `three/webgpu`, with WebGL2 as
+the automatic fallback), the DOM kept only for hit targets and the screen reader. A plain URL lands
+on it (`&gl=1` forces the WebGL2 backend); the old painted layer and its `?scene=2d` escape hatch
+retired on 2026-10-10 — the repository holds one interface now. The contract, the measurements and
+the per-screen ledger live in
 [`docs/superpowers/specs/2026-10-09-scene3d-rewrite-design.md`](docs/superpowers/specs/2026-10-09-scene3d-rewrite-design.md),
 and the real-device suite covers it (`tests/smoke/touch-device.mjs`, the `3D:` checks).
 

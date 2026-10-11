@@ -1,6 +1,15 @@
 import type * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { frameRect, radialVignette, roundedRect, softDisc, solidDisc, stadiumBar } from '../sprite';
+import {
+  frameRect,
+  radialVignette,
+  roundedRect,
+  SCRIM,
+  scrimRamp,
+  softDisc,
+  solidDisc,
+  stadiumBar,
+} from '../sprite';
 
 describe('the puff sprite is soft, and it is generated rather than drawn', () => {
   it('is solid in the middle and clear at the rim', () => {
@@ -160,5 +169,60 @@ describe('the vignette is clear in the middle and dark at the rim', () => {
       expect(now).toBeGreaterThanOrEqual(previous);
       previous = now;
     }
+  });
+});
+
+/**
+ * §2's bottom scrim: S1 待机 lays `linear-gradient(180deg,transparent,rgba(0,0,0,.55))` over the
+ * bottom 34 % of the stage, S2 点燃 the same ramp over 30 % at .5, and the three screens with the
+ * rod at the mouth lay nothing. These are the Demo's own numbers, not a designer's judgement.
+ */
+describe('the scrim is a band along the bottom, and only two screens have one', () => {
+  it('is darkest along its own bottom edge', () => {
+    // v = 0 is the bottom of the plane, so the ramp has to *start* solid. Reversed, the band would
+    // hang a shadow off the middle of the room and leave the floor lit.
+    const size = 64;
+    const data = scrimRamp(size).image.data as Uint8Array;
+    const alphaAt = (row: number): number => data[row * size * 4 + 3] as number;
+    expect(alphaAt(0)).toBe(255);
+    expect(alphaAt(size - 1)).toBe(0);
+  });
+
+  it('fades evenly upwards, so the band has no step in it', () => {
+    const size = 64;
+    const data = scrimRamp(size).image.data as Uint8Array;
+    let previous = 256;
+    for (let row = 0; row < size; row += 1) {
+      const now = data[row * size * 4 + 3] as number;
+      expect(now).toBeLessThanOrEqual(previous);
+      previous = now;
+    }
+  });
+
+  it('is one column repeated across a square, with the ink in alpha alone', () => {
+    // The ramp is one-dimensional, so every column repeats it, and the texture is square because
+    // that is the shape this stage's overlays are all built in — a 2 px-wide strip of these same
+    // numbers sat on the scrim mesh and painted nothing at all through the WebGPU backend.
+    const size = 32;
+    const texture = scrimRamp(size);
+    const data = texture.image.data as Uint8Array;
+    expect([texture.image.width, texture.image.height]).toEqual([size, size]);
+    const probes: Array<[number, number]> = [
+      [0, 0],
+      [size - 1, 0],
+      [size / 2, size - 1],
+    ];
+    for (const [x, y] of probes) {
+      const i = (y * size + x) * 4;
+      expect([data[i], data[i + 1], data[i + 2]]).toEqual([255, 255, 255]);
+      expect(data[i + 3]).toBe(data[y * size * 4 + 3]);
+    }
+  });
+
+  it('carries the two bands §2 gives, at their own height and darkness', () => {
+    expect(SCRIM.idle).toEqual({ share: 0.34, alpha: 0.55 });
+    expect(SCRIM.lighting).toEqual({ share: 0.3, alpha: 0.5 });
+    // A third entry would be a band the Demo never drew.
+    expect(Object.keys(SCRIM).sort()).toEqual(['idle', 'lighting']);
   });
 });

@@ -1,19 +1,19 @@
 /**
- * Weather and air life — SPEC.md §22, §24, §25.
+ * Weather and air life — SPEC.md §22, §24, §25 — the **frame** half.
  *
- * §25 says weather mainly changes smoke, sound, light and the environment; the visible
- * half of that is here. Rain is a set of seeded streaks that fall with the wind, and the
- * room itself carries slow dust motes in the key light, which is most of what makes a
- * still frame feel like a place someone could be sitting in.
+ * This module used to be two painters' shared copy, then one painter and the scene; since the
+ * painted layer retired (2026-10-10) what is here is the data the scene draws from: seeded streaks
+ * that fall with the wind, and the room's slow dust motes. Geometry is generated once per
+ * (environment, weather) and reused, so a frame costs a handful of numbers instead of a
+ * random-number fight.
  *
- * Geometry is generated once per (environment, weather) and reused, so a frame costs a
- * handful of strokes instead of a random-number fight.
+ * The stroke colour and line width ride in the frame (`RAIN_TINT`, `widthUnits`) rather than in a
+ * painter, so the slant/alpha/width contract cannot drift between readers.
  */
 
-import { clamp01, rgbToCss } from '@puffly/shared';
+import { clamp01 } from '@puffly/shared';
 import type { GameStateView } from '@puffly/game-core';
 import { fbm2 } from './noise';
-import type { Viewport } from './viewport';
 
 export interface Streak {
   x: number;
@@ -92,7 +92,7 @@ function geometryFor(environmentId: string, weather: string) {
 export const rainGeometry = (environmentId: string, weather: 'rain' | 'storm'): Streak[] =>
   geometryFor(environmentId, weather).streaks;
 
-/** The stroke every rain line is drawn in, sRGB — one colour, two painters. */
+/** The stroke every rain line is drawn in, sRGB — the one colour both the scene and any older reader use. */
 export const RAIN_TINT: [number, number, number] = [206, 218, 232];
 
 /** One streak of rain in stage fractions, top point to bottom point. */
@@ -110,9 +110,9 @@ export interface RainFrame {
 }
 
 /**
- * One frame of rain, in stage fractions — the one copy both painters read. `null` is the field's
- * own answer to "this venue has no sky in frame or no weather to show", which is a state a venue
- * change can leave standing for a whole session.
+ * One frame of rain, in stage fractions — the one copy every reader draws from. `null` is the
+ * field's own answer to "this venue has no sky in frame or no weather to show", which is a state a
+ * venue change can leave standing for a whole session.
  *
  * `y` starts at −0.1 without the painted layer's `stage.y` term: `stageBoxFor` centres on x only,
  * so `stage.y` is 0 in every box the game can make, and this is the same number that layer was
@@ -145,37 +145,12 @@ export function rainLines(
   return { lines, alpha, widthUnits: 0.0016 };
 }
 
-/** Rain in front of the scene, angled by the wind the simulation is already using. */
-export function drawRain(
-  ctx: CanvasRenderingContext2D,
-  state: GameStateView,
-  viewport: Viewport,
-  reducedMotion: boolean,
-): void {
-  const frame = rainLines(state, state.nowMs / 1000, reducedMotion);
-  if (frame === null) return;
-
-  ctx.save();
-  ctx.strokeStyle = rgbToCss(RAIN_TINT, frame.alpha);
-  ctx.lineWidth = Math.max(1, viewport.len(frame.widthUnits));
-  ctx.beginPath();
-  for (const line of frame.lines) {
-    const top = viewport.px({ x: line.x1, y: line.y1 });
-    const bottom = viewport.px({ x: line.x2, y: line.y2 });
-    ctx.moveTo(top.x, top.y);
-    ctx.lineTo(bottom.x, bottom.y);
-  }
-  ctx.stroke();
-  ctx.restore();
-}
-
-/** Dust in the light: the cheapest possible way to make still air look like a room. */
 /**
- * One frame of the room's dust, in stage fractions and stage-unit radii — the one copy both
- * painters read. Always on: the room's own light is what it hangs in, and a talk of weather does
- * not switch it off. The visible half of `smoke.turbulence` — the field is a slow weather (guarded
- * in §22), so swinging the motes wider with it cannot shiver, which is what dust actually does
- * when the air starts turning.
+ * One frame of the room's dust, in stage fractions and stage-unit radii — the one copy every reader
+ * draws from. Always on: the room's own light is what it hangs in, and a talk of weather does not
+ * switch it off. The visible half of `smoke.turbulence` — the field is a slow weather (guarded in
+ * §22), so swinging the motes wider with it cannot shiver, which is what dust actually does when
+ * the air starts turning.
  */
 export function dustMotes(
   state: GameStateView,
@@ -197,30 +172,4 @@ export function dustMotes(
     out.push({ x, y, radius, alpha });
   }
   return out;
-}
-
-export function drawDust(
-  ctx: CanvasRenderingContext2D,
-  state: GameStateView,
-  viewport: Viewport,
-  reducedMotion: boolean,
-): void {
-  ctx.save();
-  ctx.globalCompositeOperation = 'lighter';
-  for (const mote of dustMotes(state, state.nowMs / 1000, reducedMotion)) {
-    const at = viewport.px({ x: mote.x, y: mote.y });
-    const radius = viewport.len(mote.radius);
-    // The one filter that is a viewport's, not the room's: a mote under a third of a pixel is
-    // nothing to paint.
-    if (radius <= 0.3) continue;
-    ctx.fillStyle = rgbToCss([236, 226, 208], mote.alpha);
-    ctx.beginPath();
-    ctx.arc(at.x, at.y, radius, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.restore();
-}
-
-export function clearWeatherCache(): void {
-  cache.clear();
 }

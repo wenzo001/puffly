@@ -62,17 +62,19 @@ const MEANING: Record<string, string> = {
   // S11's 统计 entry: the ledger's own numbers, which is also what `▤` must never come to mean on
   // any other surface.
   stats: 'the ledger',
-  // S14's six gestures and S1-S6's three phase tabs. A gesture and the object it uses are one
-  // referent on purpose: `△` on the pill (hold the lighter) and `△` on the tab (the 点燃 phase) are
-  // both the lighter. That rule is what the two clashes below were measured against, and it resolved
-  // both: the shape says what the moment is about, never which finger motion is asked for.
-  // 取烟 is the pack's shape now that the pack is a thing to press (S14's sixth gesture). The rod is
-  // what arrives, but a gesture is named by what the finger acts on — as `discard` is the tray.
-  pick: 'a box',
-  puff: 'a draw',
+  // §2's Demo icons (the SVG vocabulary that replaced the ASCII gesture marks). A gesture and the
+  // object it uses are one referent on purpose: the flame on the pill (hold the lighter), in the
+  // header ring and on the tab all mean the lighter; the rod on 取烟 is the cigarette that arrives,
+  // the same rod the header and the smoking tab wear.
+  airflow: 'a draw',
+  'swirl-dot': 'a draw',
+  'exhale-arrow': 'a draw',
   flick: 'the ash',
+  'tray-lines': 'the ash',
   extinguish: 'a stubbed rod',
   discard: 'the tray',
+  ashtray: 'the tray',
+  gear: 'the settings',
   light: 'a lighter',
   // S23's three substitutes. `⌇` is the one to watch: it is a hair away from `⌁`, which is 磕灰.
   breathe: 'a breath',
@@ -80,35 +82,38 @@ const MEANING: Record<string, string> = {
   walk: 'a walk',
 };
 
-/** `key: 'glyph'` pairs from a component's own literal map, whatever the variable is called. */
-function glyphsIn(source: string, keys: readonly string[]): Array<[string, string]> {
-  const found: Array<[string, string]> = [];
-  for (const key of keys) {
-    const match = new RegExp(`${key}:\\s*'([^']+)'`).exec(source);
-    if (match?.[1]) found.push([key, match[1]]);
-  }
-  return found;
-}
+const GLYPH_SOURCE = readFileSync(new URL('../components/DemoGlyph.vue', import.meta.url), 'utf8');
 
 /**
- * S14 names six gestures as the loop itself and S1–S6 put three phases on the bottom rail, both in
- * the same shapes the rail and the HUD use. Until now neither site was in this alphabet, so
- * "a shape never changes sides" had never been checked against the marks a finger reads mid-break.
- * They join the one `MEANING` table above rather than getting their own: a gesture and the object it
- * uses are the same referent, and two tables would be two claims about what a shape means.
+ * §2's icons are the vocabulary that replaced the ASCII gesture marks: the header ring, the pill
+ * and the rail all render `DemoGlyph` by name. Each surface is scanned for the names it binds, so
+ * "one shape never changes sides" now means "one icon name never changes referents".
  */
-function gestureMarks(source: string): Array<[string, string]> {
-  return [...source.matchAll(/affordance === '(\w+)'">([^<]+)<\/template>/g)].map((match) => [
+function hudIcons(source: string): Array<[string, string]> {
+  return [...source.matchAll(/glyph: '([a-z-]+)'/g)].map((match) => ['ring', String(match[1])]);
+}
+function pillIcons(source: string): Array<[string, string]> {
+  return [...source.matchAll(/case '(\w+)':\s*\n?\s*return '([a-z-]+)'/g)].map((match) => [
     String(match[1]),
     String(match[2]),
   ]);
 }
-function phaseMarks(source: string): Array<[string, string]> {
-  return [...source.matchAll(/\{ id: '(\w+)', glyph: '([^']+)', key/g)].map((match) => [
-    String(match[1]),
-    String(match[2]),
-  ]);
+function railIcons(source: string): Array<[string, string]> {
+  const out: Array<[string, string]> = [];
+  for (const match of source.matchAll(/id: '(\w+)', icon: '([a-z-]+)'/g)) {
+    out.push([String(match[1]), String(match[2])]);
+  }
+  // The settings button is a button, not a TABS entry.
+  for (const match of source.matchAll(/<DemoGlyph[^>]*name="([a-z-]+)"/g)) {
+    out.push(['settings', String(match[1])]);
+  }
+  return out;
 }
+
+/** Every icon name `DemoGlyph` actually implements. */
+const SUPPORTED_ICONS = new Set(
+  [...GLYPH_SOURCE.matchAll(/name === '([a-z-]+)'/g)].map((match) => String(match[1])),
+);
 
 /** 减量页's three substitutes are marks from the same geometric family, so they are judged here too. */
 function alternativeMarks(source: string): Array<[string, string]> {
@@ -120,6 +125,39 @@ function alternativeMarks(source: string): Array<[string, string]> {
   ].map((match) => [String(match[1]), String(match[2])]);
 }
 
+/** What each Demo icon refers to, by icon name (one icon may be bound on several surfaces). */
+const ICON_MEANING: Record<string, string> = {
+  rod: 'a rod',
+  flame: 'a lighter',
+  airflow: 'a draw',
+  'swirl-dot': 'a draw',
+  'exhale-arrow': 'a draw',
+  flick: 'the ash',
+  'tray-lines': 'the ash',
+  extinguish: 'a stubbed rod',
+  ashtray: 'the tray',
+  gear: 'the settings',
+};
+
+const icons: Array<{ icon: string; meaning: string; where: string }> = [
+  ...hudIcons(HUD_SOURCE).map(([, icon]) => ({
+    icon,
+    meaning: ICON_MEANING[icon] ?? icon,
+    where: `hud:${icon}`,
+  })),
+  ...pillIcons(PILL_SOURCE).map(([affordance, icon]) => ({
+    icon,
+    meaning: ICON_MEANING[icon] ?? MEANING[affordance] ?? icon,
+    where: `pill:${affordance}`,
+  })),
+  ...railIcons(TAB_SOURCE).map(([tab, icon]) => ({
+    icon,
+    meaning: ICON_MEANING[icon] ?? MEANING[tab] ?? icon,
+    where: `rail:${tab}`,
+  })),
+];
+
+/** The text-mark alphabet: the desk rail, the collection rungs, the kit and S23's substitutes. */
 const alphabet: Array<{ glyph: string; meaning: string; where: string }> = [
   ...RAIL_ENTRIES.map((entry) => ({
     glyph: entry.glyph,
@@ -133,11 +171,6 @@ const alphabet: Array<{ glyph: string; meaning: string; where: string }> = [
       meaning: MEANING[unit] ?? unit,
       where: `rung:${unit}`,
     })),
-  ...glyphsIn(HUD_SOURCE, ['rod', 'lighter', 'tray', 'out']).map(([key, glyph]) => ({
-    glyph,
-    meaning: MEANING[key] ?? key,
-    where: `hud:${key}`,
-  })),
   ...[...SHEET_SOURCE.matchAll(/CollectionCategory\.(\w+),\s*glyph:\s*'([^']+)'/g)].map(
     (match) => ({
       glyph: match[2] ?? '',
@@ -145,16 +178,6 @@ const alphabet: Array<{ glyph: string; meaning: string; where: string }> = [
       where: `kit:${match[1]}`,
     }),
   ),
-  ...gestureMarks(PILL_SOURCE).map(([key, glyph]) => ({
-    glyph,
-    meaning: MEANING[key] ?? key,
-    where: `pill:${key}`,
-  })),
-  ...phaseMarks(TAB_SOURCE).map(([key, glyph]) => ({
-    glyph,
-    meaning: MEANING[key] ?? key,
-    where: `phase:${key}`,
-  })),
   ...alternativeMarks(REDUCE_SOURCE).map(([key, glyph]) => ({
     glyph,
     meaning: MEANING[key] ?? key,
@@ -168,14 +191,10 @@ describe('the mark alphabet means one thing (§23, §55)', () => {
     console.log(
       `ALPHABET ${alphabet.length} marks: ${alphabet.map((m) => `${m.glyph}=${m.meaning}`).join(' ')}`,
     );
-    // +1 for the rung mark the level ladder wears: the places used to be hung on the calendar,
-    // and a level is a fifth axis (§6.1). The rail term is the entry count of S10's seven plus
-    // S11's 统计 — a new entry has to be added to that number on purpose, which is the whole point
-    // of writing the denominator out. The next two terms are S14's gesture marks on the pill and
-    // S1-S6's three phase tabs, added when this file started covering the loop itself: the pill term
-    // is six now that 取烟 has its own shape, and the last three are
-    // S23's substitutes, which wear marks from this same geometric family.
-    expect(alphabet.length).toBe(8 + 3 + 4 + 5 + 6 + 3 + 3);
+    // The denominator, with the loop's own surfaces removed since §2 replaced their ASCII marks
+    // with the Demo SVG vocabulary (judged by the icon describe below): eight rail, three rungs,
+    // five kit categories and S23's three substitutes.
+    expect(alphabet.length).toBe(8 + 3 + 5 + 3);
   });
 
   it('never lets one shape mean two things', () => {
@@ -223,50 +242,70 @@ describe('the mark alphabet means one thing (§23, §55)', () => {
     expect(escape.test('\\u2307\n      </button>')).toBe(true);
   });
 
-  it('reads the loop sites as well as the shelf ones', () => {
-    // The two extractors above are string matches against a template: if either silently stops
-    // matching, the alphabet shrinks and the clash case has fewer shapes to judge rather than more.
-    // So each site names what it must find.
-    expect(gestureMarks(PILL_SOURCE).map(([key]) => key)).toEqual([
-      'puff',
-      'lighter',
-      'flick',
-      'extinguish',
-      'discard',
-      'pick',
-    ]);
-    expect(phaseMarks(TAB_SOURCE).map(([key]) => key)).toEqual(['light', 'puff', 'tray']);
+  it('reads every substitute the reduction panel names', () => {
     expect(alternativeMarks(REDUCE_SOURCE).map(([key]) => key)).toEqual([
       'breathe',
       'water',
       'walk',
     ]);
-    // The two shapes a player can confuse at 15px: 磕灰 on the pill and 走两步 on 减量. The machine
-    // cannot judge whether they read apart, so it keeps them apart in codepoints and says which pair
-    // to look at; the eye is the one that decides.
-    const flick = alphabet.find((entry) => entry.where === 'pill:flick');
-    const walk = alphabet.find((entry) => entry.where === 'reduction:walk');
-    expect(flick?.glyph).toBe('⌁');
-    expect(walk?.glyph).toBe('⌇');
-    console.log(`LOOKALIKE ${flick?.glyph}(${flick?.meaning}) vs ${walk?.glyph}(${walk?.meaning})`);
+  });
+});
+
+describe('the Demo icon vocabulary means one thing (§2)', () => {
+  it('reads the five header, six pill and four rail bindings', () => {
+    // Extractor tripwires: a markup change that silently drops a surface shrinks this list.
+    expect([...new Set(hudIcons(HUD_SOURCE).map(([, icon]) => icon))].sort()).toEqual(
+      ['airflow', 'flame', 'rod', 'swirl-dot', 'tray-lines'].sort(),
+    );
+    expect(pillIcons(PILL_SOURCE).map(([key]) => key)).toEqual([
+      'pick',
+      'lighter',
+      'puff',
+      'flick',
+      'extinguish',
+      'discard',
+    ]);
+    expect(railIcons(TAB_SOURCE).map(([key]) => key)).toEqual([
+      'light',
+      'puff',
+      'tray',
+      'settings',
+    ]);
+    // No surface may bind an icon the component does not draw.
+    for (const entry of icons) {
+      expect(SUPPORTED_ICONS.has(entry.icon), `${entry.where} binds unknown ${entry.icon}`).toBe(
+        true,
+      );
+    }
+    console.log(
+      `ICONS ${icons.length} bindings: ${icons
+        .map((m) => `${m.where}→${m.icon}(${m.meaning})`)
+        .join(' ')}`,
+    );
   });
 
-  it('gives the first gesture of the loop a mark of its own (§ S14)', () => {
-    // S14 lists six: 取烟 点燃 吸入 吐烟 磕灰 掐灭. Five had shapes and the first fell through to `—`,
-    // which is the rod's own mark — defensible while 取烟 *was* a tap on the rod. The pack is what the
-    // finger acts on now, so the gesture wears the pack's shape and `—` means one thing again.
-    const marks = Object.fromEntries(gestureMarks(PILL_SOURCE));
-    expect(marks.pick).toBe('▭');
-    expect(PILL_SOURCE).toContain('<template v-else>');
-    // The fall-through stays, and it stays the rod's: an affordance nobody has placed is a gap to
-    // notice in the picture, not a mark to invent silently.
-    const boxes = alphabet.filter((entry) => entry.glyph === '▭');
-    expect(boxes.length, 'the box mark is worn in more places than the three that mean it').toBe(3);
-    for (const entry of boxes) expect(entry.meaning, entry.where).toBe('a box');
-    const rods = alphabet.filter((entry) => entry.glyph === '—');
-    for (const entry of rods) expect(entry.meaning, entry.where).toBe('a rod');
-    console.log(
-      `PICK ▭ at ${boxes.map((entry) => entry.where).join(', ')}; — at ${rods.map((entry) => entry.where).join(', ')}`,
-    );
+  it('never lets one icon name mean two things', () => {
+    const clashes: string[] = [];
+    for (const entry of icons) {
+      const same = icons.filter(
+        (other) => other.icon === entry.icon && other.meaning !== entry.meaning,
+      );
+      for (const other of same) clashes.push(`${entry.icon}: ${entry.where} vs ${other.where}`);
+    }
+    expect([...new Set(clashes)]).toEqual([]);
+  });
+
+  it('keeps the cross-surface referents the Demo drew', () => {
+    // The flame is the lighter on all three loop surfaces; the rod is the rod on 取烟， the header
+    // and the smoking tab; the ashtray means the tray whether the pill discards or the rail points;
+    // the two ash glyphs (flick / tray-lines) both mean the ash.
+    const where = (icon: string) => icons.filter((e) => e.icon === icon);
+    for (const e of where('flame')) expect(e.meaning).toBe('a lighter');
+    for (const e of where('rod')) expect(e.meaning).toBe('a rod');
+    for (const e of where('ashtray')) expect(e.meaning).toBe('the tray');
+    for (const e of [...where('flick'), ...where('tray-lines')]) {
+      expect(e.meaning).toBe('the ash');
+    }
+    for (const e of where('gear')) expect(e.meaning).toBe('the settings');
   });
 });

@@ -275,3 +275,44 @@ export function radialVignette(size = 128, inner = 0.25, outer = 1): THREE.DataT
   texture.magFilter = THREE.LinearFilter;
   return texture;
 }
+
+/**
+ * §2's bottom scrim, in the Demo's own numbers: the height of the band as a share of the stage, and
+ * how dark its floor is. Two screens have one (待机 at 34 % / .55, 点燃 at 30 % / .5); the three
+ * screens with the rod in the mouth have none, so a caller has to be able to say "no band".
+ */
+export const SCRIM = {
+  idle: { share: 0.34, alpha: 0.55 },
+  lighting: { share: 0.3, alpha: 0.5 },
+} as const;
+
+/**
+ * The ramp `linear-gradient(180deg,transparent,rgba(0,0,0,1))` written straight into a
+ * `DataTexture`: clear at the top of the band, opaque along its bottom edge, and the caller sets the
+ * material's opacity to the screen's own alpha. Row 0 is v = 0, which is the *bottom* of the plane,
+ * so the ramp begins at its darkest end.
+ *
+ * White ink with the darkness carried in alpha, square, and linear-filtered — the shape every other
+ * overlay on this stage already has, and not a stylistic choice: a 2×64 strip of these same numbers
+ * sat on this mesh and painted nothing at all through the WebGPU backend, while the square one
+ * darkens it by the full measured amount. The ink itself is the material's colour, set after
+ * construction the way `radialVignette` does it.
+ */
+export function scrimRamp(size = 64): THREE.DataTexture {
+  const data = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y += 1) {
+    const alpha = Math.round((1 - y / (size - 1)) * 255);
+    for (let x = 0; x < size; x += 1) {
+      const i = (y * size + x) * 4;
+      data[i] = 255;
+      data[i + 1] = 255;
+      data[i + 2] = 255;
+      data[i + 3] = alpha;
+    }
+  }
+  const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  texture.needsUpdate = true;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  return texture;
+}

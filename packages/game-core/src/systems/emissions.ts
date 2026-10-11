@@ -9,6 +9,7 @@
 
 import { clamp, clamp01, mixRgb, type Rgb } from '@puffly/shared';
 import { SMOKE } from '../constants';
+import { PUFF_TIERS, type PuffTier, type PuffTierId } from '../puffTier';
 import type { Burst, BurstKind } from '../types/events';
 import type { SmokeCharacter } from '../types/content';
 import type { Point } from '../types/geometry';
@@ -37,6 +38,14 @@ export interface BurstOptions {
   gravity?: number;
   tint?: Rgb;
   heat?: number;
+  /** The §puffAnimations tier this breath settled on; copied onto the burst for the renderer. */
+  tierRecipe?: {
+    tier: PuffTierId;
+    volumeMl: number;
+    smokeLayers: readonly [number, number];
+    spreadRadiusPx: number;
+    riseSeconds: number;
+  };
 }
 
 function qualityScale(rt: EngineRuntime): number {
@@ -175,6 +184,87 @@ export function makeBurst(rt: EngineRuntime, options: BurstOptions): Burst {
     gravity: (options.gravity ?? 0) + plume.gravity,
     tint: options.tint ?? rt.state.smoke.tint,
     heat: options.heat ?? 0,
+    ...(options.tierRecipe === undefined
+      ? {}
+      : {
+          tier: options.tierRecipe.tier,
+          volumeMl: options.tierRecipe.volumeMl as 8 | 24 | 35,
+          smokeLayers: {
+            min: options.tierRecipe.smokeLayers[0],
+            max: options.tierRecipe.smokeLayers[1],
+          },
+          spreadRadiusPx: options.tierRecipe.spreadRadiusPx as 24 | 52 | 86,
+          riseSeconds: options.tierRecipe.riseSeconds,
+        }),
+  };
+}
+
+/**
+ * The tier-shaped breath, §puffAnimations exhale table.
+ *
+ * The table itself is the Demo's own numbers (8 / 24 / 35 ml, 24 / 52 / 86 px, 0.6 / 1.2 / 2.5 s);
+ * the only arithmetic here is reading those CSS figures as stage units, against the envelope the
+ * inhaled breath used to ship:
+ *
+ * - `M` **is the legacy envelope** — the `44 + 86·intensity` disc count, radius 0.01…0.03, life
+ *   3.6…8.2 s, the intensity-driven ejection speed, buoyancy and turbulence. Every calibrated
+ *   plume file measures a 1.4 s breath, which is M, so M cannot move without re-tuning the room.
+ * - `S` and `L` are that envelope scaled by the Demo's own ratios: radius ∝ 24 / 52 and 86 / 52
+ *   (the same result as dividing 24 / 52 / 86 CSS px by the 844 px stage and the breath's own
+ *   growth, `scaleGrowth` × mean depth × `PUFF_SPREAD` ≈ 2.0), and life ∝ 0.6 / 1.2 and 2.5 / 1.2.
+ *   L's ratio is capped at 1.6 rather than 2.08: discs authored to ~17 s would outlive the
+ *   ashtray phase itself and hang in the room the player has left.
+ * - ejection speed, buoyancy and turbulence stay on the intensity formulas at every tier. They are
+ *   not columns of the Demo's table, so the tier may not author them; the table's rise time is
+ *   expressed through the life envelope — L discs simply keep climbing long after S's have gone.
+ */
+/**
+ * The M-tier reference count is the inhaled recipe the plume was calibrated with
+ * (`44 + 86·intensity`): M is a 1.0…2.0 s draw and every calibrated file measures one, so its
+ * authored count cannot move. S and L take that same draw scaled by the table's own volume
+ * ratio (8 / 24 and 35 / 24 ml).
+ */
+const M_VOLUME_ML = 24;
+const mCount = (intensity: number, volumeMl: number): number =>
+  Math.round((44 + 86 * intensity) * (volumeMl / M_VOLUME_ML));
+const M_RADIUS: readonly [number, number] = [0.01, 0.03];
+const M_LIFE_MS: readonly [number, number] = [3600, 8200];
+const RADIUS_SCALE: Record<PuffTierId, number> = {
+  S: 24 / 52,
+  M: 1,
+  L: 86 / 52,
+};
+const LIFE_SCALE: Record<PuffTierId, number> = {
+  S: 0.6 / 1.2,
+  M: 1,
+  L: 1.6,
+};
+
+export function tieredExhaleOptions(
+  tierRecord: PuffTier,
+  intensity: number,
+): Omit<BurstOptions, 'kind' | 'origin' | 'directionDeg'> {
+  const radiusScale = RADIUS_SCALE[tierRecord.id];
+  const lifeScale = LIFE_SCALE[tierRecord.id];
+  return {
+    count: mCount(intensity, tierRecord.volumeMl),
+    spreadDeg: 13,
+    speed: [0.01, 0.028 + 0.04 * intensity],
+    radius: [M_RADIUS[0] * radiusScale, M_RADIUS[1] * radiusScale],
+    lifeMs: [M_LIFE_MS[0] * lifeScale, M_LIFE_MS[1] * lifeScale],
+    alphaPeak: 0.08 + 0.1 * intensity,
+    alphaDecay: 1.9,
+    rise: 1.3 + intensity * 1.3,
+    turbulence: 0.3 + intensity * 0.35,
+    scaleGrowth: 1.45,
+    heat: clamp01(intensity * 0.35),
+    tierRecipe: {
+      tier: tierRecord.id,
+      volumeMl: tierRecord.volumeMl,
+      smokeLayers: tierRecord.smokeLayers,
+      spreadRadiusPx: tierRecord.spreadRadiusPx,
+      riseSeconds: tierRecord.riseSeconds,
+    },
   };
 }
 
@@ -225,36 +315,45 @@ export function exhaleBurst(
 ): Burst {
   const smoke = rt.cigarette.smokeProfile;
   const modifier = rt.environment.smokeModifier;
-  // 缓缓吐出: a draw that was held in the mouth leaves slowly rather than being pushed out of the
-  // lungs. The same cloud, given a longer life and less speed and lift — content decides how slow.
-  const spread = rt.cigarette.puffProfile.exhaleMs;
-  const slow = spread > 0 ? 1 + spread / 2500 : 1;
-  const ease = spread > 0 ? 1 / slow : 1;
+  const directionDeg = tipAngle(rt) + 8 + releaseSteer(rt);
+  // 品鉴型（雪茄 / 小雪茄 / 斗烟 / 水烟）are not drawn into the lungs, so §puffAnimations' tier
+  // library is not theirs: the smoke was held in the mouth and leaves on its own slow rhythm
+  // （含住两秒再缓缓吐）. The tier table is the inhaled rods' branch below.
+  const savourMs = rt.cigarette.puffProfile.savourMs;
+  if (savourMs > 0) {
+    // The same cloud, given a longer life and less speed and lift — content decides how slow.
+    // No `tierRecipe` is attached: this branch deliberately carries no tier fields, so a renderer
+    // cannot mistake a mouthed slow cloud for a tiered 柱.
+    const slow = 1 + savourMs / 2500;
+    const ease = 1 / slow;
+    return makeBurst(rt, {
+      kind: 'exhale',
+      origin: rt.state.cigarette.pose.tip,
+      count: Math.round((44 + 86 * intensity) * slow),
+      directionDeg,
+      spreadDeg: 13,
+      speed: [0.01 * ease, (0.028 + 0.04 * intensity) * ease],
+      radius: [0.01, 0.03],
+      lifeMs: [3600 * slow, 8200 * slow],
+      alphaPeak: 0.08 + 0.1 * intensity,
+      alphaDecay: 1.9,
+      rise: smoke.riseSpeed * modifier.riseSpeed * (1.3 + intensity * 1.3) * ease,
+      turbulence: smoke.turbulence * modifier.turbulence * (0.3 + intensity * 0.35),
+      scaleGrowth: 1.45,
+      heat: clamp01(intensity * 0.35),
+    });
+  }
+  // Inhaled rods: the breath is whatever tier the released press measured — S 细线 / M 团 / L 柱.
+  // Nothing here reads intent or a setting, and nothing rolls again: the tier was settled in
+  // `endPuff` from the press's own held time, which is exactly what §71 replays.
+  const recipe = tieredExhaleOptions(PUFF_TIERS[rt.state.cigarette.puff.lastTier], intensity);
   return makeBurst(rt, {
+    ...recipe,
     kind: 'exhale',
     origin: rt.state.cigarette.pose.tip,
-    // The brief's breath is a *rising* plume: it leaves the mouth in a narrow body and thins as it
-    // goes. Two wrong turns got here — 66 wide lobes summed into a white ball, then the fix for
-    // that, which spread the same light over even more, even wider puffs and read as fog
-    // (像雾, 没对上焦). A line needs more bodies on a narrower road, not fewer on a wider one.
-    count: 44 + Math.round(86 * intensity),
-    directionDeg: tipAngle(rt) + 8 + releaseSteer(rt),
-    spreadDeg: 13,
-    speed: [0.01 * ease, (0.028 + 0.04 * intensity) * ease],
-    radius: [0.01, 0.03],
-    lifeMs: [3600 * slow, 8200 * slow],
-    alphaPeak: 0.08 + 0.1 * intensity,
-    // Widening by less than three fifths of itself over its life: the breath is a column, and a
-    // puff that grows faster than it climbs is a balloon.
-    // 缓缓吐出 means the breath thins as it goes, and the frame is only so tall: a cloud that is
-    // still half lit when its own body crosses the top edge is smoke leaving the scene, which is
-    // what `plume-on-stage.test.ts` forbids. Measured: at 1.55 the centre of a classic's breath
-    // left at four seconds still 55% lit, and at 1.9 it left at 43%.
-    alphaDecay: 1.9,
-    rise: smoke.riseSpeed * modifier.riseSpeed * (1.3 + intensity * 1.3) * ease,
-    turbulence: smoke.turbulence * modifier.turbulence * (0.3 + intensity * 0.35),
-    scaleGrowth: 1.45,
-    heat: clamp01(intensity * 0.35),
+    directionDeg,
+    rise: recipe.rise * smoke.riseSpeed * modifier.riseSpeed,
+    turbulence: recipe.turbulence * smoke.turbulence * modifier.turbulence,
   });
 }
 

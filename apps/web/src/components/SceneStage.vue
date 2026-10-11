@@ -13,9 +13,19 @@
  */
 import { TresCanvas } from '@tresjs/core';
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
-import { emberHeat, emberPresence, ventDraught } from '@puffly/game-core';
+import {
+  emberHeat,
+  emberPresence,
+  LIP_ACTIONS,
+  puffTierFor,
+  showsLipLine,
+  TIMING,
+  ventDraught,
+  type LipAction,
+} from '@puffly/game-core';
 import type { GameStateView } from '@puffly/game-core';
 import { clamp01, mixRgb } from '@puffly/shared';
+import { preferredDpr, type Puffly } from '../composables/usePuffly';
 import {
   backgroundStructure,
   cherryHot,
@@ -50,10 +60,9 @@ import {
   EffectList,
   effectFor,
   pickUpRing,
-} from '@puffly/game-renderer';
-import type { Puffly } from '../composables/usePuffly';
-import {
   ashtrayRadiusWorld,
+  ASH_PILE,
+  ashPileMetrics,
   canvasToWorld,
   createPufflyRenderer,
   frameRect,
@@ -69,7 +78,11 @@ import {
   radialVignette,
   roomBackdrop,
   rodBetweenInBox,
+  PROP_INK,
+  ROD_THICKNESS_SHARE,
   roundedRect,
+  SCRIM,
+  scrimRamp,
   softDisc,
   solidDisc,
   stadiumBar,
@@ -77,9 +90,9 @@ import {
   stageWorldSize,
   toWorldSize,
   TRAY_FLATTEN,
+  lipArt,
   WORLD_HEIGHT,
   type GlyphAtlas,
-  type RendererChoice,
   type StageBox,
   flameAlpha,
 } from '@puffly/game-scene';
@@ -96,37 +109,109 @@ const props = defineProps<{
 const params = new URLSearchParams(window.location.search);
 const forceWebGL = params.get('gl') === '1';
 
+interface LipProbe {
+  visible: boolean;
+  action: string;
+  tier: 'S' | 'M' | 'L';
+  /** The column's authored near half-width, Demo reference px. */
+  columnWidthPx: number;
+  /** `inhale` while drawn, `savor` when the rod keeps the mouth hidden, '' before any draw. */
+  kind: '' | 'inhale' | 'savor';
+}
+interface StageRingProbe {
+  visible: boolean;
+  frac: number;
+  seconds: string;
+}
 interface SceneProbe {
-  backend: RendererChoice['backend'] | 'pending';
+  backend: string;
   frames: number;
   particles: number;
-  /** The three context, once the scene is up — how a check outside the page asks what was built. */
+  /** The context, once the scene is up — how a check outside the page asks what was built. */
   context: unknown;
+  /** The §2 S3 104 px stage ring. */
+  stageRing: StageRingProbe;
+  /** The abstract mouth (S22): lip line + airflow column. */
+  lip: LipProbe;
+  /**
+   * Whether the engine would take a draw at this instant: no draw in progress, and the settle window
+   * after the previous release elapsed. A press that lands inside that window is swallowed by §18's
+   * rest rule, so a check that presses on a timer can report a working game as a broken one — which
+   * is what happened on 2026-10-11, seven reds in one run and green in the runs either side of it.
+   */
+  puffReady: boolean;
+  /** The most recent exhale recipe the engine handed the scene. */
+  lastExhale: {
+    tier: 'S' | 'M' | 'L' | null;
+    count: number;
+    radiusMax: number;
+    lifeMsMin: number;
+    volumeMl: number | null;
+    spreadRadiusPx: number | null;
+    riseSeconds: number | null;
+  } | null;
+  /**
+   * Test-only: swap the live rod straight at the engine, bypassing the cabinet's unlock wall
+   * (which the UI keeps). The smoke suite needs a 品鉴型 rod on a fresh profile, and every such rod
+   * is unlocked content. Nothing in production calls this.
+   */
+  selectCigarette: (id: string) => void;
 }
-const probe: SceneProbe = { backend: 'pending', frames: 0, particles: 0, context: null };
+const probe: SceneProbe = {
+  backend: 'pending',
+  frames: 0,
+  particles: 0,
+  context: null,
+  stageRing: { visible: false, frac: 0, seconds: '' },
+  lip: { visible: false, action: '', tier: 'S', columnWidthPx: 0, kind: '' },
+  puffReady: false,
+  lastExhale: null,
+  selectCigarette: (id: string) => props.game.select({ cigarette: id }),
+};
 (window as unknown as { __pufflyScene?: SceneProbe }).__pufflyScene = probe;
 
 const rendererFactory = (ctx: Parameters<typeof createPufflyRenderer>[0]) =>
   createPufflyRenderer(ctx, { forceWebGL, onChoice: (choice) => (probe.backend = choice.backend) });
 
-/** The canvas fills the viewport, so the viewport's own aspect is the canvas aspect. */
+/**
+ * The surface the camera is framed for: the canvas's own box. This is not the window — on the desk
+ * the scene gives 260 px to the data column, and a camera framed for the window stretches the
+ * picture by the ratio of the two (1429/1169 across, 846/792 down: different numbers, so the table
+ * slides and the rod gets fatter on one axis only). Until a canvas exists the window is the only
+ * number there is to have.
+ */
 const aspect = ref(window.innerWidth / Math.max(1, window.innerHeight));
 const viewportWidthPx = ref(window.innerWidth);
 const viewportHeightPx = ref(window.innerHeight);
+let canvasEl: HTMLElement | null = null;
+let canvasWatcher: ResizeObserver | null = null;
+
+function applySurface(widthPx: number, heightPx: number): void {
+  viewportWidthPx.value = widthPx;
+  viewportHeightPx.value = heightPx;
+  aspect.value = widthPx / Math.max(1, heightPx);
+}
+
+/** The canvas's CSS box, falling back to the window while it is not in the document yet. */
+function measureSurface(): void {
+  const w = canvasEl?.clientWidth ?? 0;
+  const h = canvasEl?.clientHeight ?? 0;
+  if (w > 0 && h > 0) applySurface(w, h);
+  else applySurface(window.innerWidth, window.innerHeight);
+}
+
 const onResize = (): void => {
-  aspect.value = window.innerWidth / Math.max(1, window.innerHeight);
-  viewportWidthPx.value = window.innerWidth;
-  viewportHeightPx.value = window.innerHeight;
+  measureSurface();
 };
 
 onMounted(() => window.addEventListener('resize', onResize));
 /**
  * The plume is not this file's recipe: it takes the engine's own bursts in with the same
- * `intakeBurst` and the same look the 2D renderer uses, so both layers draw one plume from one
+ * `intakeBurst` and the same look the painted layer used, so the plume has one intake from one
  * source. Seeded jitter for the scene's own use stays; the bursts bring their own.
  */
 const stopEvents = props.game.onEvent((event) => {
-  // The same two accents the painted layer's `handleEvent` pushes (§60's feedback): the ring the
+  // The same two accents the painted layer's `handleEvent` pushed (§60's feedback): the ring the
   // table gets when the rod leaves it, and whatever `effectFor` makes of a burst — one list, one
   // recipe, read by both painters.
   if (event.kind === 'transition') {
@@ -140,6 +225,20 @@ const stopEvents = props.game.onEvent((event) => {
     return;
   }
   if (event.kind !== 'burst') return;
+  if (event.burst.kind === 'exhale') {
+    // The tier the release settled on, with the recipe it carried — the deterministic half of the
+    // S/M/L breath check (the visible half is measured in pixels by the smoke suite).
+    const b = event.burst;
+    probe.lastExhale = {
+      tier: b.tier ?? null,
+      count: b.count,
+      radiusMax: b.radius.max,
+      lifeMsMin: b.lifeMs.min,
+      volumeMl: b.volumeMl ?? null,
+      spreadRadiusPx: b.spreadRadiusPx ?? null,
+      riseSeconds: b.riseSeconds ?? null,
+    };
+  }
   intakeBurst(event.burst, pool, plumeIntakeOptions(props.game.rendererLook()));
   const look = props.game.rendererLook();
   const effect = effectFor(event.burst, clockMs, look.visualCues);
@@ -147,6 +246,9 @@ const stopEvents = props.game.onEvent((event) => {
 });
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize);
+  canvasWatcher?.disconnect();
+  canvasWatcher = null;
+  canvasEl = null;
   document.documentElement.classList.remove('scene3d-text');
   stopEvents();
 });
@@ -162,6 +264,15 @@ const at = (key: 'lighter' | 'ashtray' | 'pack'): readonly [number, number, numb
   const p = points.value[key];
   return p === undefined ? [0, -99, 0] : canvasToWorld(p, box.value, aspect.value);
 };
+/**
+ * Which of §2's two rods this is: the one lying on the pack (a dark band, `#5A5348`) or the one
+ * held up into the key light (paper, `#F0E8DA`). `IDLE` is the only state with the rod still on
+ * the table. Not a computed — the state object is mutated in place, so a computed over it never
+ * fires and the rod would keep whichever band the first frame happened to pick.
+ */
+function rodInkFor(state: GameStateView | null): string {
+  return state?.cigarette.state === 'IDLE' ? PROP_INK.rodAtRest : PROP_INK.rodHeld;
+}
 const rod = computed(() => {
   const { body, ember } = points.value;
   return body === undefined || ember === undefined
@@ -188,15 +299,8 @@ const lighter = computed(() => ({
  * state object is mutated in place, so a computed over it would never fire.
  */
 const lighterLid = shallowRef<THREE.Group | null>(null);
-const lighterInk = computed(() => {
-  const hue = props.state?.style.lighter.hue ?? [176, 138, 82];
-  return new THREE.Color().setRGB(
-    (hue[0] ?? 0) / 255,
-    (hue[1] ?? 0) / 255,
-    (hue[2] ?? 0) / 255,
-    THREE.SRGBColorSpace,
-  );
-});
+/** §2's borders are one CSS pixel wide, so that is what the rim and the highlight are drawn at. */
+const edgePx = computed(() => Math.max(0.001, pxToWorld(1)));
 const pack = computed(() => ({
   w: toWorldSize(PACK_SIZE.width, unitWorld.value),
   h: toWorldSize(PACK_SIZE.height, unitWorld.value),
@@ -325,6 +429,10 @@ let grainMaterial: THREE.MeshBasicMaterial | null = null;
 /** The rod's standing ash: the painter's own eleven-segment band, as one ribbon. */
 const columnMesh = shallowRef<THREE.Mesh | null>(null);
 let columnMaterial: THREE.MeshBasicMaterial | null = null;
+/** The tray's pile of tapped ash (§2 S5) and the pixel box its stadium was baked at. */
+let pileMesh: THREE.Mesh | null = null;
+let pileMaterial: THREE.MeshBasicMaterial | null = null;
+let pileSignature = '';
 let columnSignature = '';
 /** The rod's char front: the band, its additive hot core and the toothed grain row. */
 const charBand = shallowRef<THREE.Mesh | null>(null);
@@ -366,6 +474,8 @@ let skyMesh: THREE.Mesh | null = null;
 let skyColours: THREE.BufferAttribute | null = null;
 let wallMesh: THREE.Mesh | null = null;
 let wallMaterial: THREE.MeshBasicMaterial | null = null;
+let scrimMesh: THREE.Mesh | null = null;
+let scrimMaterial: THREE.MeshBasicMaterial | null = null;
 let nosingMesh: THREE.Mesh | null = null;
 let nosingMaterial: THREE.MeshBasicMaterial | null = null;
 const poolMeshes: THREE.Mesh[] = [];
@@ -375,6 +485,16 @@ let boxSignature = '';
 
 function onSceneReady(context: unknown): void {
   probe.context = context;
+  // The camera now measures the surface it draws into, and a `.stage` that changes size without a
+  // window resize (the sheet opening, the rail appearing) has to be heard rather than polled.
+  const given = (context as { canvas?: unknown }).canvas;
+  canvasEl =
+    given instanceof HTMLElement ? given : document.querySelector<HTMLElement>('canvas.scene3d');
+  measureSurface();
+  if (typeof ResizeObserver !== 'undefined' && canvasEl !== null) {
+    canvasWatcher = new ResizeObserver(measureSurface);
+    canvasWatcher.observe(canvasEl);
+  }
   vignetteMaterial = new THREE.MeshBasicMaterial({
     map: radialVignette(192),
     transparent: true,
@@ -392,6 +512,14 @@ function onSceneReady(context: unknown): void {
     new THREE.MeshBasicMaterial({
       map: softDisc(64),
       transparent: true,
+      // The puff's alpha rides its instance colour (an instanced cloud has no per-instance
+      // opacity), which is only a fade under additive blending. Under the default source-over a
+      // faint puff painted its darkened colour at the sprite's full alpha — so the breath that
+      // should have been invisible was a dark bead, and measured exactly that on 2026-10-10:
+      // pixels in the plume's own band sat below the same pixels with the cloud hidden. §2's
+      // columns are `rgba(207,198,188,.17)` over a dark room: smoke in this game only ever adds
+      // light, and the dust and the sparks already composite that way.
+      blending: THREE.AdditiveBlending,
       depthWrite: false,
       side: THREE.DoubleSide,
     }),
@@ -472,6 +600,23 @@ function onSceneReady(context: unknown): void {
   wallMesh.position.z = -1.35;
   root.add(wallMesh);
 
+  // §2's bottom scrim. Behind every prop and in front of the table's own plate and its pools: in
+  // the Demo the band is the stage's last child, but none of its objects reach down into it, so the
+  // layering is only observable here — and washing .55 black over the near-black silhouettes #124
+  // just established would make them and the floor one shape.
+  scrimMaterial = new THREE.MeshBasicMaterial({
+    map: scrimRamp(64),
+    transparent: true,
+    depthWrite: false,
+  });
+  // Set imperatively, the way the vignette above does it: a hex literal in the options object is
+  // indistinguishable from a CSS text colour to the S19 contrast scanner.
+  scrimMaterial.color.set(0x000000);
+  scrimMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), scrimMaterial);
+  scrimMesh.name = 'scrim';
+  scrimMesh.frustumCulled = false;
+  scrimMesh.visible = false;
+  root.add(scrimMesh);
   nosingMaterial = new THREE.MeshBasicMaterial({ transparent: true });
   nosingMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), nosingMaterial);
   nosingMesh.position.z = -0.24;
@@ -582,6 +727,102 @@ function onSceneReady(context: unknown): void {
   hintInk.value = hintGroup;
   rigGroup.add(hintGroup);
 
+  // The three Demo icon surfaces.
+  const buildGlyphRigs = (group: THREE.Group, capacity: number): InkRig[] => {
+    const rigs: InkRig[] = [];
+    for (let i = 0; i < capacity; i += 1) {
+      const material = new THREE.MeshBasicMaterial({
+        transparent: true,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
+      mesh.frustumCulled = false;
+      mesh.visible = false;
+      group.add(mesh);
+      rigs.push({ mesh, material, signature: '', skipped: false });
+    }
+    return rigs;
+  };
+  const hudGlyphGroup = new THREE.Group();
+  hudGlyphRigs.push(...buildGlyphRigs(hudGlyphGroup, HUD_GLYPH_CAPACITY));
+  hudGlyphInk.value = hudGlyphGroup;
+  rigGroup.add(hudGlyphGroup);
+  const pillGlyphGroup = new THREE.Group();
+  pillGlyphRigs.push(...buildGlyphRigs(pillGlyphGroup, PILL_GLYPH_CAPACITY));
+  pillGlyphInk.value = pillGlyphGroup;
+  rigGroup.add(pillGlyphGroup);
+  for (let i = 0; i < 4; i += 1) {
+    const group = new THREE.Group();
+    const rigs = buildGlyphRigs(group, RAIL_GLYPH_CAPACITY);
+    railGlyphRigs.push(rigs);
+    railGlyphGroups.push(group);
+    rigGroup.add(group);
+  }
+  const catGlyphGroup = new THREE.Group();
+  catGlyphRigs.push(...buildGlyphRigs(catGlyphGroup, CAT_GLYPH_CAPACITY));
+  catGlyphInk.value = catGlyphGroup;
+  rigGroup.add(catGlyphGroup);
+
+  // The S3 stage ring: 104 px around the rod while a draw is held, the arc being the draw's own
+  // progress and the held seconds inside it. Everything inside the group is authored in Demo CSS
+  // pixels; `placeStageRing` scales the group by one px-to-world factor.
+  const stageRingGroup = new THREE.Group();
+  stageRingGroup.frustumCulled = false;
+  stageRingGroup.visible = false;
+  const stageRingTrackMaterial = new THREE.MeshBasicMaterial({
+    transparent: true,
+    opacity: 0.22,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  stageRingTrackMaterial.color.setRGB(1, 1, 1, THREE.SRGBColorSpace);
+  const stageRingTrack = new THREE.Mesh(new THREE.RingGeometry(42, 50, 64), stageRingTrackMaterial);
+  stageRingTrack.frustumCulled = false;
+  stageRingTrack.name = 'stage-ring-track';
+  stageRingGroup.add(stageRingTrack);
+  const stageRingArcMaterial = new THREE.MeshBasicMaterial({
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  stageRingArcMaterial.color.setRGB(1, 0.541, 0.239, THREE.SRGBColorSpace);
+  const stageRingArc = new THREE.Mesh(new THREE.RingGeometry(42, 50, 64), stageRingArcMaterial);
+  stageRingArc.frustumCulled = false;
+  stageRingArc.name = 'stage-ring-arc';
+  stageRingGroup.add(stageRingArc);
+  stageRingArcRef = stageRingArc;
+  const ringNumMaterial = new THREE.MeshBasicMaterial({
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  ringNumMaterial.color.setRGB(0.929, 0.902, 0.855, THREE.SRGBColorSpace);
+  // Real (tiny) geometry up front: TresJS's own performance monitor traverses every mesh reading
+  // geometry.attributes.position.count, so an empty BufferGeometry here crashes the frame loop.
+  const stageRingNum = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), ringNumMaterial);
+  stageRingNum.frustumCulled = false;
+  stageRingGroup.add(stageRingNum);
+  stageRingNumRef = stageRingNum;
+  const ringUnitMaterial = new THREE.MeshBasicMaterial({
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  ringUnitMaterial.color.setRGB(0.929, 0.902, 0.855, THREE.SRGBColorSpace);
+  const stageRingUnit = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), ringUnitMaterial);
+  stageRingUnit.frustumCulled = false;
+  stageRingGroup.add(stageRingUnit);
+  stageRingUnitRef = stageRingUnit;
+  rigGroup.add(stageRingGroup);
+  stageRingGroupRef = stageRingGroup;
+
+  // The abstract mouth (S22): two lip curves, their marks, and the airflow column.
+  const mouthGroup = new THREE.Group();
+  mouthGroup.frustumCulled = false;
+  rigGroup.add(mouthGroup);
+  mouthGroupRef = mouthGroup;
+
   flameMaterial = new THREE.MeshBasicMaterial({
     map: flameAlpha(),
     transparent: true,
@@ -649,17 +890,12 @@ function onSceneReady(context: unknown): void {
   rainCloud.name = 'rain';
   rigGroup.add(rainCloud);
   rainMesh.value = rainCloud;
-  // The film grain's tile, baked by the painted layer's own `createGrainTile` (same LCG, same
-  // 128 px), read back as pixels because every texture on this stage so far is a DataTexture and
-  // this pipeline has only ever been fed those.
-  const grainTile = createGrainTile();
-  const tileCtx =
-    grainTile === null
-      ? null
-      : (grainTile.getContext?.('2d') as unknown as CanvasRenderingContext2D | null);
-  const grainPixels = tileCtx?.getImageData(0, 0, 128, 128) ?? null;
-  if (grainPixels !== null) {
-    const texture = new THREE.DataTexture(grainPixels.data, 128, 128, THREE.RGBAFormat);
+  // The film grain's tile, baked by the same integer LCG the painted layer used (same 128 px,
+  // same values), handed back as raw RGBA now that no canvas stands between them — every texture
+  // on this stage is a DataTexture.
+  const grainPixels = createGrainTile();
+  {
+    const texture = new THREE.DataTexture(grainPixels, 128, 128, THREE.RGBAFormat);
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
     // The canvas composites the tile in sRGB; tagging it is what keeps the mid-greys the same
@@ -693,6 +929,47 @@ function onSceneReady(context: unknown): void {
   columnRibbon.position.set(0, 0, COLUMN_Z);
   rigGroup.add(columnRibbon);
   columnMesh.value = columnRibbon;
+  // §2's pile of tapped ash — the mound that turns the tray's gram figure into something on screen.
+  // The number had a reader; `PROP_INK.ashPile` had none, so the tray reported 2.1 g of ash and drew
+  // an empty bowl. `ashPileMetrics` owns the box (the Demo's 126×22 in a 190 tray, dropped by the
+  // Demo's own 80 px, all of it in the tray's plane); the ramp is the Demo's two ends as vertex
+  // colours, the same `tint` path the column above takes, and the stadium plus its 3 px of softness
+  // is baked per pixel box below, the way the slider's track is.
+  pileMaterial = new THREE.MeshBasicMaterial({
+    transparent: true,
+    vertexColors: true,
+    depthWrite: false,
+  });
+  const pilePlane = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), pileMaterial);
+  const pileTop = new THREE.Color(PROP_INK.ashPile);
+  const pileDeep = new THREE.Color(PROP_INK.ashPileDeep);
+  // PlaneGeometry's first two vertices are the top edge, so the light end of `180deg,#4A453E,
+  // #2A2621` stays up and the dark end settles into the tray.
+  pilePlane.geometry.setAttribute(
+    'color',
+    new THREE.Float32BufferAttribute(
+      [
+        pileTop.r,
+        pileTop.g,
+        pileTop.b,
+        pileTop.r,
+        pileTop.g,
+        pileTop.b,
+        pileDeep.r,
+        pileDeep.g,
+        pileDeep.b,
+        pileDeep.r,
+        pileDeep.g,
+        pileDeep.b,
+      ],
+      3,
+    ),
+  );
+  pilePlane.name = 'ash-pile';
+  pilePlane.frustumCulled = false;
+  pilePlane.visible = false;
+  rigGroup.add(pilePlane);
+  pileMesh = pilePlane;
   charMaterial = new THREE.MeshBasicMaterial({
     transparent: true,
     depthWrite: false,
@@ -990,6 +1267,25 @@ function applyBackdrop(state: GameStateView | null): void {
     }
   }
 
+  if (scrimMesh !== null && scrimMaterial !== null) {
+    // Which of §2's bands this screen asks for — and 'no band' is one of the answers, because the
+    // three screens with the rod at the mouth have nothing like it.
+    const screen = state.cigarette.state;
+    const band =
+      screen === 'LIGHTING'
+        ? SCRIM.lighting
+        : screen === 'IDLE' || screen === 'PICKED_UP'
+          ? SCRIM.idle
+          : null;
+    scrimMesh.visible = band !== null;
+    scrimMaterial.opacity = band?.alpha ?? 0;
+    if (band !== null) {
+      const strip = rectWorld({ x: 0, y: 1 - band.share, w: 1, h: band.share });
+      scrimMesh.scale.set(strip.width, strip.height, 1);
+      scrimMesh.position.set(strip.centre[0], strip.centre[1], -0.235);
+    }
+  }
+
   if (nosingMesh !== null && nosingMaterial !== null) {
     const table = structure.table;
     nosingMesh.visible = table !== null;
@@ -1014,7 +1310,12 @@ function applyBackdrop(state: GameStateView | null): void {
     if (mesh === undefined || material === undefined) return;
     mesh.visible = true;
     const world = canvasToWorld({ x: light.x, y: light.y }, box.value, aspect.value);
-    mesh.position.set(world[0], world[1], -1.36 + index * 0.002);
+    // Two pools, two depths, because the deck draws them as two different facts: the one above the
+    // table edge is light on the wall (so it has to clear the wall's near-black plate), the one
+    // below it is light on the table (so it has to clear the table plate, which is otherwise pure
+    // black and swallows it). Both stay behind the props, which sit at z 0.
+    const onTable = light.y > state.stage.layout.tableEdgeY;
+    mesh.position.set(world[0], world[1], onTable ? -0.245 : -1.345 + index * 0.002);
     mesh.scale.set(light.rx * 2 * size.width, light.ry * 2 * size.height, 1);
     material.color.setRGB(
       light.rgb[0] / 255,
@@ -1065,13 +1366,14 @@ const ARCHIVE_TEXTS =
 const RUN_TABLE: ReadonlyArray<{ selector: string; nth: number }> = [
   { selector: '.hud > button.num', nth: 0 },
   { selector: '.hud > span.num.alt', nth: 0 },
-  { selector: '.hud .ring .digits, .hud .ring .mark', nth: 0 },
-  { selector: '.pill .glyph', nth: 0 },
+  // §2's 待机 row is three figures and only one of them is the pressed one: the leading stick count
+  // is a plain span, and without its own slot the scene simply never paints it.
+  { selector: '.hud > span.num:not(.alt)', nth: 0 },
+  // The header symbol, the pill icon and the rail icons are Demo SVGs; their ink is mirrored by the
+  // glyph ink groups, not the atlas. Only words remain here.
   { selector: '.pill .word', nth: 0 },
   { selector: '.hint', nth: 0 },
-  { selector: '.cat > span:not(.badge)', nth: 0 },
   ...[0, 1, 2, 3, 4].map((nth) => ({ selector: '.hud .desk .read', nth })),
-  ...[0, 1, 2, 3].map((nth) => ({ selector: '.rail .tab .glyph', nth })),
   ...[0, 1, 2, 3].map((nth) => ({ selector: '.rail .tab .word', nth })),
   ...Array.from({ length: 32 }, (_, nth) => ({ selector: ARCHIVE_TEXTS, nth })),
 ];
@@ -1092,6 +1394,13 @@ interface RingRig {
 }
 const hudRig = shallowRef<RingRig | null>(null);
 const pillRig = shallowRef<RingRig | null>(null);
+/** The §2 S3 stage ring group and its pieces (geometry authored in Demo CSS px). */
+let stageRingGroupRef: THREE.Group | null = null;
+let stageRingArcRef: THREE.Mesh | null = null;
+let stageRingNumRef: THREE.Mesh | null = null;
+let stageRingUnitRef: THREE.Mesh | null = null;
+/** The abstract mouth's own group, positioned at the rod's mouth end while a draw is held. */
+let mouthGroupRef: THREE.Group | null = null;
 /**
  * A card: the same machinery the pill proved — a stadium quad whose paint is whatever the element's
  * own computed style says (a three-stop gradient, or a flat fill), rebuilt only when the state's
@@ -1465,6 +1774,12 @@ function placeFlame(state: GameStateView | null): void {
  * 0.55`, turned by `rotation` — so the 3D layer draws the same shape rather than an invented flake.
  * The colour is the cigarette's own ash material, lifted 15% toward white, the way `drawFallingAsh`
  * mixes it.
+ *
+ * What this layer cannot carry is §2 S5's per-grain alpha — the Demo's three grains are
+ * `rgba(207,198,188,.75/.55/.4)` at 5/4/3 px, the biggest nearest the rod. The sizes are the core's
+ * own (`fragment.size`, and a flicked column breaks big-to-small), but an instanced cloud has no
+ * per-instance opacity, and unlike the breath these must not be added: ash is opaque, so the one
+ * number the Demo varies is the one this mesh holds flat at 0.9.
  */
 function placeAsh(state: GameStateView | null): void {
   const ashMesh = flakes.value;
@@ -1509,6 +1824,10 @@ function placeRod(state: GameStateView | null): void {
   const mesh = rodMesh.value;
   const current = rod.value;
   if (mesh === null || current === null) return;
+  // §2's two rods — dark while it lies on the pack, paper once it is held — set here, where this
+  // frame's state actually is. A computed over the state object never fires: the core mutates it
+  // in place, which is the same reason the cap's hinge is driven from here too.
+  (mesh.material as THREE.MeshStandardMaterial).color.set(rodInkFor(state));
   const len = Math.max(1e-4, current.length);
   let geometry = mesh.geometry;
   if (Math.abs(len - rodBuiltLength) > 0.0005 || rodBase === null) {
@@ -1517,7 +1836,8 @@ function placeRod(state: GameStateView | null): void {
     // perfectly round tube while the puff was live. One owner, one order: rebuild here, then pinch.
     rodBuiltLength = len;
     geometry.dispose();
-    geometry = new THREE.CylinderGeometry(0.018, 0.018, len, 12, 16);
+    const radius = (len * ROD_THICKNESS_SHARE) / 2;
+    geometry = new THREE.CylinderGeometry(radius, radius, len, 12, 16);
     mesh.geometry = geometry;
     rodBase = (
       geometry.getAttribute('position') as THREE.BufferAttribute
@@ -1527,7 +1847,7 @@ function placeRod(state: GameStateView | null): void {
   const puff = state?.cigarette.puff;
   const perPx = pxToWorld(1);
   const lenPx = len / perPx;
-  const thickPx = 0.036 / perPx;
+  const thickPx = (len * ROD_THICKNESS_SHARE) / perPx;
   const dip = puff != null && puff.active ? thickPx * DIP_SHARE * clamp01(puff.intensity) : 0;
   const signature = `${lenPx.toFixed(2)}|${dip.toFixed(3)}`;
   if (signature === rodShapeSignature) return;
@@ -1651,6 +1971,46 @@ function placeColumn(state: GameStateView | null): void {
     mesh.geometry = geometry;
   }
   mesh.visible = true;
+}
+
+/**
+ * The tray's pile, gated on the tray actually holding something.
+ *
+ * It reads `ashtray.grams` — the same field the tray's gram figure on the HUD is formatted from — so
+ * the mound and the number cannot disagree (§15). The Demo draws one fixed pile for one fixed
+ * state, so presence is the whole mapping here: a growth curve would be a second source for a
+ * quantity the core already keeps.
+ */
+function placePile(state: GameStateView | null): void {
+  if (pileMesh === null || pileMaterial === null) return;
+  if ((state?.ashtray.grams ?? 0) <= 0) {
+    pileMesh.visible = false;
+    return;
+  }
+  const metrics = ashPileMetrics(trayRadius.value);
+  // The stadium is baked at the box it is drawn at, the way the slider's track is: one texel of
+  // feather is then one CSS pixel of softness on screen, which is what the Demo's `blur(3px)` says,
+  // and stretching a fixed mask would oval the two round caps.
+  const perPxX = frame.value.width / Math.max(0.0001, box.value.width * viewportWidthPx.value);
+  const pxWidth = Math.max(2, Math.round(metrics.width / perPxX));
+  const pxHeight = Math.max(2, Math.round(metrics.height / pxToWorld(1)));
+  const signature = `${pxWidth}x${pxHeight}`;
+  if (signature !== pileSignature) {
+    pileSignature = signature;
+    pileMaterial.map?.dispose();
+    pileMaterial.map = stadiumBar(pxWidth, pxHeight, ASH_PILE.blurPx);
+    pileMaterial.needsUpdate = true;
+  }
+  const anchor = at('ashtray');
+  pileMesh.scale.set(metrics.width, metrics.height, 1);
+  // In front of the tray's own face: the disc is a cylinder `trayRadius * 0.28` deep, so its
+  // camera-side cap sits at 0.14 of the radius.
+  pileMesh.position.set(
+    anchor[0],
+    anchor[1] + metrics.dy,
+    anchor[2] + trayRadius.value * 0.14 + 0.0005,
+  );
+  pileMesh.visible = true;
 }
 
 /**
@@ -1981,8 +2341,15 @@ function step(deltaMs: number): void {
     ventDraught(state?.environment.ventilation ?? 1),
   );
   probe.frames += 1;
+  // Read from the same fields the engine's own rest rule reads, so a check waiting on this is
+  // waiting on the rule rather than on a duration someone copied out of it.
+  probe.puffReady =
+    state !== null &&
+    !state.cigarette.puff.active &&
+    state.cigarette.puff.sinceReleaseMs >= TIMING.restSettleMs;
   placeCherry(state);
   placeAsh(state);
+  placePile(state);
   placeRod(state);
   placeColumn(state);
   placeChar(state);
@@ -2008,6 +2375,9 @@ function step(deltaMs: number): void {
   placePill();
   placePillInk();
   placeHintInk();
+  placeGlyphIcons();
+  placeStageRing(state);
+  placeMouth(state);
 
   const cloud = puffs.value;
   if (cloud === null) return;
@@ -2211,12 +2581,12 @@ function fillCard(rig: CardRig, element: HTMLElement | null, shrink: number): vo
     const geometry = new THREE.BufferGeometry();
     const stops = [
       ...style.backgroundImage.matchAll(
-        /(?:rgba?|oklab|oklch|lab|lch|color)\([^)]*\)\s*([\d.]+%)?/g,
+        /(#[0-9a-fA-F]{3,8}|(?:rgba?|oklab|oklch|lab|lch|color)\([^)]*\))\s*([\d.]+%)?/g,
       ),
     ]
       .map((match) => ({
-        colour: parseColour(match[0]),
-        at: match[1] === undefined ? null : Number.parseFloat(match[1]) / 100,
+        colour: parseColour(String(match[1])),
+        at: match[2] === undefined ? null : Number.parseFloat(match[2]) / 100,
       }))
       .filter((stop) => stop.colour !== null);
     const positions: number[] = [];
@@ -2338,7 +2708,8 @@ function placePill(): void {
   const pill = document.querySelector<HTMLElement>('.pill');
   if (rig === null) return;
   const held = pill?.closest('.cta')?.getAttribute('data-held') === 'true';
-  fillCard(rig, pill, held === true ? 0.96 : 1);
+  // The DOM's own press, so the painted card shrinks with the box the finger is on.
+  fillCard(rig, pill, held === true ? 0.98 : 1);
   if (ring !== null) {
     placeRingRig(ring, pill?.querySelector('svg') ?? null, 0.054, 0.055);
   }
@@ -2914,6 +3285,23 @@ const pillInk = shallowRef<THREE.Group | null>(null);
 const HINT_INK_CAPACITY = 4;
 const hintRigs: InkRig[] = [];
 const hintInk = shallowRef<THREE.Group | null>(null);
+/**
+ * The Demo SVG icons, mirrored the same way the pill's line art is. Three surfaces — the header
+ * ring symbol, the pill icon and the four rail icons — each from its own SVG, since a rig's
+ * transform is locked to one element's screen CTM.
+ */
+const HUD_GLYPH_CAPACITY = 5;
+const hudGlyphRigs: InkRig[] = [];
+const hudGlyphInk = shallowRef<THREE.Group | null>(null);
+const PILL_GLYPH_CAPACITY = 6;
+const pillGlyphRigs: InkRig[] = [];
+const pillGlyphInk = shallowRef<THREE.Group | null>(null);
+const RAIL_GLYPH_CAPACITY = 3;
+const railGlyphGroups: THREE.Group[] = [];
+const railGlyphRigs: InkRig[][] = [];
+const CAT_GLYPH_CAPACITY = 3;
+const catGlyphRigs: InkRig[] = [];
+const catGlyphInk = shallowRef<THREE.Group | null>(null);
 /** Longest sample step, in element units — an 18-unit thread becomes 18 segments, a 1000-unit path 32. */
 const INK_STEPS = 32;
 
@@ -3005,17 +3393,21 @@ function ribbonGeometry(
 }
 
 /** Everything that decides an ink shape's picture; anything outside it can move every frame for free. */
-function inkSignature(element: SVGGeometryElement): string {
+function inkSignature(element: SVGGeometryElement | SVGRectElement): string {
   const style = getComputedStyle(element);
   const circle =
     element instanceof SVGCircleElement
       ? `${element.cx.baseVal.value},${element.cy.baseVal.value},${element.r.baseVal.value}`
       : '';
+  const rect =
+    element instanceof SVGRectElement
+      ? `${element.x.baseVal.value},${element.y.baseVal.value},${element.width.baseVal.value},${element.height.baseVal.value}`
+      : '';
   const outline =
     element.getAttribute('d') ??
     element.getAttribute('points') ??
     `${element.getAttribute('x2') ?? ''} ${element.getAttribute('y2') ?? ''}`;
-  return `${element.tagName}|${circle}|${outline}|${style.stroke}|${style.fill}|${style.strokeWidth}|${style.strokeDasharray}`;
+  return `${element.tagName}|${circle}|${rect}|${outline}|${style.stroke}|${style.fill}|${style.strokeWidth}|${style.strokeDasharray}`;
 }
 
 /** One SVG of line art, drawn in the scene — shared by the pill's diagrams and the hint's dimple. */
@@ -3050,13 +3442,20 @@ function placeInk(
   const host = alphaHost ?? svg;
   const svgOpacity = Number.parseFloat(getComputedStyle(host).opacity);
   const svgAlpha = Number.isFinite(svgOpacity) ? svgOpacity : 1;
-  const marks = [...svg.querySelectorAll<SVGGeometryElement>('path, line, polyline, circle')];
+  const marks = [
+    ...svg.querySelectorAll<SVGGeometryElement | SVGRectElement>(
+      'path, line, polyline, circle, rect',
+    ),
+  ];
   marks.forEach((element, index) => {
     const rig = rigs[index];
     if (rig === undefined) return;
     const style = getComputedStyle(element);
     const signature = inkSignature(element);
-    const paint = parseColour(style.fill === 'none' ? style.stroke : style.fill);
+    const isRect = element instanceof SVGRectElement;
+    const paint = parseColour(
+      isRect ? style.fill : style.fill === 'none' ? style.stroke : style.fill,
+    );
     if (signature !== rig.signature) {
       rig.signature = signature;
       if (element instanceof SVGCircleElement) {
@@ -3065,6 +3464,19 @@ function placeInk(
           element.r.baseVal.value * 2,
           element.r.baseVal.value * 2,
         ).translate(element.cx.baseVal.value, element.cy.baseVal.value, 0);
+      } else if (isRect) {
+        // A filled rect (the Demo icons are mostly rects): the rounded corners are at most a couple
+        // of CSS px here, well under a world pixel, so the plane stays square rather than inventing
+        // a rounded geometry the eye could not resolve.
+        rig.mesh.geometry.dispose();
+        rig.mesh.geometry = new THREE.PlaneGeometry(
+          element.width.baseVal.value,
+          element.height.baseVal.value,
+        ).translate(
+          element.x.baseVal.value + element.width.baseVal.value / 2,
+          element.y.baseVal.value + element.height.baseVal.value / 2,
+          0,
+        );
       } else {
         const outline = inkOutline(element);
         const dash = style.strokeDasharray;
@@ -3121,6 +3533,296 @@ function placeHintInk(): void {
   const svg = hint?.querySelector<SVGSVGElement>('svg') ?? null;
   placeInk(svg, hintInk.value, hintRigs, hint);
 }
+
+/** The three Demo icon surfaces (header symbol / pill icon / four rail icons). */
+function placeGlyphIcons(): void {
+  placeInk(
+    document.querySelector<SVGSVGElement>('.hud .ring svg.demo-glyph'),
+    hudGlyphInk.value,
+    hudGlyphRigs,
+    null,
+  );
+  placeInk(
+    document.querySelector<SVGSVGElement>('.cta .pill svg.demo-glyph'),
+    pillGlyphInk.value,
+    pillGlyphRigs,
+    null,
+  );
+  const railSvgs = document.querySelectorAll<SVGSVGElement>('.rail .tab svg.demo-glyph');
+  railGlyphGroups.forEach((group, index) => {
+    placeInk(railSvgs[index] ?? null, group, railGlyphRigs[index] ?? [], null);
+  });
+  placeInk(
+    document.querySelector<SVGSVGElement>('.cat svg.demo-glyph'),
+    catGlyphInk.value,
+    catGlyphRigs,
+    null,
+  );
+}
+
+// ------------------------------------------------------------ the §2 S3 stage ring (104 px)
+
+let stageRingSig = '';
+
+function hideStageRing(): void {
+  if (stageRingGroupRef !== null) stageRingGroupRef.visible = false;
+  probe.stageRing = { visible: false, frac: 0, seconds: '' };
+}
+
+function placeStageRing(state: GameStateView | null): void {
+  const group = stageRingGroupRef;
+  const arc = stageRingArcRef;
+  const numMesh = stageRingNumRef;
+  const unitMesh = stageRingUnitRef;
+  if (group === null || arc === null || numMesh === null || unitMesh === null || state === null) {
+    hideStageRing();
+    return;
+  }
+  const puff = state.cigarette.puff;
+  if (state.cigarette.state !== 'PUFFING' || !state.cigarette.pose.visible) {
+    hideStageRing();
+    return;
+  }
+  group.visible = true;
+  const world = canvasToWorld(state.anchors.body, box.value, aspect.value);
+  group.position.set(world[0], world[1], 0.012);
+  const k = pxToWorld(1);
+  group.scale.set(k, k, 1);
+  arc.position.z = 0.001;
+  arc.renderOrder = 2;
+  numMesh.position.z = 0.002;
+  unitMesh.position.z = 0.002;
+  const frac = clamp01(puff.progress);
+  const seconds = (puff.heldMs / 1000).toFixed(1);
+  const sig = `${frac.toFixed(4)}|${seconds}|${k.toFixed(6)}`;
+  if (sig !== stageRingSig) {
+    stageRingSig = sig;
+    arc.geometry.dispose();
+    if (frac > 0.005) {
+      // Starts at twelve o'clock and runs the way the rod burns — the same convention as the
+      // header ring's mirrored arc.
+      arc.geometry = new THREE.RingGeometry(42, 50, 64, 1, Math.PI / 2, -frac * Math.PI * 2);
+    }
+    arc.visible = frac > 0.005;
+    if (atlas !== null) {
+      const numLayout = layoutText(seconds, atlas, 1);
+      fillRunGeometry(numMesh, seconds, 1, numLayout);
+      numMesh.position.x = -numLayout.width / 2;
+      numMesh.position.y = 7;
+      const unitText = '秒';
+      const unitLayout = layoutText(unitText, atlas, 1);
+      fillRunGeometry(unitMesh, unitText, 1, unitLayout);
+      unitMesh.position.x = -unitLayout.width / 2;
+      unitMesh.position.y = -11;
+      numMesh.visible = true;
+      unitMesh.visible = true;
+    }
+  }
+  probe.stageRing = { visible: true, frac, seconds };
+}
+
+// ------------------------------------------------------------ the abstract mouth (§puffAnimations)
+
+const LIP_LIP_Z = 0.004;
+const COLUMN_STACKS = 5;
+
+function disposeGroupContent(group: THREE.Group): void {
+  for (const child of [...group.children]) {
+    const mesh = child as THREE.Mesh;
+    mesh.geometry?.dispose();
+    const material = mesh.material as THREE.Material | THREE.Material[] | undefined;
+    if (Array.isArray(material)) material.forEach((m) => m.dispose());
+    else material?.dispose();
+    group.remove(child);
+  }
+}
+
+function stripMaterial(colour: [number, number, number], alpha: number): THREE.MeshBasicMaterial {
+  const material = new THREE.MeshBasicMaterial({
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  material.color.setRGB(colour[0] / 255, colour[1] / 255, colour[2] / 255, THREE.SRGBColorSpace);
+  material.opacity = alpha;
+  return material;
+}
+
+let mouthActionId: string | null = null;
+
+/** Mark the rig's authored alpha once, so the per-frame fade can restore it. */
+function rememberBaseAlpha(mesh: THREE.Mesh): void {
+  const material = mesh.material as THREE.MeshBasicMaterial;
+  if (material.userData.baseAlpha === undefined) material.userData.baseAlpha = material.opacity;
+}
+
+function buildMouth(art: ReturnType<typeof lipArt>): void {
+  const group = mouthGroupRef;
+  if (group === null) return;
+  disposeGroupContent(group);
+  mouthActionId = null;
+
+  // The lip curves (and their marks) live in a sub-group so the S3 tilt rotates the mouth alone.
+  const lipSubGroup = new THREE.Group();
+  lipSubGroup.rotation.z = (art.tiltDeg * Math.PI) / 180;
+  group.add(lipSubGroup);
+
+  const lipMat = stripMaterial([art.lipRgb[0], art.lipRgb[1], art.lipRgb[2]], art.lipAlpha);
+  const addRibbon = (points: ReadonlyArray<readonly [number, number]>, z: number) => {
+    const mesh = new THREE.Mesh(ribbonGeometry([points], 1.1), lipMat);
+    mesh.frustumCulled = false;
+    mesh.position.z = z;
+    rememberBaseAlpha(mesh);
+    lipSubGroup.add(mesh);
+  };
+  // L3 presses in steps: the curves meet at the centre with a break rather than a seam.
+  const split = (points: readonly { x: number; y: number }[]) => {
+    const mid = Math.floor(points.length / 2);
+    return [
+      points.slice(0, mid).map((p) => [p.x, p.y] as [number, number]),
+      points.slice(mid + 1).map((p) => [p.x, p.y] as [number, number]),
+    ];
+  };
+  const lipPieces = art.lip.segmented
+    ? [...split(art.lip.upper), ...split(art.lip.lower)]
+    : [
+        art.lip.upper.map((p) => [p.x, p.y] as [number, number]),
+        art.lip.lower.map((p) => [p.x, p.y] as [number, number]),
+      ];
+  for (const piece of lipPieces) addRibbon(piece, LIP_LIP_Z);
+
+  for (const stroke of art.lip.strokes) {
+    if (stroke.kind === 'bead' && stroke.radiusPx !== undefined) {
+      const p0 = stroke.points[0];
+      if (p0 === undefined) continue;
+      const mesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(stroke.radiusPx * 2, stroke.radiusPx * 2),
+        lipMat,
+      );
+      mesh.frustumCulled = false;
+      mesh.position.set(p0.x, p0.y, LIP_LIP_Z);
+      rememberBaseAlpha(mesh);
+      lipSubGroup.add(mesh);
+    } else {
+      addRibbon(
+        stroke.points.map((p) => [p.x, p.y] as [number, number]),
+        LIP_LIP_Z - 0.001,
+      );
+    }
+  }
+
+  // The airflow column: stacked soft discs, fading mouth-bright to far-thin. The sub-group is
+  // deliberately not tilted: the column's own offset/bend carries the S3 lean.
+  const discTexture = softDisc(64);
+  const [cr, cg, cb] = art.columnRgb;
+  const pieces = art.column.segments.length;
+  art.column.segments.forEach((segment, si) => {
+    for (let i = 0; i <= COLUMN_STACKS; i += 1) {
+      const localT = i / COLUMN_STACKS;
+      const globalT = pieces === 1 ? localT : (si + localT) / pieces;
+      const halfW = segment.w0 + (segment.w1 - segment.w0) * localT;
+      const y = segment.y0 + (segment.y1 - segment.y0) * localT;
+      // S3 drifts sideways linearly; M2's spin is one half-sine.
+      const x =
+        art.column.offsetPx +
+        (art.column.spin
+          ? Math.sin(Math.PI * globalT) * art.column.bendPx
+          : art.column.bendPx * globalT);
+      const alpha = art.columnAlpha[0] + (art.columnAlpha[1] - art.columnAlpha[0]) * globalT;
+      const material = stripMaterial([cr, cg, cb], alpha);
+      material.map = discTexture;
+      material.needsUpdate = true;
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
+      mesh.frustumCulled = false;
+      const height = Math.max(4, (segment.y1 - segment.y0) / COLUMN_STACKS) * 1.9;
+      mesh.scale.set(halfW * 2, height, 1);
+      mesh.position.set(x, y, -0.002);
+      mesh.name = 'airflow';
+      rememberBaseAlpha(mesh);
+      group.add(mesh);
+    }
+  });
+}
+
+function placeMouth(state: GameStateView | null): void {
+  const group = mouthGroupRef;
+  if (group === null || state === null) {
+    probe.lip = { visible: false, action: '', tier: 'S', columnWidthPx: 0, kind: '' };
+    return;
+  }
+  const puff = state.cigarette.puff;
+  const mouthed = state.cigarette.readouts.savourMs > 0;
+  if (
+    state.cigarette.state !== 'PUFFING' ||
+    !state.cigarette.pose.visible ||
+    puff.lipAction === null
+  ) {
+    group.visible = false;
+    probe.lip = {
+      visible: false,
+      action: puff.lipAction ?? '',
+      tier: puffTierFor(puff.heldMs),
+      columnWidthPx: 0,
+      kind: mouthed ? 'savor' : 'inhale',
+    };
+    return;
+  }
+  // §puffAnimations: a mouthed rod rolls its action (replay needs the stream intact) but never gets
+  // the lip line or the column.
+  if (!showsLipLine(state.cigarette.readouts.savourMs)) {
+    group.visible = false;
+    probe.lip = {
+      visible: false,
+      action: puff.lipAction,
+      tier: puffTierFor(puff.heldMs),
+      columnWidthPx: 0,
+      kind: 'savor',
+    };
+    return;
+  }
+  const action: LipAction =
+    LIP_ACTIONS.find((entry) => entry.id === puff.lipAction) ?? LIP_ACTIONS[0]!;
+  const art = lipArt(action);
+  if (mouthActionId !== action.id) {
+    buildMouth(art);
+    mouthActionId = action.id;
+  }
+  group.visible = true;
+  // The local frame: x across the lips, y outward past the mouth end. The pivot is the mouth end,
+  // and the rod points pivot→tip; outward is that direction reversed.
+  const pose = state.cigarette.pose;
+  const tip = canvasToWorld(pose.tip, box.value, aspect.value);
+  const pivot = canvasToWorld(pose.pivot, box.value, aspect.value);
+  const outward = new THREE.Vector2(tip[0] - pivot[0], tip[1] - pivot[1])
+    .normalize()
+    .multiplyScalar(-1);
+  const across = new THREE.Vector2(outward.y, -outward.x);
+  const k = pxToWorld(1);
+  const basis = new THREE.Matrix4().makeBasis(
+    new THREE.Vector3(across.x * k, across.y * k, 0),
+    new THREE.Vector3(outward.x * k, outward.y * k, 0),
+    new THREE.Vector3(0, 0, 1),
+  );
+  group.quaternion.setFromRotationMatrix(basis);
+  group.position.set(pivot[0], pivot[1], 0.026);
+  // The column fades in over the action's own to-top time; the lips themselves stay put. Reduced
+  // motion shows the column immediately.
+  const reduced = props.game.rendererLook().reducedMotion;
+  const fade = reduced ? 1 : clamp01(puff.heldMs / Math.max(1, art.column.fadeInMs));
+  for (const child of group.children) {
+    if (child.name === 'airflow') {
+      const material = (child as THREE.Mesh).material as THREE.MeshBasicMaterial;
+      material.opacity = (material.userData.baseAlpha as number) * fade;
+    }
+  }
+  probe.lip = {
+    visible: true,
+    action: action.id,
+    tier: puffTierFor(puff.heldMs),
+    columnWidthPx: art.column.segments[0]?.w0 ?? 0,
+    kind: 'inhale',
+  };
+}
 </script>
 
 <template>
@@ -3137,7 +3839,7 @@ function placeHintInk(): void {
   <TresCanvas
     class="scene3d"
     :renderer="rendererFactory"
-    window-size
+    :dpr="preferredDpr()"
     clear-color="#101010"
     :tone-mapping="THREE.NoToneMapping"
     @loop="({ delta }) => step((delta ?? 0) * 1000)"
@@ -3188,7 +3890,7 @@ function placeHintInk(): void {
       <!-- Tank: −0.7H…−0.14H. -->
       <TresMesh :position="[0, -0.42 * lighter.h, 0]">
         <TresBoxGeometry :args="[lighter.w, 0.56 * lighter.h, lighter.w * 0.7]" />
-        <TresMeshStandardMaterial :color="lighterInk" :metalness="0.5" :roughness="0.4" />
+        <TresMeshStandardMaterial :color="PROP_INK.lighterTank" :metalness="0.5" :roughness="0.4" />
       </TresMesh>
       <!-- Chimney and wick: −0.14H…−0.03H. -->
       <TresMesh :position="[0, -0.085 * lighter.h, 0]">
@@ -3202,15 +3904,40 @@ function placeHintInk(): void {
         name="lighter-lid"
         :position="[0, -0.14 * lighter.h, -lighter.w * 0.35]"
       >
-        <TresMesh :position="[0, 0.22 * lighter.h, lighter.w * 0.35]">
-          <TresBoxGeometry :args="[lighter.w * 1.035, 0.44 * lighter.h, lighter.w * 0.7]" />
-          <TresMeshStandardMaterial :color="lighterInk" :metalness="0.55" :roughness="0.3" />
+        <TresMesh :position="[0, 0.11 * lighter.h, lighter.w * 0.35]">
+          <!-- The shell is 0.22H tall and centred at half that above the hinge, so closed it spans
+               shoulder → top and covers the chimney, and `lighter.lid` alone decides whether the
+               wick is out. Width and depth are the tank's: a flip-top's cap is the same can.
+
+               It used to have no geometry at all — a `TresMesh` with only a material and a nested
+               mesh — which drew nothing *and* threw once per frame inside TresJS's own memory meter
+               (it reads `geometry.attributes.position.count` for every mesh in the scene). The
+               nested mesh below inherited the parent's 0.22H and so floated a line at 0.44H, above
+               the lighter rather than on it; the two numbers were the same edge, counted twice. -->
+          <TresBoxGeometry :args="[lighter.w, 0.22 * lighter.h, lighter.w * 0.7]" />
+          <TresMeshStandardMaterial
+            :color="PROP_INK.lighterCap"
+            :metalness="0.55"
+            :roughness="0.3"
+          />
+          <!-- `box-shadow: inset 0 1px 0 rgba(255,255,255,.06)`, as the line it draws: the shell's
+               top face, a hair in front of it so it is not z-fighting with the can. -->
+          <TresMesh :position="[0, 0.11 * lighter.h, lighter.w * 0.01]">
+            <TresPlaneGeometry :args="[lighter.w * 1.035, edgePx]" />
+            <TresMeshBasicMaterial :color="PROP_INK.lighterEdge" />
+          </TresMesh>
         </TresMesh>
       </TresGroup>
     </TresGroup>
     <TresMesh :position="at('pack')">
+      <!-- §2's `border: 1px solid rgba(255,255,255,.05)`: the plate behind, a hair larger, is the
+           only way a box can have an edge in this layer. -->
+      <TresMesh :position="[0, 0, -pack.w * 0.32]">
+        <TresPlaneGeometry :args="[pack.w + 2 * edgePx, pack.h + 2 * edgePx]" />
+        <TresMeshBasicMaterial :color="PROP_INK.packEdge" />
+      </TresMesh>
       <TresBoxGeometry :args="[pack.w, pack.h, pack.w * 0.6]" />
-      <TresMeshStandardMaterial color="#a63a2c" :roughness="0.6" />
+      <TresMeshStandardMaterial :color="PROP_INK.pack" :roughness="0.6" />
     </TresMesh>
     <!--
       A disc facing the camera, squashed by the 2D layer's own ratio: the canvas draws the tray as an
@@ -3228,7 +3955,7 @@ function placeHintInk(): void {
       :scale="[1, 1, TRAY_FLATTEN]"
     >
       <TresCylinderGeometry :args="[trayRadius, trayRadius, trayRadius * 0.28, 32]" />
-      <TresMeshStandardMaterial color="#6b6b70" :metalness="0.3" :roughness="0.5" />
+      <TresMeshStandardMaterial :color="PROP_INK.ashtray" :metalness="0.3" :roughness="0.5" />
     </TresMesh>
 
     <!-- The rod: a cylinder between the two published points (its true ends), rotated by the
@@ -3240,8 +3967,11 @@ function placeHintInk(): void {
       :position="rod.mid"
       :rotation="[0, 0, rod.angle - Math.PI / 2]"
     >
-      <TresCylinderGeometry :args="[0.018, 0.018, 0.1, 12, 16]" />
-      <TresMeshStandardMaterial color="#e8e2d6" />
+      <TresCylinderGeometry
+        :args="[(0.1 * ROD_THICKNESS_SHARE) / 2, (0.1 * ROD_THICKNESS_SHARE) / 2, 0.1, 12, 16]"
+      />
+      <!-- The ink is this frame's, not the template's: see `rodInkFor`. -->
+      <TresMeshStandardMaterial color="#f0e8da" />
     </TresMesh>
 
     <!--

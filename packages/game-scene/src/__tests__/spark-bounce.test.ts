@@ -203,9 +203,14 @@ describe('the table takes the spark (S12: 落地有弹跳)', () => {
     // A source read, and only what a source read can buy: that the one production call site names
     // the layout's own table line instead of a constant — the half that would silently stop
     // bouncing the moment the table lifts (§55). The physics is judged behaviourally above.
-    const renderer = readFileSync(new URL('../renderer.ts', import.meta.url), 'utf8');
-    const call = /pool\.update\([^;]*\);/s.exec(renderer);
-    expect(call, 'the renderer no longer integrates the pool').not.toBeNull();
-    expect(call?.[0]).toContain('state.stage.layout.table.y');
+    // The call site moved with the scene (2026-10-10): `SceneStage`'s frame is the only place the
+    // pool is integrated now.
+    const scene = readFileSync(
+      new URL('../../../../apps/web/src/components/SceneStage.vue', import.meta.url),
+      'utf8',
+    );
+    const call = /pool\.update\([^;]*\);/s.exec(scene);
+    expect(call, 'the scene no longer integrates the pool').not.toBeNull();
+    expect(call?.[0]).toContain('state?.stage.layout.table.y');
   });
 });

@@ -29,7 +29,6 @@ import {
   buildCollectionItems,
   createDefaultLookup,
 } from '@puffly/game-content';
-import { createCanvasRenderer } from '@puffly/game-renderer';
 import {
   deriveJourney,
   deriveStatistics,
@@ -39,54 +38,6 @@ import {
 
 const WALL_CLOCK = Date.UTC(2026, 8, 29, 22, 15, 0);
 const STEP = Math.ceil(1000 / 60);
-
-/** A stand-in canvas: this test is about the loop, and whether it draws without corrupting anything. */
-function fakeContext(): CanvasRenderingContext2D {
-  const gradient = { addColorStop: () => undefined };
-  const noop = () => undefined;
-  const target: Record<string, unknown> = {
-    setTransform: noop,
-    clearRect: noop,
-    save: noop,
-    restore: noop,
-    translate: noop,
-    // The ignition camera (S7) scales the frame about the cherry; this stand-in lists every
-    // canvas method the renderer is allowed to reach for, so a new one has to appear here.
-    scale: noop,
-    rotate: noop,
-    beginPath: noop,
-    moveTo: noop,
-    lineTo: noop,
-    quadraticCurveTo: noop,
-    closePath: noop,
-    fill: noop,
-    stroke: noop,
-    fillRect: noop,
-    arc: noop,
-    ellipse: noop,
-    rect: noop,
-    drawImage: noop,
-    createLinearGradient: () => gradient,
-    createRadialGradient: () => gradient,
-    canvas: { width: 900, height: 1200 },
-  };
-  return new Proxy(target, {
-    get: (object, property) => object[property as string] ?? null,
-    set: (object, property, value) => {
-      object[property as string] = value;
-      return true;
-    },
-  }) as unknown as CanvasRenderingContext2D;
-}
-
-function fakeSprites() {
-  return {
-    size: 8,
-    soft: () =>
-      ({ width: 8, height: 8 }) as unknown as CanvasImageSource & { width: number; height: number },
-    clear: () => undefined,
-  };
-}
 
 interface Driver {
   engine: ReturnType<typeof createEngine>;
@@ -110,34 +61,18 @@ function driver(): Driver {
   const events: EngineEvent[] = [];
   engine.on((event) => events.push(event));
 
-  const renderer = createCanvasRenderer({
-    ctx: fakeContext(),
-    width: 900,
-    height: 1200,
-    dpr: 2,
-    sprites: fakeSprites(),
-  });
-  engine.on((event) => renderer.handleEvent(event));
-
   /**
-   * Simulated in fixed steps, but drawn only four times a second of sim time. This file's claim
-   * is "the whole loop works and the renderer never corrupts it" — stepping every frame at 60 Hz
-   * for three simulated minutes would only make the suite slow enough to time out on a busy
-   * machine, which is exactly the flake that showed up while other packages were being built.
+   * Simulated in fixed steps. This file's claim used to be "the whole loop works and the renderer
+   * never corrupts it"; since the painted layer retired (2026-10-10) the renderer half is gone and
+   * what remains is the loop itself — a session opened, drawn out, closed and counted, with the
+   * statistics layer reading it back.
    */
   const run = (ms: number): void => {
     let left = ms;
-    let sinceDraw = 0;
     while (left > 0) {
       engine.advance(STEP);
-      sinceDraw += STEP;
-      if (sinceDraw >= 250) {
-        renderer.render(engine.getState(), sinceDraw);
-        sinceDraw = 0;
-      }
       left -= STEP;
     }
-    renderer.render(engine.getState(), Math.max(STEP, sinceDraw));
   };
 
   const aim = (target: InputTarget, type: GameInput['type']): void => {

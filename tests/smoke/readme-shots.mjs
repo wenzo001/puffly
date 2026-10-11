@@ -45,7 +45,13 @@ try {
 
 let browser;
 try {
-  browser = await browserType.launch(CHROME ? { executablePath: CHROME } : {});
+  browser = await browserType.launch(
+    CHROME !== undefined
+      ? { executablePath: CHROME }
+      : ENGINE === 'chromium'
+        ? { channel: 'chromium' } // the full build, like the device suite: the shell lacks the GPU paths
+        : {},
+  );
 } catch (error) {
   console.error(`cannot launch ${ENGINE}: ${error.message}`);
   process.exit(3);

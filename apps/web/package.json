@@ -1,6 +1,6 @@
 {
   "name": "@puffly/web",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,7 +13,6 @@
     "@puffly/game-audio": "*",
     "@puffly/game-content": "*",
     "@puffly/game-core": "*",
-    "@puffly/game-renderer": "*",
     "@puffly/game-statistics": "*",
     "@puffly/game-storage": "*",
     "@puffly/shared": "*",

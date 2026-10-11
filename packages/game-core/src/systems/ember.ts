@@ -111,7 +111,8 @@ export function tickEmber(rt: EngineRuntime, dtMs: number): void {
  * The ember as it is *perceived*: its steady heat, breathed on by the flicker `tickEmber` just
  * drew. One home, because the cherry's glow and the burn's level have to wobble on the same number
  * — otherwise the player watches a flickering tip and hears a still picture (§4 声音跟画面连接).
- * Read by three sites in the renderer and two in the audio engine.
+ * Read by two sites in the 3D scene (`SceneStage`'s cherry and its halo) and two in the audio
+ * engine (`beds`' level and `cues`' hiss).
  *
  * `tickEmber` itself does not use this for `lit` or `temperature`: those decide state, and an
  * ignition that depended on a random draw could not be replayed (§71).

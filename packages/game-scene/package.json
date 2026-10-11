@@ -1,6 +1,6 @@
 {
   "name": "@puffly/game-scene",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -11,8 +11,7 @@
     "@puffly/game-core": "*",
     "@puffly/shared": "*",
     "@tresjs/core": "^5.9.3",
-    "three": "^0.186.1",
-    "@puffly/game-renderer": "*"
+    "three": "^0.186.1"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"

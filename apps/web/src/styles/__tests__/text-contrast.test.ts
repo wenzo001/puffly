@@ -12,7 +12,7 @@
 
 import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { hexToRgb, mixRgb } from '@puffly/shared';
+import { hexToRgb } from '@puffly/shared';
 import type { Rgb } from '@puffly/shared';
 
 const CSS_URL = '../global.css';
@@ -23,7 +23,9 @@ const TOKENS = (() => {
   const start = css.indexOf(':root');
   const block = css.slice(start, css.indexOf('\n}', start));
   const map = new Map<string, string>();
-  for (const match of block.matchAll(/(--[a-z-]+):\s*(#[0-9a-fA-F]{6})/g)) {
+  // `[a-z0-9-]` and not `[a-z-]`: the design names two of its tokens by number (`--text-2`,
+  // `--text-3`), and a scanner that cannot see a token is a scanner that cannot judge it.
+  for (const match of block.matchAll(/(--[a-z0-9-]+):\s*(#[0-9a-fA-F]{6})/g)) {
     map.set(String(match[1]), String(match[2]).toLowerCase());
   }
   return map;
@@ -82,15 +84,41 @@ const PAIRS: readonly { colour: string; on: string; text: Rgb; surface: Rgb }[] 
     text: hexToRgb('#e2604a'),
     surface: token('--deep-charcoal'),
   },
+  /**
+   * The two gradients the Demo paints words on are horizontal or vertical, and the words are centred
+   * on them, so the surface a reader actually sees is the midpoint. Judged at the extreme stop instead
+   * the pair would be measuring a pixel no letter ever occupies — and the number there is on record
+   * either way: `--on-ember` on `--grad-nav`'s #D94D1A end is 4.18, under the bar, which is a fact
+   * about that gradient's far edge and not about this label.
+   */
   {
-    // The pill's label and the lit tab are the two dark-ink-on-ember places. For dark ink the worst
-    // stop of the gradient is the *darkest* one, which is ember 88% against the floor. The shell
-    // mixes in oklab and this approximates the stop in sRGB; the margin here is more than double the
-    // bar, so the difference between the two spaces cannot decide the assertion.
-    colour: '#1a1109',
-    on: 'the darkest stop of the ember gradient',
-    text: hexToRgb('#1a1109'),
-    surface: mixRgb(token('--ember-orange'), token('--deep-charcoal'), 0.12),
+    // §1's `--on-ember` on §1's `--grad-start` (#FF8533 → #DE5719), mid: #EF6E26.
+    colour: '#2a1408',
+    on: 'the middle of the start gradient',
+    text: hexToRgb('#2a1408'),
+    surface: hexToRgb('#ef6e26'),
+  },
+  {
+    // The lit tab sits on `--grad-nav` (#FF8033 → #D94D1A), mid: #EC6727 — a different gradient from
+    // the pill's, so it is judged on its own even though the ink is the same name.
+    colour: '#2a1408',
+    on: 'the middle of the nav gradient',
+    text: hexToRgb('#2a1408'),
+    surface: hexToRgb('#ec6727'),
+  },
+  {
+    colour: 'var(--text-2)',
+    on: 'the app floor',
+    text: token('--text-2'),
+    surface: token('--deep-charcoal'),
+  },
+  {
+    // §1's `.btn.cont` ink, the light text on the continue gradient (S3 吐烟, S4 收烟, S5 磕灰). For
+    // light ink the worst stop is the gradient's *lightest* end, #3D3B38.
+    colour: '#e4dcd2',
+    on: 'the lightest stop of the continue gradient',
+    text: hexToRgb('#e4dcd2'),
+    surface: hexToRgb('#3d3b38'),
   },
   {
     // The declared 次级色, and the one place it is allowed to carry words: 「还没有」 in the 图鉴 and in

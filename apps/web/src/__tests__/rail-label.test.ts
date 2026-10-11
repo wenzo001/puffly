@@ -33,6 +33,38 @@ function caption(locale: string, key: string): string {
   return table?.[key] ?? '';
 }
 
+/** SPEC.md §55's smallest measured stage. A caption wraps here before it wraps anywhere. */
+const NARROWEST_STAGE = 320;
+
+/** One number out of a rule, with the rule quoted back when it is missing — a silent 0 here would
+ * turn the arithmetic below into a claim about nothing. */
+function px(rule: string, name: string, pattern: RegExp): number {
+  const value = Number(pattern.exec(rule)?.[1] ?? NaN);
+  expect(value, `${name} is not a px number in the rail's CSS`).toBeGreaterThan(0);
+  return value;
+}
+
+/** The width the capsule leaves each of the four tabs, at a given stage width. */
+function tabShareAt(stageWidth: number): number {
+  const rule = RAIL.slice(RAIL.indexOf('.rail {'), RAIL.indexOf('}', RAIL.indexOf('.rail {')));
+  const outer = Math.min(
+    stageWidth - px(rule, 'the capsule’s side margins', /width: calc\(100% - (\d+)px\)/),
+    px(rule, 'the capsule’s cap', /max-width: (\d+)px/),
+  );
+  return (
+    (outer -
+      px(rule, 'the capsule’s border', /border: (\d+)px/) * 2 -
+      px(rule, 'the capsule’s padding', /padding: (\d+)px/) * 2) /
+    RAIL_KEYS.length
+  );
+}
+
+/** What is left for the caption once a tab has taken its own padding. */
+function tabContentAt(stageWidth: number): number {
+  const padding = px(tabRule(), 'the tab’s padding', /padding: 0 (\d+)px/);
+  return tabShareAt(stageWidth) - padding * 2;
+}
+
 function tokenNumber(name: string): number {
   const match = CSS.match(new RegExp(`${name}:\\s*calc\\((\\d+(?:\\.\\d+)?)px`));
   if (!match?.[1]) throw new Error(`${name} is not a calc(<number>px * …)`);
@@ -52,25 +84,23 @@ describe('the rail label stays on one line (§9.2)', () => {
     expect(tokenNumber('--label-size')).toBeLessThanOrEqual(13);
   });
 
-  it('fits three full-width characters inside the tab’s own floor', () => {
-    const rule = tabRule();
-    const minWidth = Number(/min-width:\s*(\d+)px/.exec(rule ?? '')?.[1] ?? 0);
-    const padding = Number(/padding: 0 (\d+)px/.exec(rule ?? '')?.[1] ?? 0);
-    const content = minWidth - padding * 2;
+  it('fits three full-width characters in the width a phone actually gives a tab', () => {
     const widestChinese = Math.max(...RAIL_KEYS.map((key) => caption('zh-CN', key).length));
-    // A CJK glyph is one em, so this is arithmetic rather than an estimate — but it is arithmetic
-    // about the tab's *floor*, which a flex item may grow past, not about the width a phone
-    // actually gives it. It catches a fourth character; it does not and cannot catch the wrap the
-    // 15px caption caused, because 3 × 15 still fits 46. That one is held by the size bound above.
-    expect(widestChinese * tokenNumber('--label-size')).toBeLessThanOrEqual(content);
     expect(widestChinese).toBe(3);
+    // A CJK glyph is one em, so this is arithmetic rather than an estimate. It is now arithmetic
+    // about the width the layout *gives* the tab, which it was not while the tab carried a
+    // `min-width`: §2's `.item` is `flex: 1`, so the four share the capsule and the capsule is what
+    // has a width. Measured at the narrowest stage, because that is where a caption wraps first.
+    expect(widestChinese * tokenNumber('--label-size')).toBeLessThanOrEqual(
+      tabContentAt(NARROWEST_STAGE),
+    );
+    expect(widestChinese * tokenNumber('--label-size')).toBeLessThanOrEqual(tabContentAt(390));
   });
 
-  it('never overflows the narrowest stage the game supports', () => {
-    const rule = tabRule();
-    const minWidth = Number(/min-width:\s*(\d+)px/.exec(rule ?? '')?.[1] ?? 0);
-    // SPEC.md §55 names 320×568 as the smallest stage measured. Four tabs at their floor still fit.
-    expect(minWidth * RAIL_KEYS.length).toBeLessThanOrEqual(320);
+  it('leaves every tab a target a thumb can hit at the narrowest stage', () => {
+    // §1's 44×44 floor. `flex: 1` can shrink an item below its content, so the share each tab gets
+    // is the number to check, and it is checked before the padding is taken off.
+    expect(tabShareAt(NARROWEST_STAGE)).toBeGreaterThanOrEqual(44);
   });
 
   it('holds every tier to the labels it ships today', () => {

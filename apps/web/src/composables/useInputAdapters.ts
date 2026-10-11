@@ -111,7 +111,7 @@ const clampUnit = (value: number): number =>
   Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
 
 export function createPointerAdapter(
-  canvas: HTMLCanvasElement,
+  surface: HTMLElement,
   engine: GameEngine,
   readViewport: () => {
     cssWidth: number;
@@ -144,7 +144,7 @@ export function createPointerAdapter(
     const point = toStagePoint(
       event.clientX,
       event.clientY,
-      canvas.getBoundingClientRect(),
+      surface.getBoundingClientRect(),
       readViewport(),
     );
     fingers.set(event.pointerId, { x: event.clientX, y: event.clientY });
@@ -168,7 +168,7 @@ export function createPointerAdapter(
     // A capture the browser refuses (an id it no longer considers active) is not a reason to
     // lose the press: without it the pointer still reports its moves.
     try {
-      canvas.setPointerCapture?.(event.pointerId);
+      surface.setPointerCapture?.(event.pointerId);
     } catch {
       /* uncaptured, and still playing */
     }
@@ -201,7 +201,7 @@ export function createPointerAdapter(
           const middle = toStagePoint(
             (first.x + second.x) / 2,
             (first.y + second.y) / 2,
-            canvas.getBoundingClientRect(),
+            surface.getBoundingClientRect(),
             readViewport(),
           );
           spreadAt = 0;
@@ -219,7 +219,7 @@ export function createPointerAdapter(
     const point = toStagePoint(
       event.clientX,
       event.clientY,
-      canvas.getBoundingClientRect(),
+      surface.getBoundingClientRect(),
       readViewport(),
     );
     const travelled = Math.hypot(point.x - press.start.x, point.y - press.start.y);
@@ -254,7 +254,7 @@ export function createPointerAdapter(
     const point = toStagePoint(
       event.clientX,
       event.clientY,
-      canvas.getBoundingClientRect(),
+      surface.getBoundingClientRect(),
       readViewport(),
     );
     const velocity = {
@@ -295,7 +295,7 @@ export function createPointerAdapter(
     }
 
     try {
-      canvas.releasePointerCapture?.(event.pointerId);
+      surface.releasePointerCapture?.(event.pointerId);
     } catch {
       /* nothing to give back */
     }
@@ -320,16 +320,16 @@ export function createPointerAdapter(
 
   return {
     attach() {
-      canvas.addEventListener('pointerdown', onDown);
-      canvas.addEventListener('pointermove', onMove);
-      canvas.addEventListener('pointerup', onUp);
-      canvas.addEventListener('pointercancel', onCancel);
+      surface.addEventListener('pointerdown', onDown);
+      surface.addEventListener('pointermove', onMove);
+      surface.addEventListener('pointerup', onUp);
+      surface.addEventListener('pointercancel', onCancel);
     },
     detach() {
-      canvas.removeEventListener('pointerdown', onDown);
-      canvas.removeEventListener('pointermove', onMove);
-      canvas.removeEventListener('pointerup', onUp);
-      canvas.removeEventListener('pointercancel', onCancel);
+      surface.removeEventListener('pointerdown', onDown);
+      surface.removeEventListener('pointermove', onMove);
+      surface.removeEventListener('pointerup', onUp);
+      surface.removeEventListener('pointercancel', onCancel);
       fingers.clear();
       spreadAt = 0;
       press = null;

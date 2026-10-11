@@ -1,14 +1,52 @@
 /**
- * Prop sizes, in stage units — the same units the core's layout and the Canvas 2D props use.
+ * Prop sizes, in stage units — the same units the core's layout uses.
  *
- * One stage unit is the stage's own height (the 2D viewport's `unit` is `min(width / 0.75, height)`,
+ * One stage unit is the stage's own height (the old viewport's `unit` is `min(width / 0.75, height)`,
  * which is the height for any stage at or wider than 3:4), so a size here multiplies `WORLD_HEIGHT`
  * to become world units. Getting that wrong is how the first draft of this layer drew a lighter two
  * thirds of its real width.
  *
- * The numbers are the 2D renderer's own exports while that renderer still ships; `apps/web` carries
- * a parity test pinning the two together, and that test retires with the 2D layer (P5).
+ * It carries the numbers the painted layer used while that layer still shipped; since 2026-10-10 the
+ * 2D layer is gone and these are the only copy (the parity test that used to pin the two together
+ * retired with it).
  */
+import { wander } from './noise';
+
+/**
+ * The props' own inks, in the order §2 of SmokeRitual-UI-Demo.html paints them. Every one of these
+ * is near-black on purpose: the Demo's redline keeps the scene to geometry silhouettes and flat
+ * colour, and all of the warmth in those screens comes from the light pool *behind* the objects.
+ * A gradient over one of our flat-shaded bands becomes its two ends — the lighter's cap is the top
+ * of `180deg,#2A2622,#1A1714` and its tank the bottom, which is also the order the bands hang on
+ * the hinge. The pack's edge is what `1px solid rgba(255,255,255,.05)` over its own plate works
+ * out to; the ashtray's is the top of its 160deg ramp, and the pile of tapped ash is the 22px band
+ * lying in it.
+ */
+export const PROP_INK = {
+  lighterCap: '#2a2622',
+  lighterTank: '#1a1714',
+  pack: '#191612',
+  packEdge: '#25221f',
+  /** `inset 0 1px 0 rgba(255,255,255,.06)` over the cap's own #2A2622. */
+  lighterEdge: '#37342f',
+  ashtray: '#1b1815',
+  /** The two ends of the pile's `180deg,#4A453E,#2A2621` — see `ASH_PILE`. */
+  ashPile: '#4a453e',
+  ashPileDeep: '#2a2621',
+  /** The rod lying on the table (S1) is in the room's shadow, not in the key light. */
+  rodAtRest: '#5a5348',
+  /** Held up (S2 onward) it is the paper the Demo draws: `180deg,#F0E8DA,#A69C8E`. */
+  rodHeld: '#f0e8da',
+} as const;
+
+/**
+ * The rod's thickness as a share of its own length. §2 draws the held cigarette 168 × 34 and the
+ * one resting on the pack 96 × 16, so the paper tube is about a fifth of its length across — the
+ * 1 : 55 of a real cigarette is what the *simulation* keeps, and this is the 20 % cartoon the
+ * redline allows on the way it is drawn.
+ */
+export const ROD_THICKNESS_SHARE = 34 / 168;
+
 export const LIGHTER_SIZE = { width: 0.05, height: 0.075 } as const;
 export const PACK_SIZE = { width: 0.058, height: 0.088 } as const;
 /** How much the tray's disc is squashed on screen — the 2D layer's convention, not a perspective. */
@@ -32,4 +70,116 @@ export function ashtrayRadiusWorld(stageUnits: number, worldHeight: number): num
 export function parsePropScale(text: string): number | null {
   const value = Number(text);
   return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+/**
+ * §2's pile of tapped ash, lying in the tray's near lip. The Demo's own box: `132,486` at `126×22`
+ * with `r11` (a stadium), filled `linear-gradient(180deg,#4A453E,#2A2621)` and `blur(3px)`, in a
+ * tray of `100,322` at `190×190`.
+ *
+ * Everything is a share of the tray it lies in, so the pile rides every prop scale instead of owning
+ * an anchor the layout never published. The tray is drawn as an oblique ellipse (`TRAY_FLATTEN`,
+ * the painter's convention this scene reproduces as geometry), and the Demo draws it face-on — so
+ * the pile lies *in* that plane: its span across the tray is the Demo's 126/190, its span along the
+ * tray is the Demo's 22/190 squashed like the tray is, and its centre is the Demo's 80 px down the
+ * tray's own 95 px half. Squashed together, all three stay inside the tray: at these numbers the
+ * mound's lower edge stops just short of the near rim, which is where the picture puts it.
+ */
+export const ASH_PILE = {
+  /** 126 of the tray's 190, across. */
+  widthShare: 126 / 190,
+  /** 22 of the tray's 190, along the tray's own plane. */
+  heightShare: 22 / 190,
+  /** (497 − 417) against the tray's half of 95, downward. */
+  dropShare: 80 / 95,
+  /** The Demo's `filter: blur(3px)`, read as CSS pixels on the screen it is drawn at. */
+  blurPx: 3,
+} as const;
+
+/** The pile's box in world units, given the radius of the tray it lies in. */
+export function ashPileMetrics(radiusWorld: number): {
+  width: number;
+  height: number;
+  dy: number;
+} {
+  const span = radiusWorld * 2;
+  return {
+    width: span * ASH_PILE.widthShare,
+    height: span * ASH_PILE.heightShare * TRAY_FLATTEN,
+    dy: -radiusWorld * TRAY_FLATTEN * ASH_PILE.dropShare,
+  };
+}
+
+// ------------------------------------------------------------------------------------------------
+// The rod, the lighter's flame and the paper dent — moved here with the painted layer's retirement
+// (2026-10-10). Same numbers, same formulas; the scene is their only reader now.
+
+/** The lighter's flip-top opens by this much: `lighter.lid` through the same 78°. */
+export const LID_THROW_DEG = 78;
+
+/**
+ * Where the flame stands on the lighter, as a fraction of its body height in the local frame the
+ * painted layer drew in (y grows downward): `chimTop` (top −0.3H + cap 0.44H + chimney 0.11H) less
+ * the wick's own 0.05H. A reader whose y grows upward — the scene — flips the sign.
+ */
+export const FLAME_BASE_FRACTION = -0.3 + 0.44 + 0.11 - 0.05;
+
+/**
+ * The lighter's flame as numbers, in stage units and free of any canvas. `flame` is the 0–1
+ * strength the simulation holds, `flicker`/`sputter` its two nervous inputs, and `wander` the same
+ * noise the painted layer has always used.
+ */
+export function flameMetrics(input: {
+  flame: number;
+  flicker: number;
+  sputter: number;
+  nowMs: number;
+  flameHeight: number;
+}): { height: number; width: number; jitter: number } {
+  const jitter = wander(input.nowMs / 1000, 11) * 0.12 + input.flicker * 0.4;
+  const height = input.flameHeight * input.flame * (1 + jitter * 0.25) * (1 - input.sputter * 0.7);
+  return { height, width: height * 0.42, jitter };
+}
+
+/** The char front's bite into one grain's own length, as a share of it. */
+export const CHAR_BIT = 0.46;
+/** The grain field's seed: the same noise field every reader walks, index by index. */
+export const CHAR_GRAIN_SEED = 1332;
+
+/** How deep the paper gives under a full draw, as a share of the rod's own thickness. */
+export const DIP_SHARE = 0.22;
+
+/** Where the tube pinches: just behind the cherry, which is where the air is actually leaving. */
+export const WAIST = 0.78;
+
+/**
+ * How far the paper has given inward at one x, sampled from the very curve the rod's body path
+ * emits.
+ *
+ * There is a reason this reads the curve instead of using a formula: the first version of the dent
+ * shrank the brand band by a bell of its own, and the bell disagreed with the Bézier by 0.15 px at the
+ * band's centre — a stripe standing a hair outside a collapsed tube, which is exactly how a fake dent
+ * reads as a bug. One sampler, one shape.
+ */
+export function paperGive(length: number, thickness: number, dip: number, x: number): number {
+  if (dip <= 0) return 0;
+  const half = thickness / 2;
+  const r = Math.min(thickness * 0.45, length / 2, half);
+  const x0 = r;
+  const x1 = length - r;
+  const cy = -half + dip * 2;
+  let closest = -half;
+  let bestDx = Infinity;
+  for (let step = 0; step <= 32; step += 1) {
+    const t = step / 32;
+    const mt = 1 - t;
+    const px = mt * mt * x0 + 2 * mt * t * (length * WAIST) + t * t * x1;
+    const py = mt * mt * -half + 2 * mt * t * cy + t * t * -half;
+    const dx = Math.abs(px - x);
+    if (dx < bestDx) {
+      bestDx = dx;
+      closest = py;
+    }
+  }
+  return half + closest;
 }

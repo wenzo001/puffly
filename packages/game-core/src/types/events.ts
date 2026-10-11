@@ -4,6 +4,7 @@
 
 import type { CigaretteStateId, SmokeField, WorldSnapshot } from './state';
 import type { Point, Range, Rgb } from './geometry';
+import type { PuffTierId } from '../puffTier';
 
 /** §69 examples plus the rest of the loop. Wire shape is free-form on purpose. */
 export const SessionEventType = {
@@ -137,6 +138,17 @@ export interface Burst {
   tint: Rgb;
   /** 0..1 ember heat at emission time, for the first few particles. */
   heat: number;
+  /**
+   * §puffAnimations, carried only by an `exhale`: the tier the released press landed on, with the
+   * tier table's own numbers so a renderer can draw 细线 / 团 / 柱 without re-deriving any of them.
+   * The breath's geometry above (`count` / `radius` / `lifeMs` / `rise`) is already shaped by the
+   * same tier; these fields are the readable copy of what shaped it, not a second opinion.
+   */
+  tier?: PuffTierId;
+  volumeMl?: 8 | 24 | 35;
+  smokeLayers?: Range;
+  spreadRadiusPx?: 24 | 52 | 86;
+  riseSeconds?: number;
 }
 
 /** What adapters subscribe to. Deliberately small (§45): state is continuous, these are discrete. */

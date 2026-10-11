@@ -2,13 +2,12 @@
  * The shell's only place that knows about engines, adapters and storage (SPEC.md §45).
  *
  * Vue deliberately does *not* drive the simulation: the rAF loop calls `engine.tick`, the
- * renderer draws, and a summary is republished a few times per second so components
+ * the scene draws, and a summary is republished a few times per second so components
  * re-render on a human scale instead of once per particle (§54, §81 (9), §81 (10)).
  */
 
 import { computed, onBeforeUnmount, ref, type ComputedRef, type Ref } from 'vue';
 import { formatClock } from '@puffly/shared';
-import { shouldPaint } from './idlePaint';
 import {
   anchorForTarget,
   createDefaultSettings,
@@ -17,6 +16,7 @@ import {
   type CollectionItem,
   type EngineEvent,
   type GameEngine,
+  type ContrastMode,
   type GameStateView,
   type QualityMode,
   type Selection,
@@ -24,14 +24,7 @@ import {
   type Settings,
 } from '@puffly/game-core';
 import { buildCollectionItems, createDefaultLookup, DEFAULT_IDS } from '@puffly/game-content';
-import {
-  createCanvasRenderer,
-  createGrainTile,
-  createViewport,
-  defaultSpriteFactory,
-  type PufflyRenderer,
-  type RendererSettings,
-} from '@puffly/game-renderer';
+import { createViewport } from '@puffly/game-scene';
 import {
   deriveJourney,
   deriveReduction,
@@ -54,6 +47,26 @@ import {
   targetForAffordance,
 } from './useInputAdapters';
 import type { ScenePalette, SkinPalette } from '@puffly/game-core';
+
+/**
+ * What the scene is told about looks. It used to be the Canvas renderer's own settings type — the
+ * name and the field set are kept because the scene wants exactly these seven answers, and
+ * `realism-row.test.ts` reads the Pick union on `rendererLook` as the wiring proof.
+ */
+export interface RendererSettings {
+  reducedMotion: boolean;
+  quality: QualityMode;
+  /** §64: raised smoke opacity and a lit rim on the rod, for a readable silhouette. */
+  contrast: ContrastMode;
+  /** S6's 写实度 row (0 = 卡通, 1 = 写实, 0.8 = the deck's own split). */
+  realism: number;
+  /** The applied skin's palette, or null for the content's own colours (§47). */
+  skin: SkinPalette | null;
+  /** The player's own room colours, or null to keep the place's own. */
+  customBackground: ScenePalette | null;
+  /** §63: nothing can be heard, so the discrete cues have to be seen. */
+  visualCues: boolean;
+}
 import { HINT_KEYS, createI18n, resolveLocale, type I18n, type LocaleCode } from '../i18n';
 import { anchorAtLight } from '../anchor';
 import { isOverLimit } from '../limit';
@@ -119,6 +132,19 @@ const BREAK_WRITE_MS = 1500;
 const CATCH_UP_MAX_MS = 8 * 60_000;
 /** Keep the canvas from costing more than it can show. */
 const MAX_DPR = 3;
+
+/**
+ * The pixel-ratio cap the interface has always promised (§54): 2 on a finger, 3 on a cursor.
+ * Exported because the scene canvas is the only canvas now, and it has to take the same medicine —
+ * an uncapped 3x backing store on a phone is exactly the cost this rule exists to refuse.
+ */
+export function preferredDpr(): number {
+  return Math.min(
+    window.devicePixelRatio || 1,
+    matchMedia('(pointer: coarse)').matches ? MAX_DPR_COARSE : MAX_DPR,
+  );
+}
+
 /** A phone at 3x is 3.4 million pixels of smoke per frame; it cannot show the difference. */
 const MAX_DPR_COARSE = 2;
 
@@ -244,7 +270,7 @@ export interface Puffly {
   storageDegraded: Ref<boolean>;
   /** Whether a vibration motor exists to be asked for one (§30). */
   canVibrate: Ref<boolean>;
-  attach(canvas: HTMLCanvasElement): Promise<void>;
+  attach(surface: HTMLElement): Promise<void>;
   /**
    * Drive the scene from a control instead of a finger on it: the same input the space bar sends,
    * aimed at the same anchor (§65). A pill that faked the gesture would be the one thing §28
@@ -252,7 +278,7 @@ export interface Puffly {
    */
   gesture(kind: 'hold' | 'tap' | 'release'): void;
   /**
-   * What the renderer is being told about looks — reduced motion, quality, contrast, realism, the
+   * What the scene is being told about looks — reduced motion, quality, contrast, realism, the
    * skin's palette. The 3D stage consumes the same bursts with the same look, so it reads this
    * rather than assembling a second set of the same six fields.
    */
@@ -382,15 +408,12 @@ export function createPuffly(): Puffly {
   };
 
   let engine: GameEngine | null = null;
-  let renderer: PufflyRenderer | null = null;
   let audio: AudioBridge | null = null;
   let persistence: Persistence | null = null;
   let sessions: Session[] = [];
   let stop: (() => void)[] = [];
   let raf = 0;
   let lastFrameMs = 0;
-  /** ms carried into the next paint, so an idle-throttled frame still advances the scene by its own age. */
-  let paintMs = 0;
   /**
    * Wall time the frame loop already accounted for while the page was hidden. A desktop tab that
    * is merely throttled keeps calling `requestAnimationFrame` at 1 Hz, and those frames are real
@@ -417,7 +440,7 @@ export function createPuffly(): Puffly {
     content.bundle.skins.find((skin) => skin.id === settings.value.skin)?.palette ?? null;
 
   /**
-   * One place assembles what the renderer is told. Three call sites used to spell four fields out
+   * One place assembles what the scene is told. Three call sites used to spell four fields out
    * by hand, which is how a fifth field gets applied by the loop and forgotten by the resize.
    */
   const rendererSettings = (
@@ -438,7 +461,7 @@ export function createPuffly(): Puffly {
     realism: settings.value.realism,
     skin: skinPalette(),
     customBackground: settings.value.customBackground,
-    // The same flag the renderer is handed on the summary beat — one value, or the 3D layer's
+    // The same flag the scene reads on the summary beat — one value, or its
     // accents would answer a different question than the canvas's.
     visualCues: cuesAreVisual,
   });
@@ -446,7 +469,6 @@ export function createPuffly(): Puffly {
   const applyEffectiveQuality = (): void => {
     const quality = effectiveQuality();
     engine?.setSettings({ ...settings.value, quality });
-    renderer?.setSettings(rendererSettings(quality));
   };
 
   /**
@@ -594,8 +616,8 @@ export function createPuffly(): Puffly {
   /**
    * Everyone else who wants the engine's events.
    *
-   * The 3D stage consumes the same bursts the 2D renderer does — same `intakeBurst`, same pool,
-   * same look — and this is how it hears about them. One stream, two renderers, no second copy of
+   * The scene consumes the engine's bursts through the same `intakeBurst` the painted layer used
+   * (same pool, same look), and this is how it hears about them — one stream, no second copy of
    * what a burst is.
    */
   const eventListeners = new Set<(event: EngineEvent) => void>();
@@ -605,7 +627,6 @@ export function createPuffly(): Puffly {
   }
 
   const handleEngineEvent = (event: EngineEvent): void => {
-    renderer?.handleEvent(event);
     for (const listener of eventListeners) listener(event);
     const state = engine?.getState();
     if (audio && state) audio.handle(event, state);
@@ -640,7 +661,7 @@ export function createPuffly(): Puffly {
   };
 
   /**
-   * The last cue channel the renderer was told to use. This is its only writer — the renderer
+   * The last cue channel the scene was told to use. This is its only writer — the scene
    * starts on `false`, the same value, so the two can never disagree about who is in charge.
    */
   let cuesAreVisual = false;
@@ -669,22 +690,6 @@ export function createPuffly(): Puffly {
     // dropped frame must not slow a burning rod — and the skipped time is carried into the next
     // paint, so a puff that is still there when the scene wakes up moves at its own speed and not
     // in slow motion.
-    paintMs += dt;
-    if (
-      renderer !== null &&
-      shouldPaint(
-        {
-          sessionActive: live.ui.sessionActive,
-          lit: live.cigarette.ember.lit || live.lighter.flame > 0.01,
-          particles: renderer.particleCount(),
-          idleMs: live.ui.idleMs,
-        },
-        paintMs,
-      )
-    ) {
-      renderer.render(live, paintMs);
-      paintMs = 0;
-    }
     // Continuous beds follow the state every frame; cues arrive as events (§26, §27).
     audio?.sync(live);
 
@@ -698,7 +703,6 @@ export function createPuffly(): Puffly {
       const visual = summary.value.cueChannel === 'visual';
       if (visual !== cuesAreVisual) {
         cuesAreVisual = visual;
-        renderer?.setSettings({ visualCues: visual });
       }
       if (engine?.getState().ui.sessionActive) persistBreak();
       const state = engine.getState();
@@ -709,15 +713,15 @@ export function createPuffly(): Puffly {
     raf = requestAnimationFrame(frame);
   };
 
-  const dprFor = (): number =>
-    Math.min(window.devicePixelRatio || 1, coarsePointer() ? MAX_DPR_COARSE : MAX_DPR);
+  const dprFor = (): number => preferredDpr();
 
-  const resize = (canvas: HTMLCanvasElement): void => {
+  const resize = (surface: HTMLElement): void => {
     // The stage's own box is the authority. On the desk the scene gives 260px to the data column,
-    // and a canvas measured off the window would slide underneath it.
-    const box = canvas.parentElement?.getBoundingClientRect();
-    const laidW = Math.round(box?.width || canvas.clientWidth || 640);
-    const laidH = Math.round(box?.height || canvas.clientHeight || 960);
+    // and a surface measured off the window would slide underneath it; the hit surface fills the
+    // stage, so its own rect *is* that box.
+    const box = surface.getBoundingClientRect();
+    const laidW = Math.round(box.width || 640);
+    const laidH = Math.round(box.height || 960);
     // On a phone the layout viewport can be taller than the visual one while the browser chrome
     // slides away, so `visualViewport` is the room the player actually has (§66) — it may take
     // space away from the stage, never hand the canvas more than the stage owns.
@@ -725,18 +729,13 @@ export function createPuffly(): Puffly {
     const cssWidth = visual === null ? laidW : Math.min(laidW, Math.round(visual.width));
     const cssHeight = visual === null ? laidH : Math.min(laidH, Math.round(visual.height));
     const dpr = dprFor();
-    canvas.width = Math.round(cssWidth * dpr);
-    canvas.height = Math.round(cssHeight * dpr);
-    canvas.style.width = `${cssWidth}px`;
-    canvas.style.height = `${cssHeight}px`;
     viewport.resize(cssWidth, cssHeight, dpr);
-    renderer?.setViewport(cssWidth, cssHeight, dpr);
     // The core owns hit-testing, so it has to know the same shape the canvas just became —
     // including how tall, because the chrome it must clear is measured in pixels.
     engine?.setStageAspect(viewport.aspect, viewport.stage.height);
   };
 
-  const attach = async (canvas: HTMLCanvasElement): Promise<void> => {
+  const attach = async (surface: HTMLElement): Promise<void> => {
     persistence = createPersistence();
     const loaded = await persistence.load(Date.now());
     settings.value = {
@@ -783,23 +782,7 @@ export function createPuffly(): Puffly {
       }
     }
 
-    const context = canvas.getContext('2d');
-    if (context) {
-      renderer = createCanvasRenderer({
-        ctx: context,
-        grainTile: createGrainTile(defaultSpriteFactory(), 128),
-        width: canvas.clientWidth || 640,
-        height: canvas.clientHeight || 960,
-        dpr: dprFor(),
-        settings: {
-          ...rendererSettings(),
-          // The loop below owns this from the first beat; starting where it starts means the two
-          // can never disagree about who is carrying the cues (§63).
-          visualCues: false,
-        },
-      });
-    }
-    resize(canvas);
+    resize(surface);
 
     // The very first aspect has to be in place before a pointer can be aimed at anything.
     engine?.setStageAspect(viewport.aspect, viewport.stage.height);
@@ -810,7 +793,7 @@ export function createPuffly(): Puffly {
 
     stop.push(game.on(handleEngineEvent));
 
-    const pointer = createPointerAdapter(canvas, game, () => ({
+    const pointer = createPointerAdapter(surface, game, () => ({
       cssWidth: viewport.cssWidth,
       cssHeight: viewport.cssHeight,
       stage: viewport.stage,
@@ -875,16 +858,16 @@ export function createPuffly(): Puffly {
     stop.push(() => document.removeEventListener('visibilitychange', onVisibility));
 
     if (typeof ResizeObserver === 'function') {
-      const observer = new ResizeObserver(() => resize(canvas));
-      observer.observe(canvas);
+      const observer = new ResizeObserver(() => resize(surface));
+      observer.observe(surface);
       stop.push(() => observer.disconnect());
     } else {
-      window.addEventListener('resize', () => resize(canvas));
+      window.addEventListener('resize', () => resize(surface));
     }
 
     // Mobile chrome sliding away changes the visual viewport without resizing any element, and
     // an orientation flip fires neither reliably (§66).
-    const onViewportShift = (): void => resize(canvas);
+    const onViewportShift = (): void => resize(surface);
     const visual = window.visualViewport;
     if (visual) {
       visual.addEventListener('resize', onViewportShift);
@@ -896,7 +879,6 @@ export function createPuffly(): Puffly {
     stop.push(() => {
       cancelAnimationFrame(raf);
       audio?.dispose();
-      renderer?.dispose();
     });
 
     recompute();
@@ -979,7 +961,6 @@ export function createPuffly(): Puffly {
       settings.value = { ...settings.value, ...patch };
       if (patch.quality === 'auto') autoTier = startingTier();
       engine?.setSettings({ ...settings.value, quality: effectiveQuality() });
-      renderer?.setSettings(rendererSettings());
       audio?.setSettings(settings.value);
       const root = document.documentElement;
       if (root) {

@@ -28,13 +28,12 @@ const PURE_PACKAGES = [
   'packages/game-statistics',
 ];
 const ADAPTER_PACKAGES = [
-  'packages/game-renderer',
+  // The 3D scene: TresJS + three/webgpu. It replaced the Canvas 2D renderer (2026-10-10), and its
+  // formulas moved in with it — the package is an adapter like the others: it may touch the
+  // platform, and it may not be imported by a pure package.
+  'packages/game-scene',
   'packages/game-audio',
   'packages/game-storage',
-  // The 3D scene (2026-10-09): TresJS + three/webgpu, the replacement for the Canvas 2D renderer.
-  // It is an adapter like the others — it may touch the platform, and it may not be imported by a
-  // pure package.
-  'packages/game-scene',
 ];
 
 /** Platform objects the pure layer may not reach for. Matched as uses, not as words in prose. */
@@ -78,7 +77,7 @@ const BANNED_IMPORT_PREFIXES = [
 
 /** The layering rule of SPEC.md §45: adapters are downstream of the core, never upstream. */
 const BANNED_PACKAGE_IMPORTS = [
-  '@puffly/game-renderer',
+  '@puffly/game-scene',
   '@puffly/game-audio',
   '@puffly/game-storage',
   '@puffly/web',
@@ -96,7 +95,7 @@ const FORBIDDEN_FOR_ADAPTERS = ['createEngine', 'replaySession', 'EngineOptions'
 const LANGUAGE_UNAWARE = [
   'packages/shared',
   'packages/game-core',
-  'packages/game-renderer',
+  'packages/game-scene',
   'packages/game-statistics',
 ];
 const LANGUAGE_READ = /\.language\b|\blocale\b|\brtl\b/gi;
@@ -355,7 +354,7 @@ describe('§73 architecture guards', () => {
       { label: 'tauri import', code: "import { invoke } from '@tauri-apps/api/core';" },
       {
         label: 'adapter import',
-        code: "import { createCanvasRenderer } from '@puffly/game-renderer';",
+        code: "import { createPufflyRenderer } from '@puffly/game-scene';",
       },
       { label: 'deep import', code: "import { stuff } from '@puffly/game-core/src/engine';" },
     ];
@@ -371,14 +370,6 @@ describe('§73 architecture guards', () => {
         "import type { Settings } from './types/settings';\nexport const x = 1;",
       ),
     ).toEqual([]);
-  });
-
-  it('the renderer is where platform APIs belong, and the guard can see them there', () => {
-    const code = sources('packages/game-renderer')
-      .map((file) => stripComments(readFileSync(file, 'utf8')))
-      .join('\n');
-    expect(/\bdocument\s*\./.test(code), 'sprite factory should still use document').toBe(true);
-    expect(/\bCanvasRenderingContext2D\b/.test(code)).toBe(true);
   });
 
   it.each(ADAPTER_PACKAGES)('%s depends only one way: core is not its servant', (dir) => {

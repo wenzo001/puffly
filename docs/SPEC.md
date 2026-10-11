@@ -652,7 +652,7 @@ scale
 比较两次跑动里渲染器**逐个索取**的 sprite 颜色（按下标对齐）：改之前 **60 片里 0 片换色**。
 现在烟羽在粒子出生那一刻就换掉烟雾类 burst 的颜色，材质类（`ember` 滤嘴、`ash` 灰、`impact` 托盘灰）
 保留 core 写给它们的颜色——皮肤可以改烟，不该把灰改成蓝色。
-判据：`packages/game-renderer/src/__tests__/plume-palette.test.ts`（4 条）。两条单点变异各自只红一条：
+判据：plume-palette.test.ts（2026-10-10 随 2D 光栅套件退役）（4 条）。两条单点变异各自只红一条：
 调用点不传 `plumeTint` → 只红"repaints the plume…"；去掉材质那道 kind 守卫 → 只红
 "leaves the ash its own material colour"。另两条是防自证的正对照（两种候选色相距 >30）与确定性对照
 （同一份调色板跑两遍 0 处不同）。
@@ -981,7 +981,7 @@ ambient_event
 A/B 为准。改前改后都还剩 ~134 的峰值，那不是抖：1 px 宽的雨线以 alpha 0.256 压在暗天上，扫过一粒像素
 本身就是三通道相加约 150 的变化 —— 那是要的运动。
 
-判据：`packages/game-renderer/src/__tests__/rain-fall.test.ts` 三条——单帧位移 ÷ 线长 < 0.4（实测最差
+判据：`packages/game-scene/src/__tests__/rain-fall.test.ts` 三条——单帧位移 ÷ 线长 < 0.4（实测最差
 0.124）；每帧像素落在 2..14 之间（冻住会红、抖回去也会红）；最后一条不读生成器，而是从 `drawRain` 真正
 落到画布上的像素里按列把相邻两帧配对，逐条要求"同一条线只是往下移了一点"（54/54 配上、0 条违例）。
 配对这件工具自己也要证：两帧里不许有两条线共用同一列——按整像素会撞 6 条，所以键是精确列。五次单点
@@ -1060,7 +1060,7 @@ sin 抖红一条。（第六次探针本身无效，作废：那次位移只依�
 法国露台 0.70、中国吸烟亭 0.75、院子 0.35、办公室前 0.40）**还没有搬进来**，是 #54 的活；
 **稿子里没有"网吧"**——用户口语点名的那一处在 12 格里找不到，需要他确认要不要额外加。
 
-判据：`tests/venue-and-smoke.test.ts` 四条。变异八次——alpha 系数去掉红 2 条、`spread` 钉成 1 红 1 条、
+判据：venue-and-smoke.test.ts（2026-10-10 随旧渲染层退役）四条。变异八次——alpha 系数去掉红 2 条、`spread` 钉成 1 红 1 条、
 `spread` 改成可以小于 1 红 1 条、换算改成 `clamp01(ventilation)`（不从密封端起算）红 4 条、山顶那行改 0.3
 红 1 条、新手房间那行改 0.3 红 2 条、把场所乘进 `smoke.dispersion` 红 1 条（那条正是反证：核心里不该有它）、
 中间某一行（楼梯间）改成 0.3 **不红**——这是有意的边界，只有两端被钉住，中间是可调的手感。
@@ -2076,7 +2076,7 @@ adaptive scaling
 复跑（不需要浏览器，rAF 不参与）：`npx vitest run packages/game-renderer`。
 修完之后 390×844 实测空隙 74.7px、锚点落在画出的盒子内。
 
-本轮补一条判据（`packages/game-renderer/src/__tests__/chrome-band.test.ts`）：**壳子的下沿家具是像素，不是比例。**
+本轮补一条判据（chrome-band.test.ts，2026-10-10 随 2D 光栅套件退役）：**壳子的下沿家具是像素，不是比例。**
 `CHROME_CLEAR_Y = 0.72` 是一条比例线，而按钮占的是"离底 74px + 高 58px"这 132 个像素，于是同一条线在不同高度上
 含义完全不同：390×844 的竖屏上它占舞台 17%，同一台手机横过来（844×390）它占 37%。拿 13 个窗口形状实测，
 横屏手机上**还没拿起来的那支烟伸到 y=288，而按钮从 y=258 就开始画**（烟灰缸到 300、烟盒到 256），
@@ -2108,7 +2108,7 @@ y 乘 `stage.height`（390×844 手机上就是 390 和 844 两个尺度），�
 `stageDistance(a, b, aspect)` 早就在按 aspect 修正，命中判定从头到尾都活在这个模型里，
 只有画的那一边没有。
 
-判据：`packages/game-renderer/src/__tests__/rod-anchor.test.ts` 四条。一次单点变异（把画杆改回
+判据：rod-anchor.test.ts（2026-10-10 随 2D 光栅套件退役）四条。一次单点变异（把画杆改回
 `rotate(angleDeg) + len(rodLength)`）红两条：角度差 0.284 rad（16.3°），画出来的远端离出烟点
 31.5 px。第三条断言额外要求"归一化角度和屏幕角度在这里确实差 0.1 rad 以上"，否则这条判据在方形窗口上
 会白拿一个绿。
@@ -2141,7 +2141,7 @@ y 乘 `stage.height`（390×844 手机上就是 390 和 844 两个尺度），�
 ScenePalette | null`（四层：天空上端、天空下端、地平线、前景剪影），走的是 `skin` 那条完全一样的路
 （`rendererSettings()` 一处组装 → `RendererSettings` → `applyBackground()` 与 `applySkin()` 并排）。
 
-三条不变量，都是照 `skin.test.ts` 的形状钉的（`custom-background.test.ts` 四条，三次变异各红
+三条不变量，都是照 skin.test.ts 的形状钉的（custom-background.test.ts 四条，三次变异各红
 1 / 1 / 2 条）：
 1. 只改这四层。`background.kind` 决定画面里有没有那道楼梯，`fog`/`grain` 是空气 —— 一个颜色选择
    能改到它们，就等于颜色变成了地形。
@@ -3119,7 +3119,7 @@ M11 shell 不再接线（1）、M12 那行写的是别的设置（1）。
 一起改读它；`tickEmber` 决定 `lit` / `temperature` 时**仍然用不抖的那个 total** —— 着不灭不能取决于
 一次骰子（§71）。音频切片因此多了 `flicker` 字段，按编译器数只有一处构造点需要跟。
 
-判据 `tests/ember-and-burn.test.ts` 四条，落在**能同时看见两个适配器的层**：burn bed 的目标值在五个
+判据 ember-and-burn.test.ts（2026-10-10 随旧渲染层退役）四条，落在**能同时看见两个适配器的层**：burn bed 的目标值在五个
 flicker 上等于 `emberPresence`（12 位小数）、图确实追上了它（bedLevel 0.6440 → 0.7560）、整帧墨迹按
 presence 走（每单位 +2.946）、以及一条源码扫描——两个适配器里不许再出现自己那份 `ember.brightness +`
 推导（带阳性对照）。四次单点变异分别红 2 / 3 / 2 / 2 条。**这轮判据自己错过一次**：图片那条起初写成
@@ -3142,7 +3142,7 @@ presence 走（每单位 +2.946）、以及一条源码扫描——两个适配�
 没有事件的帧 `ambient == resolveLighting()` 的基线（误差 1e-6），有阴影的帧等于 `base * (1 - shadow * SHADOW_SHARE)`
 （实测 0.340 → 0.292，shadow 0.203）。
 
-判据 `tests/world-and-picture.test.ts` 三条，三次单点变异各红自己那一条（阴影不折进 ambient / 灰尘不读
+判据 world-and-picture.test.ts（2026-10-10 随旧渲染层退役）三条，三次单点变异各红自己那一条（阴影不折进 ambient / 灰尘不读
 turbulence / 暗角不再跟 ambient 走）。
 
 **仍然没做，并且这次判断为不做**（第 4 条最后一处）。先把数数对：`WorldEventId` 有 **10** 个，
@@ -3300,7 +3300,7 @@ subtle ambient light
 这一节也管"软"是怎么来的：贴图自己的衰减，不是 `ctx.filter`。而烟雾样式的 `blur` 以前**没有任何读者**
 ——写进状态就结束了，于是五种烟在"糊不糊"这一维上画出来完全一样。现在它决定贴图的四条 alpha 曲线
 （`exp(-(r/σ)²)`，σ 随 blur 走），默认比原来更紧：原来那四条 stop 相当于 σ=0.56，现在 0.42 ——
-用户说的"没对上焦"正是这件事。判据 `sprite-focus.test.ts` 量的是烘焙出来的四条 alpha：单调递减、
+用户说的"没对上焦"正是这件事。判据 sprite-focus.test.ts（2026-10-10 随 2D 光栅套件退役）量的是烘焙出来的四条 alpha：单调递减、
 blur 越大则外半区的光越多、默认比旧曲线更紧，并且钉住渲染器真的把样式的 blur 传给了贴图。
 
 ---
@@ -4031,7 +4031,7 @@ Long-term vision
 | S21 皮肤实机屏 | 六套、只改四层、四套按支数解锁（40 / 120 / 260 / 420）、朱砂按集齐 | 与稿子逐一对齐 | `brief-conformance.test.ts` "gates each skin where the sheet says"；真机 cards:6 layers:4 locked:5 | 落 |
 | S22 烟盒实机屏 | 12 槽分三档、已收计数、集齐进度 | 档位记号 `·` / `••` / `✦`，计数与差多少盒都在 | `CollectionSheet.vue:255`；真机 "烟盒 0 / 12" | 落 |
 | S23 减量 | 12 / 20 今日上限、近 7 天日均、较上周同期、三个替代动作、不劝戒不断言健康 | 上限可自调且清空不受罚、日均与同期差值都落；三个替代动作被钉成"就是这三条、第四句教训不能出现"，并且从今天起**按一下就记一次**（只有当天的数，没有连胜、没有奖励、没有"还差几次"） | `reduction.test.ts` 八条（含 "the seven days carry the average the deck puts on the page"、"the alternatives stay the three the design names"、"counts a taken alternative instead of describing one"）；`substitutes.test.ts` 四条；`save.test.ts` 那格台账的四种坏条目；真机两条；本节「减量页那三行变成能按的」 | 落（计次这一半）；红线仍守住：不劝诫、不断言健康、第四句教训不出现 |
-| S24 场所 12 处 | 通风系数 0.05–0.90 直接改烟的消散；对照表 13 行 | 21 处场所，系数逐处给，稿子 13 行里 12 行对上 | `venue-and-smoke.test.ts`；真机 "场景 1 / 21" | 落（一处系数 = 偏，见下面第 3 条） |
+| S24 场所 12 处 | 通风系数 0.05–0.90 直接改烟的消散；对照表 13 行 | 21 处场所，系数逐处给，稿子 13 行里 12 行对上 | venue-and-smoke.test.ts（2026-10-10 随旧渲染层退役）；真机 "场景 1 / 21" | 落（一处系数 = 偏，见下面第 3 条） |
 
 ### 这轮对账新照出来的三条
 
@@ -5443,7 +5443,7 @@ HB 给图标加一道词闸（无字层就又没有了）、HC 条数在面板�
 **皮肤的全部通道就是那一个指针**：判据①不许皮肤出现第五个键（id / name / 四层 / 门槛 / 一个地方 id 之外
 多一个数就当场红，变异 SF 塞进 `burnScale: 0.9` 实测红），判据③钉住面板走的是玩家点地方时**同一个**
 `select({ environment })`（另开一条路就红）。⇒ 皮肤能改变的一切，恰好等于"玩家自己走进那个地方"能改变的
-一切，一分不多。地方本身改的是什么 —— `venue-and-smoke.test.ts` 那四条判的是烟**怎么散**（浓度、铺开宽度），
+一切，一分不多。地方本身改的是什么 —— venue-and-smoke.test.ts（2026-10-10 随旧渲染层退役）那四条判的是烟**怎么散**（浓度、铺开宽度），
 不是这支烟烧多久、几口、多热、多少灰。
 
 **这里不写的那条断言**：我没有写"同一支烟在两个地方烧得一模一样"。那句话要成立得单独量一遍，本片的判据
@@ -5628,3 +5628,17 @@ TresJS 场景 + 直点舞台的修复），比"看得见的小东西"大一级�
 提 minor 而不是 patch：发布面换了层 —— 无参 URL 从旧画层换到 TresJS + WebGPU 场景（`?scene=2d`
 是逃生口），这是玩家看得见的默认变化，不是修修补补；真机套件 135/135 背书（含「默认落地出帧」与
 「逃生口仍到画层」两格新判据）。
+
+
+**2D 层退役（2026-10-10，他拍板三件的收尾）**：`packages/game-renderer` 整个删除 —— 共享公式先按
+"纯/画"切开迁进 `packages/game-scene`（noise/intake/particles/viewport/effects 整文件迁走，
+weather/paint/backdrop 成新家，props/room 合并式承接），7 个"混着画"的源文件随墨退场；`apps/web`
+的 2D 路径与 `?scene=2d` 逃生口一并拆除，舞台的命中面交给新的 `.hit` 层（pointer 适配器、
+"点面板外收起"、套件的合成派发都改接它；场景画布依旧对指针失聪）。真机套件的像素助手改走
+**合成截图**（WebGPU 画布 `getImageData` 读不到），派发点改 `.hit`；DPR 上限（手指 2× / 光标 3×）
+补回到场景画布（`TresCanvas :dpr`）—— 此前只有旧画布吃这条例，场景画布在 3× 设备上会顶满，
+这是退役这一笔顺手修掉的一处产品回归。
+
+**版本号跟着走 0.4.0 → 0.5.0**（2D 层退役）：十处 `package.json` 加 lock；`npm ls --depth=0`
+全树 0.5.0；版本读取三条 grep 仍零命中。提 minor：仓库的渲染故事换了一层（一仓一界面），
+不是修补；真机套件与门禁背书见本轮提交。

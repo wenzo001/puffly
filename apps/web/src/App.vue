@@ -5,9 +5,9 @@ import { isScenePress } from './dismiss';
 import { ANCHOR_LOCALE, STATE_KEYS } from './i18n';
 import type { Destination } from './rail';
 import type { ArchiveFacts } from './composables/usePuffly';
-// Loaded only when the URL asks for the 3D stage: three + TresJS are ~420 KB gzip and the shipped
-// app must not carry them until the scene replaces the canvas. `defineAsyncComponent` is what keeps
-// that promise — importing the component statically put all of it in the entry chunk.
+// The scene is the interface, and it is still a lazy chunk: three + TresJS are ~420 KB gzip and
+// the first paint must not carry them (`defineAsyncComponent` is what keeps that promise —
+// importing the component statically put all of it in the entry chunk).
 const SceneStage = defineAsyncComponent(() => import('./components/SceneStage.vue'));
 import HudBar from './components/HudBar.vue';
 import CtaPill from './components/CtaPill.vue';
@@ -22,7 +22,9 @@ import { dimplePath } from './hintArt';
 /** The strip's own size in CSS pixels; the diagram is generated at it, never scaled into it. */
 const DIMPLE = { width: 44, height: 13, d: dimplePath(44, 13) };
 
-const canvas = ref<HTMLCanvasElement | null>(null);
+/** The scene's hit surface: the whole bare stage, under the chrome. The scene canvas above it is
+ * deaf to pointers (the mask in global.css), so a press on the scene reports this element. */
+const surface = ref<HTMLDivElement | null>(null);
 const game = createPuffly();
 /** The three sheets the rail and the head-up row can call up. The menu is gone: the rail is the menu. */
 type SheetName = 'none' | Destination;
@@ -103,7 +105,7 @@ watch(
 );
 
 onMounted(() => {
-  if (canvas.value) void game.attach(canvas.value);
+  if (surface.value) void game.attach(surface.value);
 });
 
 function openSheet(next: SheetName, nextSection: string | null = null): void {
@@ -129,15 +131,9 @@ function jumpToSection(next: string): void {
  * convenience into a broken gesture behind the panel. One press may therefore do both jobs — the
  * panel steps away and the scene answers as it always has.
  */
-/**
- * The 3D stage is the interface now: it mounts unless the URL asks for the painted layer.
- * `?scene=2d` stays as the escape hatch while the old renderer's pixels retire.
- */
-const useScene3d = new URLSearchParams(window.location.search).get('scene') !== '2d';
-
 function dismissOnScene(event: PointerEvent): void {
   if (sheet.value === 'none') return;
-  if (!isScenePress(canvas.value, event.target)) return;
+  if (!isScenePress(surface.value, event.target)) return;
   sheet.value = 'none';
   section.value = null;
 }
@@ -161,10 +157,10 @@ function dismissOnScene(event: PointerEvent): void {
     :data-affordance="summary.affordance"
     @pointerdown.capture="dismissOnScene"
   >
-    <canvas ref="canvas" tabindex="0" :aria-label="announced" />
-    <!-- 界面层默认就是 3D 场景（&gl=1 强制走 WebGL2 那条）；?scene=2d 是旧渲染层的逃生口。 -->
+    <!-- The scene's hit surface, under everything: a press that lands on the bare stage reports
+         this element, which is what every gesture and the sheet dismissal aim at. -->
+    <div ref="surface" class="hit" tabindex="0" :aria-label="announced" />
     <SceneStage
-      v-if="useScene3d"
       :aim="summary.aim"
       :stage-box="summary.stageBox"
       :prop-scale="summary.propScale"
@@ -267,10 +263,14 @@ function dismissOnScene(event: PointerEvent): void {
   }
 }
 
-canvas {
-  display: block;
-  width: 100%;
-  height: 100%;
+/*
+ * The scene's hit surface: fills the stage, sits under the chrome (later siblings paint above it),
+ * and above nothing at all — the scene canvas is deaf to pointers, so every bare-stage press lands
+ * here. It keeps the keyboard focus ring off the scene's own paint.
+ */
+.hit {
+  position: absolute;
+  inset: 0;
   outline: none;
 }
 

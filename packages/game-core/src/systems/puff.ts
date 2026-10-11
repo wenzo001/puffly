@@ -10,6 +10,7 @@ import { clamp, clamp01, lerp } from '@puffly/shared';
 import { PUFF, TIMING } from '../constants';
 import { emit, record, setState } from '../emit';
 import { SessionEventType } from '../types/events';
+import { pickLipAction, puffTierFor } from '../puffTier';
 import { exhaleBurst, puffBurst } from './emissions';
 import type { EngineRuntime } from '../runtime';
 
@@ -24,6 +25,11 @@ export function beginPuff(rt: EngineRuntime): void {
   // Cleared here rather than left for the release to overwrite: a draw in progress must never be
   // read as the one before it, and the exhale screen is the only reader of this field.
   puff.lastDraw = 0;
+  // §puffAnimations: the mouth has nine shapes, three to a tier, and a draw opens in the
+  // shallow one — the tier walks up below as the hold grows. Rolled every single time,
+  // including for a 品鉴型 that will never be shown a lip line, for the same reason the
+  // planned window is rolled: a kind or a preference must not fork the stream §71 replays.
+  puff.lipAction = pickLipAction(rt.rng, 'S', puff.lipAction).id;
   puff.intensity = clamp01(profile.intensityMin);
   rt.timers.puffMs = 0;
   // The rod's own window is rolled every single time, whether or not the player overrode it: the
@@ -49,6 +55,13 @@ export function tickPuff(rt: EngineRuntime, dtMs: number): void {
 
   rt.timers.puffMs += dtMs;
   puff.heldMs += dtMs;
+  // The tier is the held time and nothing else, so a longer press escalates in front of the
+  // player. The roll belongs to the crossing, not the tick: `heldMs - dtMs` is this tick's own
+  // input, so a replay of the same presses crosses the same lines and spends the same draws.
+  const tier = puffTierFor(puff.heldMs);
+  if (tier !== puffTierFor(puff.heldMs - dtMs)) {
+    puff.lipAction = pickLipAction(rt.rng, tier, puff.lipAction).id;
+  }
   const planned = Math.max(1, rt.timers.puffPlannedMs);
   // Two families of draw, both authored in content rather than branched on here: an inhaled one
   // keeps filling for as long as the hand holds it, sub-linearly, so a 2s hold is not twice a 1s
@@ -87,6 +100,10 @@ export function endPuff(rt: EngineRuntime): void {
 
   puff.active = false;
   puff.sinceReleaseMs = 0;
+  // The exhale's shape is the tier the press's own clock landed on, measured before `heldMs`
+  // resets. §puffAnimations: the breath is never random — the tier decides volume, layers, spread
+  // and rise time, and this is the only moment that tier is settled.
+  puff.lastTier = puffTierFor(puff.heldMs);
   // The one figure the exhale is read by, kept at the release: `intensity` starts fading on the next
   // step, and a reading of a draw that has ended must not move while its smoke is still on screen.
   puff.lastDraw = intensity;

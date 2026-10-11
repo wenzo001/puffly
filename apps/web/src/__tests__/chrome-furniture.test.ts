@@ -1,6 +1,6 @@
 /**
  * The core keeps a clearance line for the shell's bottom furniture, and that furniture is measured
- * in pixels, here, in CSS. These two checks are the seam: the constant must equal what the button
+ * in pixels, here, in CSS. These checks are the seam: the constant must equal what the button
  * actually paints, and the resize path must actually tell the core how tall the stage is.
  *
  * They live in the shell rather than in `stage.test.ts` because the pure layer may not read files
@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 import { CHROME_BAND_PX, CHROME_EDGE_PX } from '@puffly/game-core';
 
 const PILL = readFileSync(new URL('../components/CtaPill.vue', import.meta.url), 'utf8');
+const RAIL = readFileSync(new URL('../components/TabRail.vue', import.meta.url), 'utf8');
 const SHELL = readFileSync(new URL('../composables/usePuffly.ts', import.meta.url), 'utf8');
 
 describe('the chrome the core clears is the chrome the shell draws', () => {
@@ -33,5 +34,38 @@ describe('the chrome the core clears is the chrome the shell draws', () => {
         'viewport.stage.height',
       );
     }
+  });
+});
+
+/**
+ * §2 of `SmokeRitual-UI-Demo.html` gives the two bottom controls their widths in the same breath as
+ * their heights: `.btn` is `calc(100% - 48px)` inside a 390 phone — 342, the number the Demo itself
+ * writes out as the airflow strip's viewBox — and `.tabbar` is `padding: 14px 20px` around a capsule
+ * that fills it, so 350. Both were shrink-wrapped to their content here, which is why the scene's
+ * painted card kept coming out narrower than the Demo's button: `fillCard` mirrors the rect it is
+ * given, and the rect was wrong.
+ */
+describe('the two bottom controls are the Demo’s widths, not their content’s', () => {
+  it('the pill spans the phone with §2’s 24 px margins', () => {
+    expect(PILL).toContain('width: calc(100% - 48px)');
+    // The cap is the phone's own 342, so a desktop gets the phone's button rather than a banner.
+    expect(PILL).toContain('max-width: 342px');
+    expect(PILL).toContain('min-height: 62px');
+    expect(PILL).toContain('border-radius: 31px');
+    // Half of 62: the pill is a stadium, and §2's radius is derived from its height, not chosen.
+    expect(31 * 2).toBe(62);
+  });
+
+  it('the capsule spans the phone with §2’s 20 px margins and its items share it', () => {
+    expect(RAIL).toContain('width: calc(100% - 40px)');
+    expect(RAIL).toContain('max-width: 350px');
+    expect(RAIL).toContain('height: 62px');
+    expect(RAIL).toContain('border-radius: 32px');
+    // §2's `.item` is `flex: 1`; a min-width would let four labels shrink-wrap the capsule again.
+    const tab = RAIL.slice(RAIL.indexOf('.tab {'));
+    expect(tab, 'the tabs no longer share the capsule').toContain('flex: 1');
+    expect(tab, 'a min-width puts the shrink-wrap back').not.toContain('min-width: 6');
+    // §2 gives the item the capsule's own radius and lets the browser clamp it.
+    expect(tab, 'the item drifted off --r-capsule').toContain('border-radius: 32px');
   });
 });

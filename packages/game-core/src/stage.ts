@@ -46,7 +46,7 @@ export const CHROME_CLEAR_Y = 0.72;
  * of the window and the pill itself is 58px tall. The rail under it is shorter than that, so the
  * pill owns the band.
  */
-export const CHROME_BAND_PX = 74 + 58;
+export const CHROME_BAND_PX = 74 + 62;
 
 /** A prop flush against the edge of a button still reads as one object with it; this is the gap. */
 export const CHROME_EDGE_PX = CHROME_BAND_PX + 12;

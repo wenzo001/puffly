@@ -70,7 +70,7 @@ describe('§47/§73: the derivation layer stays platform-independent', () => {
   it('imports nothing from the adapters or a framework', () => {
     for (const forbidden of [
       '@puffly/game-storage',
-      '@puffly/game-renderer',
+      '@puffly/game-scene',
       '@puffly/game-audio',
       '@puffly/web',
       'vue',

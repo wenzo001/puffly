@@ -10,12 +10,15 @@
   --warm-gray: #7e746a;
   --soft-white: #f2ede6;
   --ember-orange: #ff8a3d;
-  --ember-core: #ffd696;
+  /* The Demo calls this one `--ember-soft`: 次级强调, the highlighted figure and the hint text. */
+  --ember-core: #ffb273;
   /* 冷色（减量/水）— named in the same table as the four above. */
   --cool-blue: #a8d4e0;
   /* Not the baseline's 次级文字: #7E746A on #0B0A09 is 4.3:1, and this token paints 15px labels,
      which §5.4 holds to AA. The design's own two clauses conflict here, and the readable one wins. */
   --smoke-gray: #c4c6cd;
+  /* §1's --text-2: 次级说明文字, 5.1:1 on the floor — the design's own corrected value. */
+  --text-2: #8a8078;
   --ash-gray: #7e7e82;
 
   --chrome-bg: color-mix(in oklab, var(--deep-charcoal) 82%, transparent);

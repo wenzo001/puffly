@@ -10,6 +10,7 @@ import type { Environment, SmokeCharacter, TimeOfDayId, WeatherId } from './cont
 import type { StageLayout } from '../stage';
 import type { WorldEventOccurrence } from './events';
 import type { Point } from './geometry';
+import type { LipActionId, PuffTierId } from '../puffTier';
 
 /**
  * SPEC.md §11 — the eleven lifecycle states.
@@ -119,6 +120,20 @@ export interface PuffState {
    */
   lastDraw: number;
   heldMs: number;
+  /**
+   * The lip action this draw is on — one of §puffAnimations' nine, drawn from the tier the
+   * held time has reached and never the one just shown. This is the only state the no-repeat
+   * rule needs: the tier itself is read off `heldMs`, and the action has to survive the draw
+   * ending, because the next roll is the next draw. `null` before the first one.
+   */
+  lipAction: LipActionId | null;
+  /**
+   * The tier the draw that just ended landed on, measured from its own held time. Held from the
+   * release until the next draw begins, the same way `lastDraw` is, because the exhale's *shape*
+   * (§puffAnimations: volume, layers, spread, rise time) is decided by the tier, and `heldMs` is
+   * already back to zero while that smoke is still on screen.
+   */
+  lastTier: PuffTierId;
   /** Since the previous release; drives `RESTING` and the exhale shape. */
   sinceReleaseMs: number;
   count: number;

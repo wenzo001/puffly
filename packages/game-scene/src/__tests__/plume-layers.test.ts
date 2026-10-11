@@ -303,24 +303,15 @@ describe('wiring (source reads — what they can and cannot prove is stated in e
   it('the frame hands the pool the venue it is drawing', () => {
     // Like the table-plane read in `spark-bounce.test.ts`: this proves the one production call site
     // names this frame's own 通风系数, not a constant. That the draught then moves the curls is judged
-    // behaviourally above.
-    const renderer = readFileSync(new URL('../renderer.ts', import.meta.url), 'utf8');
-    const call = /pool\.update\([^;]*\);/s.exec(renderer);
-    expect(call, 'the renderer no longer integrates the pool').not.toBeNull();
-    expect(call?.[0]).toContain('ventDraught(state.environment.ventilation)');
-  });
-
-  it('a 烟雾 tier change carries the layers it is copying', () => {
-    // The pool is rebuilt when the 烟雾 row changes — and the auto tier does it on its own the frame
-    // the scene starts dropping — particle by particle, and the copy used to name
-    // only the §15 fields: `swing`, `delay` and now `layer` fell to the pool's defaults, which handed
-    // the air back as an unlayered lump the moment the row was touched. A source read, because the
-    // renderer keeps the rebuilt pool to itself.
-    const renderer = readFileSync(new URL('../renderer.ts', import.meta.url), 'utf8');
-    const copy = /resized\.spawn\(\{[\s\S]*?\}\)/.exec(renderer);
-    expect(copy, 'the renderer no longer keeps the air in the frame').not.toBeNull();
-    for (const field of ['swing', 'layer', 'delay']) {
-      expect(copy?.[0], `the resize copy drops ${field}`).toContain(`particle.${field}`);
-    }
+    // behaviourally above. The call site moved with the scene (2026-10-10): it is `SceneStage`'s
+    // frame now, and the tier-copy half of this describe retired with the painted renderer — the
+    // scene keeps one pool for the life of the layer, so there is no rebuilt copy to guard.
+    const scene = readFileSync(
+      new URL('../../../../apps/web/src/components/SceneStage.vue', import.meta.url),
+      'utf8',
+    );
+    const call = /pool\.update\([^;]*\);/s.exec(scene);
+    expect(call, 'the scene no longer integrates the pool').not.toBeNull();
+    expect(call?.[0]).toContain('ventDraught(state?.environment.ventilation ?? 1)');
   });
 });

@@ -13,6 +13,7 @@ import type { CopyKey } from '../i18n';
 import type { Puffly } from '../composables/usePuffly';
 import { useLongPress } from '../composables/useLongPress';
 import { forceReading } from '../forceArt';
+import DemoGlyph from './DemoGlyph.vue';
 
 const props = defineProps<{ game: Puffly }>();
 const emit = defineEmits<{ shelf: []; break: []; archive: []; archiveClose: [] }>();
@@ -28,122 +29,159 @@ const copy = computed(() => props.game.copy.value);
 const summary = computed(() => props.game.summary.value);
 const fresh = computed(() => summary.value.fresh.length);
 
-/** The ring's arc: a circle of radius 15 is 94.25 units around. */
-const CIRCUMFERENCE = 94.25;
+/** The ring's arc: §2's ring is a circle of radius 17 in a 40×40 box, 106.81 units around. */
+const CIRCUMFERENCE = 106.81;
 
 const seconds = (ms: number): string => `${(ms / 1000).toFixed(1)}s`;
 
-/** The marks the cabinet already uses for these objects, so one shape means one thing. */
-const MARKS = { rod: '—', lighter: '△', tray: '○', out: '◌' } as const;
+/**
+ * The symbol the ring wears on each screen, as the Demo names them: the rod on 待机, the flame on
+ * 点燃, the three airflow lines while a draw runs, the swirl with its dot on 吐烟, the three fading
+ * ash lines on 磕灰. `text` is the escape hatch for the two states the five screens do not draw
+ * (out / over limit), which keep their old quiet mark.
+ */
+type RingGlyph = 'rod' | 'flame' | 'airflow' | 'swirl-dot' | 'tray-lines';
 
 /**
- * The row reads the break in three places — the ring's shape, the number you can press, and the
- * smaller number beside it — and each one has to say what it is on its own, because a bare
- * "80%" in a screen reader is not a reading of anything.
+ * One figure in the row: a measurement the simulation already makes, the copy key that names it to a
+ * screen reader, whether it is the button into the break's own sheet, and whether it wears the accent.
  */
-const reading = computed(() => {
-  const state = summary.value.state;
-  const clock = summary.value.clock;
-  if (!state) {
-    return {
-      mark: MARKS.rod,
-      value: '',
-      fraction: 0,
-      primary: clock,
-      secondary: '',
-      label: copy.value.say('a11y.hud.rail'),
-      numLabel: 'a11y.hud.clock' as CopyKey,
-      altLabel: null,
+interface Figure {
+  key: CopyKey;
+  value: string;
+  press: boolean;
+  accent: boolean;
+}
+
+/**
+ * The head-up row in the anatomy §2 of the Demo fixes for all five core-loop screens: one ring
+ * wearing *that screen's own symbol* — never a number — and beside it only the figures that screen
+ * asks for. Three on 待机 (`4 02:14 78%`), two on 点燃 (`0.4s 78%`) and on 吸入
+ * (`6 / 12 3.2s`), one on 吐烟 (`62`), two on 磕灰 (`9mm 2.1g`).
+ *
+ * Icons and Arabic digits only (§9.2): the numbers are the same in every language, and the nouns
+ * they need live in `aria-label`, because a screen reader is allowed a sentence and an eye on a
+ * phone at 2am is not. Nothing here is rounded up into a claim.
+ */
+const reading = computed(
+  (): { glyph: RingGlyph; label: CopyKey; fraction: number; figures: Figure[] } => {
+    const state = summary.value.state;
+    const clock: Figure = {
+      key: 'a11y.hud.clock',
+      value: summary.value.clock,
+      press: true,
+      accent: false,
     };
-  }
-  const rod = state.cigarette;
-  const left = `${Math.round(rod.rodRemaining * 100)}%`;
-  switch (summary.value.phase) {
-    case 'light': {
-      if (rod.state === 'LIGHTING') {
+    if (!state) return { glyph: 'rod', label: 'a11y.hud.rail', fraction: 0, figures: [clock] };
+    const rod = state.cigarette;
+    const remaining: Figure = {
+      key: 'a11y.hud.remaining',
+      value: `${Math.round(rod.rodRemaining * 100)}%`,
+      press: false,
+      accent: true,
+    };
+    switch (summary.value.phase) {
+      case 'light': {
+        if (rod.state === 'LIGHTING') {
+          return {
+            glyph: 'flame',
+            label: 'a11y.hud.hold',
+            fraction: state.lighter.flame,
+            figures: [
+              {
+                key: 'a11y.hud.hold',
+                value: seconds(state.lighter.heldMs),
+                press: true,
+                accent: false,
+              },
+              remaining,
+            ],
+          };
+        }
+        // Which stick of the day this is — 1 before the first one has been saved, not 0. The ring
+        // wears the rod here, so the count has to stand in the row with the other two.
+        const sticks = (props.game.today.value?.sessionCount ?? 0) + 1;
         return {
-          mark: MARKS.lighter,
-          value: '',
-          fraction: state.lighter.flame,
-          primary: seconds(state.lighter.heldMs),
-          secondary: left,
-          label: copy.value.say('a11y.hud.hold'),
-          numLabel: 'a11y.hud.hold' as CopyKey,
-          altLabel: 'a11y.hud.remaining' as CopyKey,
+          glyph: 'rod',
+          label: 'a11y.hud.sticks',
+          fraction: rod.rodRemaining,
+          figures: [
+            { key: 'a11y.hud.sticks', value: String(sticks), press: false, accent: false },
+            {
+              key: 'a11y.hud.burned',
+              value: summary.value.burned,
+              press: true,
+              accent: false,
+            },
+            remaining,
+          ],
         };
       }
-      // Which stick of the day this is — 1 before the first one has been saved, not 0.
-      const sticks = (props.game.today.value?.sessionCount ?? 0) + 1;
-      return {
-        mark: '',
-        value: String(sticks),
-        fraction: rod.rodRemaining,
-        // 已燃 next to 剩余: the two numbers have to be about the same object, which is the
-        // consistency the deck's own audit page checked when it caught 「剩余 52% 与 03:12 不匹配」.
-        // The session countdown is a different clock and belongs to the idle row, not this pair.
-        primary: summary.value.burned,
-        secondary: left,
-        label: copy.value.say('a11y.hud.sticks'),
-        numLabel: 'a11y.hud.burned' as CopyKey,
-        altLabel: 'a11y.hud.remaining' as CopyKey,
-      };
-    }
-    case 'puff': {
-      // 吐烟那一相 (S4): the ring wears the strength of the draw that just ended — 「环内力度 62」 —
-      // and the bar under the pill is its legend (三道丝线 ↔ 三层云朵), which is why this number needs
-      // no unit and no word. Both surfaces call the same `forceReading`, so the digits and the knob
-      // cannot drift apart; the count returns as soon as the next draw starts.
-      const exhale = forceReading(rod);
-      if (exhale !== null) {
+      case 'puff': {
+        // 吐烟那一相 (S4): the row carries the strength of the draw that just ended and nothing
+        // else — 「62」 with no unit and no word — because that figure is the answer to 「这一口抽了
+        // 多久」 and a second number next to it competes with it. Both surfaces call the same
+        // `forceReading`, so the digits and the bar under the pill cannot drift apart.
+        const exhale = forceReading(rod);
+        if (exhale !== null) {
+          return {
+            glyph: 'swirl-dot',
+            label: 'a11y.hud.force',
+            fraction: rod.lengthRemaining,
+            figures: [{ key: 'a11y.hud.force', value: String(exhale), press: true, accent: false }],
+          };
+        }
         return {
-          mark: '≡',
-          value: String(exhale),
-          fraction: rod.lengthRemaining,
-          primary: `${rod.puff.count} / ${rod.readouts.puffsTarget}`,
-          secondary: left,
-          label: copy.value.say('a11y.hud.force'),
-          numLabel: 'a11y.hud.puffs' as CopyKey,
-          altLabel: 'a11y.hud.remaining' as CopyKey,
+          glyph: 'airflow',
+          label: 'a11y.hud.puffs',
+          fraction: rod.puff.active ? rod.puff.progress : rod.lengthRemaining,
+          figures: [
+            {
+              key: 'a11y.hud.puffs',
+              value: `${rod.puff.count} / ${rod.readouts.puffsTarget}`,
+              press: true,
+              accent: false,
+            },
+            rod.puff.active
+              ? {
+                  key: 'a11y.hud.hold',
+                  value: seconds(rod.puff.heldMs),
+                  press: false,
+                  accent: true,
+                }
+              : remaining,
+          ],
         };
       }
-      return {
-        mark: '≡',
-        value: '',
-        fraction: rod.puff.active ? rod.puff.progress : rod.lengthRemaining,
-        primary: `${rod.puff.count} / ${rod.readouts.puffsTarget}`,
-        secondary: rod.puff.active ? seconds(rod.puff.heldMs) : left,
-        label: copy.value.say('a11y.hud.puffs'),
-        numLabel: 'a11y.hud.puffs' as CopyKey,
-        altLabel: (rod.puff.active ? 'a11y.hud.hold' : 'a11y.hud.remaining') as CopyKey,
-      };
+      case 'tray':
+        return {
+          glyph: 'tray-lines',
+          label: 'a11y.hud.ash',
+          fraction: rod.ash.ratio,
+          figures: [
+            {
+              key: 'a11y.hud.ash',
+              value: `${rod.readouts.ashMm}mm`,
+              press: true,
+              accent: false,
+            },
+            {
+              // 拍板 ②: the gram figure that belongs on the ashtray is what the ashtray is holding
+              // (稿子 S5 的 2.1 g), not what this stick has made. One column of a real stick is
+              // hundredths of a gram, so this reads to two decimals rather than rounding a live
+              // number away to `0g`.
+              key: 'a11y.hud.trayMass',
+              value: `${Math.round(state.ashtray.grams * 100) / 100}g`,
+              press: false,
+              accent: true,
+            },
+          ],
+        };
+      default:
+        return { glyph: 'rod', label: 'a11y.hud.clock', fraction: 0, figures: [clock] };
     }
-    case 'tray':
-      return {
-        mark: MARKS.tray,
-        value: '',
-        fraction: rod.ash.ratio,
-        primary: `${rod.readouts.ashMm}mm`,
-        // 拍板 ②: the gram figure that belongs on the ashtray is what the ashtray is holding (稿子 S5
-        // 的 2.1 g), not what this stick has made. One column of a real stick is hundredths of a gram,
-        // so this reads to two decimals rather than rounding a live number away to `0g`.
-        secondary: `${Math.round(state.ashtray.grams * 100) / 100}g`,
-        label: copy.value.say('a11y.hud.ash'),
-        numLabel: 'a11y.hud.ash' as CopyKey,
-        altLabel: 'a11y.hud.trayMass' as CopyKey,
-      };
-    default:
-      return {
-        mark: MARKS.out,
-        value: '',
-        fraction: 0,
-        primary: clock,
-        secondary: '',
-        label: copy.value.say('a11y.hud.clock'),
-        numLabel: 'a11y.hud.clock' as CopyKey,
-        altLabel: null,
-      };
-  }
-});
+  },
+);
 
 /**
  * S11's desk row: the five figures a window has room to keep standing at once. The phone reveals
@@ -198,45 +236,51 @@ const desk = computed((): Array<{ key: CopyKey; value: string; press: boolean }>
       @pointerenter="mark.onPointerEnter"
       @click="mark.onClick"
     >
-      <span aria-hidden="true">{{ MARKS.rod }}</span>
+      <DemoGlyph tone="hud" :size="20" name="rod" />
       <!-- Unread unlocks: the only reason this row ever asks for attention. -->
       <span v-if="fresh > 0" class="badge" aria-hidden="true" />
     </button>
 
-    <span class="ring" role="img" :aria-label="reading.label">
-      <svg viewBox="0 0 36 36" aria-hidden="true">
-        <circle class="track" cx="18" cy="18" r="15" />
+    <span class="ring" role="img" :aria-label="copy.say(reading.label)">
+      <svg viewBox="0 0 40 40" aria-hidden="true">
+        <circle class="track" cx="20" cy="20" r="17" />
         <circle
           class="arc"
-          cx="18"
-          cy="18"
-          r="15"
+          cx="20"
+          cy="20"
+          r="17"
           :stroke-dasharray="`${(reading.fraction * CIRCUMFERENCE).toFixed(2)} ${String(CIRCUMFERENCE)}`"
         />
       </svg>
-      <b v-if="reading.value !== '' && !summary.overLimit" class="digits">{{ reading.value }}</b>
-      <span v-else class="mark" aria-hidden="true">{{
-        summary.overLimit ? '◇' : reading.mark
-      }}</span>
+      <!-- The screen's own §2 symbol; the over-limit diamond is the one mark the five screens
+           do not draw, so it stays text. -->
+      <span v-if="summary.overLimit" class="mark" aria-hidden="true">◇</span>
+      <DemoGlyph v-else class="mark" :name="reading.glyph" tone="hud" :size="26" />
     </span>
 
     <!-- The numbers are the way into the break's own sheet: the count you can see is the
-         button, so there is no fourth tab that only duplicates it. -->
-    <button
-      class="num"
-      data-hook="break"
-      :aria-label="copy.say(reading.numLabel)"
-      @click="emit('break')"
-    >
-      {{ reading.primary }}
-    </button>
-    <span
-      v-if="reading.secondary !== '' && reading.altLabel !== null"
-      class="num alt"
-      role="img"
-      :aria-label="copy.say(reading.altLabel)"
-      >{{ reading.secondary }}</span
-    >
+         button, so there is no fourth tab that only duplicates it. Which figures are on show is
+         the screen's own set — §2 keeps three on 待机 and one on 吐烟. -->
+    <template v-for="figure in reading.figures" :key="figure.key">
+      <button
+        v-if="figure.press"
+        class="num"
+        data-hook="break"
+        :class="{ alt: figure.accent }"
+        :aria-label="copy.say(figure.key)"
+        @click="emit('break')"
+      >
+        {{ figure.value }}
+      </button>
+      <span
+        v-else
+        class="num"
+        :class="{ alt: figure.accent }"
+        role="img"
+        :aria-label="copy.say(figure.key)"
+        >{{ figure.value }}</span
+      >
+    </template>
 
     <!-- S11's five, on a width that has room for them. Each figure opens the break's own sheet,
          because a number you cannot ask about is decoration. -->
@@ -302,8 +346,8 @@ const desk = computed((): Array<{ key: CopyKey; value: string; press: boolean }>
 
 .ring {
   position: relative;
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   display: grid;
   place-items: center;
   flex: none;
@@ -318,16 +362,17 @@ const desk = computed((): Array<{ key: CopyKey; value: string; press: boolean }>
   transform: rotate(-90deg);
 }
 
+/* 22%, not one shade less: below it the player cannot see how much of the break is left. */
 .track {
   fill: none;
-  stroke: color-mix(in oklab, var(--soft-white) 16%, transparent);
-  stroke-width: 2.4;
+  stroke: color-mix(in oklab, var(--soft-white) 22%, transparent);
+  stroke-width: 3;
 }
 
 .arc {
   fill: none;
   stroke: var(--ember-orange);
-  stroke-width: 2.4;
+  stroke-width: 3;
   stroke-linecap: round;
   transition: stroke-dasharray 120ms linear;
 }
@@ -341,9 +386,13 @@ const desk = computed((): Array<{ key: CopyKey; value: string; press: boolean }>
   line-height: 1;
 }
 
+/* §1.2's 页头读数 is 14/22 at weight 600, and the same design's `accessibility.minFontSize` says no
+   digit below 15 — the two documents disagree by one pixel, so the floor wins and the weight is
+   taken. The 14 is left on record rather than quietly applied: see the ledger in §12 of the design. */
 .num {
   color: var(--soft-white);
   font-size: calc(15px * var(--text-scale));
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
   /* The cell is a button as often as it is a label, so it must look like neither. */

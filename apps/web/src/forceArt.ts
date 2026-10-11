@@ -1,36 +1,43 @@
 /**
- * 力度对照图 — the exhale reading from 稿子 S4: 「力度条本身就是对照图：左端是细雾三道丝线图标，
- * 右端是浓团三层云朵图标，中间滑杆，零文字」.
+ * 力度条 — the exhale reading from §2's S4 screen of `SmokeRitual-UI-Demo.html`.
  *
- * The deck struck the two Chinese labels that used to sit at the ends of the bar (「小口 · 薄雾」 and
- * 「大口 · 浓团」) and put the shapes they named in their place, so the bar is its own legend: three
- * hairlines at one end, three lobes of cloud at the other, a knob where the draw landed. Nothing here
- * is a word, and nothing here is a control — the press owns the draw (2026-10-08 拍板 ①), so this only
- * ever reports the one the finger just took.
+ * The Demo's screen draws one 342 × 12 bar: an 8 px rounded track in rgba(255,255,255,.05), the
+ * draw's own share filled in rgba(255,138,61,.30), and a 3 px cream crest in rgba(255,217,160,.55).
+ * The width of the fill is the same single figure the head-up ring already reads (`62`), owned by
+ * `forceReading` — the number and the bar cannot come from two places.
  *
- * The figure has one owner on purpose: the ring's digits (S4 环内力度 62) and the knob are both read
- * from `forceReading`, because a number and a position that drift apart would be two readings of the
- * same draw. It is the core's `puff.lastDraw` rounded once here (§26), not recomputed per surface.
+ * The earlier deck iteration drew three silk threads and three cloud lobes at the ends; the Demo
+ * is the later, sole visual truth, so the bar is what ships now.
  */
 
 import { clamp01 } from '@puffly/shared';
 
-/** Where the track runs. The two pictograms own the margins outside it. */
-export const FORCE_TRACK = { start: 26, end: 92, y: 12 } as const;
-
-/** 三道丝线: three hairlines, longest nearest the track, so the thin end tapers away from it. */
-export const FORCE_THREADS = [
-  'M2 6c6-2 12 2 18 0',
-  'M2 12c5-2 10 2 15 0',
-  'M2 18c4-2 8 2 11 0',
-] as const;
-
-/** 三层云朵: three lobes overlapping into one mass, the largest one nearest the track. */
-export const FORCE_CLOUD = [
-  { cx: 100, cy: 14, r: 5 },
-  { cx: 107, cy: 11, r: 6 },
-  { cx: 113, cy: 15, r: 4.5 },
-] as const;
+/** The bar's own geometry, exactly the SVG the Demo places under the pill. */
+export const FORCE_BAR = {
+  width: 342,
+  height: 12,
+  track: {
+    x: 0,
+    y: 2,
+    height: 8,
+    radius: 4,
+    fill: 'rgba(255,255,255,0.05)',
+  },
+  fill: {
+    y: 2,
+    height: 8,
+    radius: 4,
+    /** rgba(255,138,61,.30) — the ember at 30 %. */
+    colour: 'rgba(255,138,61,0.30)',
+  },
+  crest: {
+    y: 2,
+    height: 3,
+    radius: 1.5,
+    /** rgba(255,217,160,.55) — the bright top edge on the filled portion. */
+    colour: 'rgba(255,217,160,0.55)',
+  },
+} as const;
 
 /** What the pill and the ring need to agree about: the rod's state and its last draw. */
 interface ForceSource {
@@ -39,24 +46,23 @@ interface ForceSource {
 }
 
 /**
- * The draw the player just took, as the 0–100 figure the deck shows, or `null` when the rod is not in
- * the window the smoke is leaving.
+ * The draw the player just took, as the 0–100 figure the S4 screen reads, or `null` when the rod is
+ * not in the window the smoke is leaving.
  *
  * `RESTING` is that window: it is what the state machine derives for the `restSettleMs` after a
  * release, and a long column or a stub pre-empts it on purpose — one screen reads one news. The
- * settle length is the core's decision and is not re-timed here (§81).
+ * settle length is the core's decision and is not re-timed here.
  */
 export function forceReading(cigarette: ForceSource): number | null {
   if (cigarette.state !== 'RESTING') return null;
   const { lastDraw } = cigarette.puff;
   // Zero means "no draw has ended": a rod that was never breathed on, or one restored from a save,
-  // has nothing to report and must not show a knob pinned at the thin end.
+  // has nothing to report and must not show a fill pinned at the thin end.
   if (!(lastDraw > 0)) return null;
   return Math.round(clamp01(lastDraw) * 100);
 }
 
-/** Where the knob sits for a reading, in the band's own units. */
-export function forceKnobX(percent: number): number {
-  const fraction = clamp01(Math.max(0, percent) / 100);
-  return FORCE_TRACK.start + fraction * (FORCE_TRACK.end - FORCE_TRACK.start);
+/** How wide the filled portion is, in the bar's own 342 px. */
+export function forceFillWidth(percent: number): number {
+  return FORCE_BAR.width * clamp01(Math.max(0, percent) / 100);
 }
