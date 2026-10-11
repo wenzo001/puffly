@@ -63,6 +63,46 @@ const launchOptions =
     : ENGINE === 'chromium'
       ? { channel: 'chromium' }
       : {};
+
+/**
+ * Ask the app under test whether it answers at all, before driving anything at it.
+ *
+ * A missing or half-started server used to come back as an uncaught `page.goto:
+ * net::ERR_CONNECTION_REFUSED` thrown out of `openPhone`: one stack trace, zero checks printed, and
+ * exit **1** — the code this suite reserves for "a check failed". Those are different claims. A red
+ * check says the product is wrong; an unreachable app says nothing was proven, which is what exit 3
+ * under is for. This came up because CI's device job died inside three minutes (a full run takes
+ * about nine) leaving only a stack trace to read.
+ */
+// Asked with `node:http`, not `fetch`: this file's lint environment does not carry the Node 18+
+// globals, and one exit code is worth fewer globals than a config edit.
+const { request: httpGet } = URL_2D.startsWith('https:')
+  ? await import('node:https')
+  : await import('node:http');
+const serving = await new Promise((done) => {
+  const req = httpGet(URL_2D, { timeout: 8000 }, (response) => {
+    response.resume();
+    done(response.statusCode ?? 0);
+  });
+  req.on('error', () => done('no answer'));
+  req.on('timeout', () => {
+    req.destroy();
+    done('timed out');
+  });
+  // `http.request` does not send until `end` is called (unlike `http.get`, and unlike `fetch`).
+  // Without this line the probe waits the full 8 s and reports a live server as timed out.
+  req.end();
+});
+if (typeof serving !== 'number' || serving >= 400) {
+  console.error(
+    `nothing usable is serving ${URL_2D} (got ${String(serving)}).\n` +
+      'This suite drives a built app: `npm run build --workspace @puffly/web`, then\n' +
+      '`node tests/smoke/serve.mjs apps/web/dist <port> 127.0.0.1 /puffly/`.\n' +
+      'Not run, so nothing is proven.',
+  );
+  process.exit(3);
+}
+
 let browser;
 try {
   browser = await browserType.launch(launchOptions);
