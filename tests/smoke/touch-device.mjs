@@ -1770,6 +1770,105 @@ try {
     JSON.stringify(idle),
   );
 
+  // #154's other half. The symbol is in the row's DOM and its CSS numbers are pinned by
+  // `hud-glyphs.test.ts` — and both were green while the ring on screen was empty, because the old
+  // rule moved the mark without changing any of those numbers. Whether the mark lands *inside* the
+  // ring is a composited fact, so it is read off the painted pixels.
+  //
+  // Two ways the first version of this sample lied, both caught by running it:
+  //   - splitting ink by luminance alone counted the ring's own arc, the brightest thing in the box,
+  //     so the bounding box came back 36.5x36.5 — that is the ring, not the mark;
+  //   - the counter-example needed `!important`: scoped CSS compiles to `.ring svg[data-v-x]`
+  //     (specificity 0,2,1), which an injected `.ring svg` loses to. A lie that never applied gives
+  //     two identical readings, and identical readings look exactly like a passing check.
+  //
+  // Thresholds are fractions of the measured box, so resizing the ring cannot silently falsify this.
+  const ringEl = page.locator('.ring').first();
+  const ringBox = await ringEl.boundingBox();
+  const ringMark = async () => {
+    if (!ringBox) return null;
+    await wakeChrome(page, '.pill').catch(() => {});
+    const data = (await ringEl.screenshot()).toString('base64');
+    return page.evaluate(
+      async ({ image, cssWidth }) => {
+        const img = new Image();
+        img.src = 'data:image/png;base64,' + image;
+        await img.decode();
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        ctx.drawImage(img, 0, 0);
+        const px = ctx.getImageData(0, 0, img.width, img.height).data;
+        const half = cssWidth / 2;
+        const scale = img.width / cssWidth;
+        // The arc lives at 0.77-0.95 of the radius (measured); the hollow inside it is the mark's.
+        const disc = half * 0.65;
+        let ink = 0;
+        let sx = 0;
+        let sy = 0;
+        let arc = 0;
+        let arcR = 0;
+        for (let y = 0; y < img.height; y += 1) {
+          for (let x = 0; x < img.width; x += 1) {
+            const i = (y * img.width + x) * 4;
+            if (0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2] <= 90) continue;
+            const r = Math.hypot(x - img.width / 2, y - img.height / 2) / scale;
+            if (r > disc) {
+              arc += 1;
+              if (r > arcR) arcR = r;
+              continue;
+            }
+            ink += 1;
+            sx += x;
+            sy += y;
+          }
+        }
+        const mark =
+          document.querySelector('.ring svg.demo-glyph') ?? document.querySelector('.ring svg');
+        return {
+          ink,
+          arc,
+          arcR: +(arcR / half).toFixed(2),
+          errX: ink ? +((sx / ink / scale - half) / half).toFixed(3) : null,
+          errY: ink ? +((sy / ink / scale - half) / half).toFixed(3) : null,
+          transform: mark ? getComputedStyle(mark).transform : 'no mark',
+        };
+      },
+      { image: data, cssWidth: ringBox.width },
+    );
+  };
+  const centred = (s) =>
+    !!s && s.ink >= 20 && s.arc >= 20 && Math.abs(s.errX) <= 0.15 && Math.abs(s.errY) <= 0.15;
+
+  const placed = await ringMark();
+  check(
+    'S1: the ring wears its symbol *inside* the ring, in the pixels a player sees',
+    centred(placed),
+    JSON.stringify(placed),
+  );
+
+  const lie = await page.evaluate(() => {
+    const style = document.createElement('style');
+    style.id = 'puffly-ring-lie';
+    style.textContent = '.ring svg{transform:rotate(-90deg) !important}';
+    document.head.append(style);
+  });
+  void lie;
+  await page.waitForTimeout(350);
+  const rotated = await ringMark();
+  const restored = await page.evaluate(() => {
+    document.querySelector('#puffly-ring-lie')?.remove();
+    const mark =
+      document.querySelector('.ring svg.demo-glyph') ?? document.querySelector('.ring svg');
+    return mark ? getComputedStyle(mark).transform : 'no mark';
+  });
+  check(
+    'the same sample goes blind when the mark is rotated out of the ring, and only then',
+    !!rotated && rotated.ink < 20 && rotated.transform !== 'none' && restored === 'none',
+    JSON.stringify(rotated) + ' restored=' + restored,
+  );
+
   // The pill is a handle on the real gesture, not a picture of one: pressing it must do exactly
   // what a finger on the rod does (§28, §65).
   await tapAt(page.locator('.pill'));
