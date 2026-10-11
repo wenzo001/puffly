@@ -631,6 +631,10 @@ function onSceneReady(context: unknown): void {
       blending: THREE.AdditiveBlending,
     });
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
+    // Named because the browser check below reads these two by name: the pool's geometry was the
+    // one place the backdrop mixed px into a fraction field, and an anonymous quad cannot be
+    // pointed at from outside the page.
+    mesh.name = i === 0 ? 'pool-bloom' : 'pool-warm';
     mesh.visible = false;
     poolMaterials.push(material);
     poolMeshes.push(mesh);
@@ -1225,12 +1229,7 @@ function applyBackdrop(state: GameStateView | null): void {
     return;
   }
   root.visible = true;
-  const structure = backgroundStructure(
-    state,
-    box.value,
-    viewportWidthPx.value,
-    viewportHeightPx.value,
-  );
+  const structure = backgroundStructure(state, viewportWidthPx.value, viewportHeightPx.value);
   const size = frame.value;
 
   if (skyMesh !== null && skyColours !== null) {

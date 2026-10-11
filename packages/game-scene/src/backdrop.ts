@@ -9,7 +9,7 @@
  */
 
 import { mixRgb, type Rgb } from '@puffly/shared';
-import type { GameStateView } from '@puffly/game-core';
+import type { CigaretteStateId, GameStateView } from '@puffly/game-core';
 import { fbm2 } from './noise';
 import { interiorEdgeInk, skyPalette, type StageBoxFrac } from './room';
 
@@ -307,9 +307,95 @@ export interface BackgroundStructure {
   glows: StageGlowFrac[];
 }
 
+/**
+ * §2's warm pool, one row per screen of the Demo's core loop.
+ *
+ * The Demo paints the pool as the stage's own background, and its numbers move with the screen the
+ * frame is about: 待机 puts it on the table under the props (`90% 55% at 50% 78%`, 16 %), 点着 pulls it
+ * in onto the flame (`70% 45% at 50% 68%`, 22 %), 吸入 and 力度 lift it to the column
+ * (`80% 60% at 50% 40%`, 12 %, and `70% 50% at 50% 46%`, 9 %), 磕灰 drops it on the tray
+ * (`70% 50% at 50% 60%`, 10 %). Read straight out of `SmokeRitual-UI-Demo.html` on 2026-10-11: its
+ * phone stage is 388 × 575 px, the same box the app's stage element gets at 390 × 844, so these are
+ * the file's own fractions and not a translation of it.
+ *
+ * `rx` is a fraction of the box's width and `ry` of its height (CSS's own two-value size), and the
+ * falloff stop (62 % for the two table screens, 66 % for the three rod screens) lives in the sprite
+ * the scene builds — the two numbers are within a hair of each other and the profile is not a fact
+ * this table can carry.
+ */
+export const WARM_POOL = {
+  idle: { cx: 0.5, cy: 0.78, rx: 0.9, ry: 0.55, alpha: 0.16 },
+  light: { cx: 0.5, cy: 0.68, rx: 0.7, ry: 0.45, alpha: 0.22 },
+  puff: { cx: 0.5, cy: 0.4, rx: 0.8, ry: 0.6, alpha: 0.12 },
+  force: { cx: 0.5, cy: 0.46, rx: 0.7, ry: 0.5, alpha: 0.09 },
+  tray: { cx: 0.5, cy: 0.6, rx: 0.7, ry: 0.5, alpha: 0.1 },
+} as const;
+
+export type WarmPoolScreen = keyof typeof WARM_POOL;
+
+/**
+ * Which of the Demo's five screens this state is drawing.
+ *
+ * The three the Demo never framed continue the screen they visually sit in — a rod smouldering
+ * between draws is still the column, and putting it out / dropping it is still the tray — rather
+ * than inventing a sixth number.
+ */
+export function warmPoolScreen(state: CigaretteStateId): WarmPoolScreen {
+  if (state === 'LIGHTING') return 'light';
+  if (state === 'RESTING') return 'force';
+  if (state === 'ASH_READY') return 'tray';
+  if (state === 'PUFFING' || state === 'BURNING' || state === 'NEAR_END') return 'puff';
+  if (state === 'EXTINGUISHING' || state === 'EXTINGUISHED' || state === 'DISCARDED') return 'tray';
+  return 'idle';
+}
+
+/**
+ * §2's bloom, in the two sizes the Demo draws it.
+ *
+ * S1 puts a 280 × 170 ellipse (`closest-side, rgba(255,138,61,.20)`, blurred 26 px) over the table —
+ * `rx 140/388 / ry 85/575` of the stage box. S2, the frame with the lighter open, draws the same
+ * idea tighter and hotter: 190 × 190 at `.34`. So the bloom has two rows, and the one fact that
+ * picks between them is whether the rod is alight.
+ *
+ * Its *centre* stays the venue's key direction rather than the Demo's fixed spot, because the thirteen
+ * rooms each name a direction and the file draws only ever one of them; what the Demo anchors is the
+ * size and the strength.
+ */
+export const WARM_BLOOM = {
+  table: { rx: 140 / 388, ry: 85 / 575, alphaAtQuiet: 0.2 },
+  alight: { rx: 95 / 388, ry: 95 / 575, alphaAtQuiet: 0.34 },
+  /** ... and the Demo's own room is the one its numbers were read in: `ambient: 0.42`. */
+  quietAmbient: 0.42,
+} as const;
+
+export type WarmBloomRow = Exclude<keyof typeof WARM_BLOOM, 'quietAmbient'>;
+
+/**
+ * The row in effect.
+ *
+ * S2's hotter bloom is the frame with the lighter open and the rod at it, so the fact that picks the
+ * row is the rod being alight — from the strike until it is out. The screens the Demo drew without a
+ * glow at all (吸入 / 力度 / 磕灰) keep the alight row rather than switching the room's light off in
+ * the middle of a break, which the file never shows and would read as a flicker.
+ */
+export function warmBloomScreen(state: CigaretteStateId): WarmBloomRow {
+  if (
+    state === 'IDLE' ||
+    state === 'PICKED_UP' ||
+    state === 'EXTINGUISHED' ||
+    state === 'DISCARDED'
+  )
+    return 'table';
+  return 'alight';
+}
+
+/** The bloom as the venue's exposure moves it, with the Demo's number as the anchor it scales from. */
+export function bloomAlpha(row: WarmBloomRow, ambient: number): number {
+  return WARM_BLOOM[row].alphaAtQuiet * ((0.4 + ambient) / (0.4 + WARM_BLOOM.quietAmbient));
+}
+
 export function backgroundStructure(
   state: GameStateView,
-  box: { x: number; y: number; width: number; height: number },
   cssWidth: number,
   cssHeight: number,
 ): BackgroundStructure {
@@ -400,30 +486,32 @@ export function backgroundStructure(
     }
   });
 
-  // The key light, from the environment's own direction, and the pool the props sit in.
+  // The two warm lights §2 draws: the venue's own bloom, and the pool of the screen being shown.
+  // Both are fractions of the stage box, because that is what the Demo writes them as — the old
+  // version of this block mixed px into a fraction field (`box.x + spot.x * box.width`,
+  // `box.width * w * 0.8`), so the pool landed 149 canvas-widths to the right of the frame and read
+  // as nothing at all. Measured 2026-10-11 on the served build: no mesh with a pool-sized scale was
+  // in the scene, and the only warm quad on screen was the pill's own glow.
   const radians = (light.keyDirectionDeg * Math.PI) / 180;
-  const keyReach = Math.max(w, h) * 0.45;
-  const spot = {
-    x: (layout.table.x + layout.ashtray.x + layout.pack.x) / 3,
-    y: (layout.table.y + layout.ashtray.y + layout.pack.y) / 3,
-  };
-  const propReach = Math.max(80, box.width * w * 0.8);
+  const pool = WARM_POOL[warmPoolScreen(state.cigarette.state)];
+  const bloomRow = warmBloomScreen(state.cigarette.state);
+  const bloom = WARM_BLOOM[bloomRow];
   const glows: StageGlowFrac[] = [
     {
       x: 0.5 + Math.cos(radians) * 0.3,
       y: 0.2 + Math.sin(radians) * 0.25,
-      rx: keyReach / w,
-      ry: keyReach / h,
+      rx: bloom.rx,
+      ry: bloom.ry,
       rgb: mixRgb(wallRgb, poolLight, 0.5),
-      alpha: 0.35 * (0.4 + light.ambient),
+      alpha: bloomAlpha(bloomRow, light.ambient),
     },
     {
-      x: box.x + spot.x * box.width,
-      y: box.y + spot.y * box.height,
-      rx: propReach / w,
-      ry: propReach / h,
+      x: pool.cx,
+      y: pool.cy,
+      rx: pool.rx,
+      ry: pool.ry,
       rgb: mixRgb(silhouette, poolLight, 0.62),
-      alpha: 0.26 + light.ambient * 0.34,
+      alpha: pool.alpha,
     },
   ];
 
