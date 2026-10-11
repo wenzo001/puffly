@@ -137,6 +137,12 @@ interface SceneProbe {
   backend: string;
   frames: number;
   particles: number;
+  /**
+   * `particles` is how many puffs this frame *draws*; this is how many slots the pool holds live.
+   * Sparks and ash draw on their own capped meshes, and a particle can be alive but not yet born,
+   * so the two differ — and only the second one is comparable to `CAPACITY`.
+   */
+  poolSize: number;
   /** The context, once the scene is up — how a check outside the page asks what was built. */
   context: unknown;
   /** The §2 S3 104 px stage ring. */
@@ -203,6 +209,7 @@ const probe: SceneProbe = {
   backend: 'pending',
   frames: 0,
   particles: 0,
+  poolSize: 0,
   context: null,
   stageRing: { visible: false, frac: 0, seconds: '' },
   ash: [],
@@ -2650,6 +2657,7 @@ function step(deltaMs: number): void {
   cloud.instanceMatrix.needsUpdate = true;
   if (cloud.instanceColor !== null) cloud.instanceColor.needsUpdate = true;
   probe.particles = n;
+  probe.poolSize = pool.size;
 }
 /**
  * One SVG ring, as meshes: the track circle and the run arc. Everything comes off the element —
