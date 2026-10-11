@@ -5721,3 +5721,33 @@ weather/paint/backdrop 成新家，props/room 合并式承接），7 个"混着�
 **版本号跟着走 0.4.0 → 0.5.0**（2D 层退役）：十处 `package.json` 加 lock；`npm ls --depth=0`
 全树 0.5.0；版本读取三条 grep 仍零命中。提 minor：仓库的渲染故事换了一层（一仓一界面），
 不是修补；真机套件与门禁背书见本轮提交。
+
+### 退役判据的去向：一张只写"我核过什么"的对照表（2026-10-11）
+
+2D 光栅套件在 2026-10-10 退役，本文与 ARCHITECTURE 里留下 **39 处「X.test.ts（2026-10-10 随 2D 光栅套件退役）」**
+形状的句子，其中 24 处只贴了标记、句子仍按现在时在判（那 24 是上界：分类器只认"点名一个仍然存在的
+`*.test.ts`"这一种后继）。这一节是逐格定性的结果，规则是**只写我读过断言正文的行**，其余明写未定性。
+
+数法（可复跑，仓根）：用 python 扫三处文档里那个形状，再按同名符号今天还有没有**生产读者**判 ——
+方法本身来自 #141 那一格（`IGNITION_IMPACT` 常数和导出都在、读者为零 ⇒ 画没了、文档还写着有）。
+
+| 退役的那份 | 今天的读者 | 我核到哪一步 |
+| --- | --- | --- |
+| realism.test.ts | `packages/game-core/src/__tests__/realism-purity.test.ts`（7 条） | 本轮回建：六档比整场会话 + `quality` 阳性对照；牙实测过（核心偷读旋钮 ⇒ 红 5 条） |
+| ignition-punch.test.ts | `packages/game-scene/src/__tests__/ignition-punch.test.ts`（9 条）+ 真机 1 条 | 本轮回建，峰值/25 帧/回到 1.0/逐帧压暗四条都在；真机读到世界缩放峰值 **1.03490** |
+| plume-lift.test.ts | `packages/game-scene/src/__tests__/plume-lift.test.ts`（4 条） | 本轮回建。**留一条自我更正**：第一版读出生时的 `alpha`（池子那时恒为 0）⇒ 两次变异全绿，是探针抓住的，不是读代码想到的 |
+| prop-placement.test.ts | 一半：`packages/game-scene/src/__tests__/stage.test.ts`（9 条）+ 真机「the rod is drawn where the core says」 | 同源那半逐条读过（分数→世界、四边落舞台边、杆角取自两个已公布点）。**"打火机与烟盒至少留半个触摸目标"那半今天没有判据** —— 全仓没有任何断言比较过两者位置，挂在 #124 |
+| place-features.test.ts | 一半：`packages/game-scene/src/__tests__/room.test.ts` | 颜色那条我读了标题（暖屋冷屋两张画）。**形状那半没有判据**：`backdrop.ts` 的 `geometry.details` 生产在读，没人比过两个场所的轮廓 ⇒ #144 |
+| warmth-scale.test.ts | `room.test.ts` | 读了它那条断言的标题与意图，正是当年三条的核心（暖冷是场所带的字段，不是渲染器的第二意见） |
+| paper-dimple.test.ts | `apps/web/src/__tests__/hint-art.test.ts`（import `DIP_SHARE`/`WAIST`）+ 真机"捏腰"那条 | 读了 import 与那段说明（两侧朝轴弯、最深在 WAIST、对照是两倍深度） |
+| rod-anchor.test.ts | `stage.test.ts` 的「takes the rod's angle from the two published points」+ 真机那条 | 两条都读过正文；真机那条本会话刚加过方向与静止两道闸 |
+| chrome-band.test.ts | `apps/web/src/__tests__/chrome-furniture.test.ts` + `packages/game-core/src/__tests__/stage.test.ts`（读 `CHROME_CLEAR_Y`） | 两条都读了断言：前者「matches the band the pill actually paints」与「is handed the height by every resize, or the line stays decorative」正是"下沿家具是像素不是比例"这半；后者另有一条「no prop lies under the chrome, in any shape of stage」把当年那张 12 形状表接住了 |
+| plume-column.test.ts | `plume-continuity.test.ts`（12 条，今天印 coverage 1.00 / heights 5.9–24.9） | 本会话现跑过，读的正是它打印的那三行 |
+| rendering.test.ts | §15 字段表与 §54 预算：`stage.test.ts`、`particles` 一侧**未逐条核**；§48「拿深冻的活快照喂场景读者」那半**今天没有同名读者** | `grep -rl freeze --include='*.test.ts'` 只答出 `rain-fall.test.ts` 里不相干的一处。要么编译期 `DeepReadonly` 就算够（那就是 ARCHITECTURE 那句话该改口），要么补运行时深冻 —— 这条留在剩下的 13 处里 |
+
+**还没定性的 9 份**（外加 `rendering` 的另两半、ARCHITECTURE 里 `prop-placement` 与 `rendering` 的两处指针）——按上面那张表的规矩逐格读正文，别按关键词命中数下结论（这一轮我先试了关键词法，
+`contrast|darken|edge` 一把命中 41 个文件，那就是噪声不是判据）：`ash-flake` `background-stillness`
+`ember-glow` `ember-heat` `lid-hinge` `pack-object` `plume-contrast` `plume-palette` `sprite-focus`。
+挂在 #142。
+
+本轮顺带把三处"今天的总数"改成现跑：`npm test` **125 档 1043 条**、真机 **161/161**（2026-10-11）。
