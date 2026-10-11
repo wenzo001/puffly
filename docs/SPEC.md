@@ -6247,6 +6247,28 @@ S1（`rodRemaining`）与 S5（`ash.ratio`）正是那两个量，**S2 接的是
 `/bottom: calc\((\d+)px/.exec(PILL)` 取的是**全文件第一个匹配**，`hud-anatomy.test.ts:51` 的
 `body.slice(at, at + 200)` 取 key 名 —— 都登在 **#155** 待判。
 
+**#155 两处当天就判完了，结论都是"今天归因正确"，代码一字未动**（现量的，不是读一遍直觉）：
+- `chrome-furniture:21-23`：`bottom: calc\((\d+)px` 与 `min-height: (\d+)px` 在 `CtaPill.vue` 里**各只命中一次**，
+  分别落在 `.cta`（第 207 行 `bottom: calc(74px + env(safe-area-inset-bottom))`）与 `.pill`（第 229 行
+  `min-height: 62px`）这两格自己那行上，注释里没有复述 ⇒ 提取器量到的就是画面上那两个数（74 + 62）。
+- `hud-anatomy:51`：`keyOfShared()` 的宿主只有两格（穷举 `const X: Figure = {` ⇒ **clock / remaining**），
+  它们自己的 `key:` 在块内第 **30 / 34** 字符处，200 窗口内**各只有 1 个命中** ⇒ 不可能取到邻格的 key。
+- **同一句风险说明在两格上的证据强度不一样，分开写**：
+  `chrome-furniture:21-23` 那条**现量过**（见下）；`hud-anatomy:51` 那条只做了**静态归因核对**
+  （窗口内命中数 1、本块 key 在块内 30/34 字符 ⇒ 今天不可能取到邻格），
+  **它的"散文被改时会自曝"没有注入验证过** —— 记在这里而不是补一句"应该也会红"，
+  因为那半句正是本轮被自己推翻过两次的那种"推理当代读数"。
+  `chrome-furniture` 的注入读数是：往 `CtaPill.vue` 的 `.cta` 之前加一句含
+  `bottom: calc(99px + env(safe-area-inset-bottom))` 的注释（提取器会把它当成第一条匹配）⇒
+  判据**响亮地红**：`AssertionError: expected 136 to be 161`（136 = `CHROME_BAND_PX`，161 = 99 + 62），
+  而不是静默读到错数还通过。⇒ 结论：这条提取器在散文被改时会自曝，所以**不给它加"必须落在某规则体内"的限定** ——
+  加了换来的是"谁在注释里写句历史值就把判据判红"的假阳，而那正是 #154 那类"注释喂饱断言"的反面
+  （那边静默通过、必须治；这边自曝、不必治）。注入的产品文件从 /tmp 备份裸 `cp` 还原，
+  `git status` 只剩文档。
+
+（复跑：`node /tmp/puffly-glyphs/key-extractor.mjs`，跑在仓根 —— 它从判据文件里读调用点、从组件里数命中。
+临时脚本，跑完即删。）
+
 **两处都收到现成的家里**：`apps/web/src/__tests__/sourceProbe.ts` 本来就有按花括号配对的
 `blockAfter()`（`first-light-anchor` / `haptics` / `stage-mirrors` / `realism-row` 四檔在用），
 所以这轮**不新造第三个规则体工具**，而是给它补了一个 `stripComments()`（两类注释一起去），
