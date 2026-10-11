@@ -5846,4 +5846,41 @@ bare ⇒ `text/html`，带 base ⇒ `text/javascript`。`tests/smoke/readme-shot
 （这台机器上是 STHeiti Light，upm 1000 / ascent 860 / descent −140）的 `g p y` 的 bbox `minY` 都是
 **−134**，即 13.4% 个 em 落在格子外面；`text.ts:112` 又按"整格 = 一个 em、格的底边就是基线"取样（`y: 0`），
 所以那一条带从来没被采到过。修法要一起动两处（格子里把基线抬到 ascent 那一分、取样按同一个偏移走），
-并把 `ascent/descent` 写进 `glyphs.json` 让两边不能各写各的 —— 细节与影响面在 #146。
+并把 `ascent/descent` 写进 `glyphs.json` 让两边不能各写各的 —— 落地与判据见本节末「图集的下伸部回来了」。
+
+### 图集的下伸部回来了：一条只有像素能看见的判据（2026-10-11）
+
+上一格登记的那一条（#146）当天就修了。**为什么这一格值得单独写：它是这一整轮里第一条"数学全对、
+画出来是错的"的缺陷**，而抓住它的不是任何一条既有判据，是眼睛。
+
+**改了三处，两处必须同时动**：
+- `apps/web/scripts/bake-atlas.mjs`：基线从"格子的下边缘"抬到"格内 `ascent` 那一分"
+  （`translate(col·CELL, row·CELL + ascent·CELL)`），并把 `ascent`/`descent` 与**每个字形自己的
+  `yMin`/`yMax`**（fontkit 的 bbox，化成 em）写进 `glyphs.json`；字体 em 盒超过一格时**直接拒烘**
+  （否则就是换一个字体把同一件事再犯一遍）。
+- `packages/game-scene/src/text.ts`：`parseAtlas` 现在**要求**那两个数（没有就报
+  `atlas: bad baseline`，em 盒装不进格子就报 `the em box does not fit one cell`），
+  `layoutText` 的 quad 底边从 `y: 0` 改成 `y: -(1 - ascent) · em`。
+  **可见的墨一个字都没挪**：quad 顶边仍在基线上方 `ascent` 个 em，所以屏上所有已经按 DOM 盒子摆好的
+  文字位置不变，只是尾巴多出来一截 —— 这一条是判据里写死的（`text.test.ts` 断顶边 = `0.86 em`）。
+- `apps/web/public/atlas/glyphs.{png,json}`：重烘。两次烘同一份源码**逐字节相同**（`cmp` 验过）。
+
+**新的判据 5 条**（`apps/web/src/__tests__/atlas-ink.test.ts` 3 条 + `text.test.ts` 2 条）。
+像素那三条不信任任何人的推导：它自己解 PNG（8-bit RGBA 非隔行，别的形状**报错而不是硬猜**），
+把每格的墨与"烘图脚本自己声明的这个字形该占哪几行"对齐。实测读数：
+`g` 的墨从改前 `25..63`（顶到格底被切）变成 `16..63`（基线现在在格内第 55 行，尾巴真的落在 55 以下），
+`a` 改前 `25..61`、改后 `16..52`（它没有下伸部，所以基线以下必须干净）——
+**这一正一反两条是互相撑着尺子的**：只判 `g` 有墨，一条噪声就能过。
+
+**两次自证**：
+1. 把烘图的平移改回 `(row+1)·CELL` 重烘 ⇒ `atlas-ink` **3 条里红 2 条**（`a` 的基线以下冒出 7 行墨；
+   逐字形对账报 `"0": ink 13..61 vs 3..54` 等 11+ 处），改回后 3 条全绿、产物与前面逐字节相同。
+2. 第三条判据自带反空转闸：`checked > 300`（404 个字形里真读到 bbox 的个数），
+   并且**要求 `a` 的 `yMin > 0`、`g` 的 `yMin < 0`** —— 否则"烘图脚本没量到 bbox、全部退化成整格"
+   会让那条对账永远绿。这一条是当场逼出来的：第一版我按 `box.yMin` 取（fontkit 的键其实是 `minY`），
+   结果 404 个字形全走了兜底值，判据一声不吭地空转，是这条闸把它抓住的。
+
+**整轮验证**：`npm test` **127 档 / 1052 条**全绿；门禁六步 ALL_GREEN；真机套件对着新产物跑
+**161/161**；四张 README 图重拍，眼睛复看 `desktop-settings.jpg` —— "Language"、"Draw length"、
+页头那格"0g"、底栏"settings" 的下伸部都回来了。图里**仍然在**的是语言行那一排豆腐块，那是 #138，
+另一格、没并进来。

@@ -78,26 +78,53 @@ if (glyphs.length < 300) {
 const opened = fontkit.openSync(chosen.path);
 const font = opened.fonts ? opened.fonts[0] : opened;
 const upm = font.unitsPerEm;
+// The cell is the em box, so the baseline sits `ascent` of the way down from its top. Putting it on
+// the cell's bottom edge instead — which is what this file did until 2026-10-11 — draws everything
+// below the baseline outside the cell: the tails of `g p y` were both lost and spilled into the cell
+// underneath, and the reader had no way to tell (#146).
+const ascent = font.ascent / upm;
+const descent = -font.descent / upm;
+if (ascent <= 0 || descent <= 0) {
+  console.error(
+    `font reports ascent=${String(font.ascent)} descent=${String(font.descent)} — unusable`,
+  );
+  process.exit(1);
+}
+if (ascent + descent > 1) {
+  console.error(
+    `${chosen.path}: its em box is ${ascent.toFixed(3)} + ${descent.toFixed(3)} em, which does not fit ` +
+      'the square cell this grid draws into. A font whose ascent+descent exceeds one em would be ' +
+      'clipped exactly the way #146 was; pick one that fits, or make the cell non-square first.',
+  );
+  process.exit(1);
+}
 const columns = Math.ceil(Math.sqrt(glyphs.length)) + 1;
 const rows = Math.ceil(glyphs.length / columns);
 const scale = CELL / upm;
 const parts = [];
 const metrics = {};
+let noBox = 0;
 const t0 = performance.now();
 glyphs.forEach((char, index) => {
   const col = index % columns;
   const row = Math.floor(index / columns);
   const glyph = font.glyphForCodePoint(char.codePointAt(0));
-  // fontkit's y-axis points up, SVG's down — flip inside the cell.
+  // fontkit's y-axis points up, SVG's down — flip inside the cell, on the baseline.
   parts.push(
-    `<g transform="translate(${col * CELL},${(row + 1) * CELL}) scale(${scale.toFixed(6)},${(-scale).toFixed(6)})"><path d="${glyph.path.toSVG()}"/></g>`,
+    `<g transform="translate(${col * CELL},${row * CELL + ascent * CELL}) scale(${scale.toFixed(6)},${(-scale).toFixed(6)})"><path d="${glyph.path.toSVG()}"/></g>`,
   );
+  // The outline box goes out to the JSON in ems above the baseline, so a test can hold the shipped
+  // pixels against this file's own claim about where each glyph's ink belongs.
+  const box = glyph.bbox;
+  if (!Number.isFinite(box?.minY) || !Number.isFinite(box?.maxY)) noBox += 1;
   metrics[char] = {
     col,
     row,
     w: CELL,
     h: CELL,
     advance: glyph.advanceWidth / upm,
+    yMin: Number.isFinite(box?.minY) ? box.minY / upm : -descent,
+    yMax: Number.isFinite(box?.maxY) ? box.maxY / upm : ascent,
   };
 });
 const width = columns * CELL;
@@ -114,7 +141,15 @@ writeFileSync(join(OUT_DIR, 'glyphs.png'), png);
 // would be wrong on every other machine. The console line below is where it is reported.
 writeFileSync(
   join(OUT_DIR, 'glyphs.json'),
-  JSON.stringify({ cell: CELL, columns, rows, readout: READOUT + MARKS, metrics }),
+  JSON.stringify({
+    cell: CELL,
+    columns,
+    rows,
+    ascent,
+    descent,
+    readout: READOUT + MARKS,
+    metrics,
+  }),
 );
 
 console.log(
@@ -123,6 +158,8 @@ console.log(
     grid: `${columns}x${rows}`,
     atlasPx: `${width}x${height}`,
     pngBytes: png.length,
+    baseline: { ascent, descent },
+    noBox,
     outlineMs: Math.round(t1 - t0),
     rasterMs: Math.round(t2 - t1),
     font: chosen.path,

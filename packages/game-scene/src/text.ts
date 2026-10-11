@@ -15,13 +15,29 @@ export interface GlyphMetric {
   h: number;
   /** The pen movement for this glyph, in ems. */
   advance: number;
+  /**
+   * The outline box the bake drew, in ems relative to the baseline. The product does not need it;
+   * `atlas-ink.test.ts` holds the shipped pixels against this claim, which is the only way to catch
+   * a bake that clips a descender or spills one into the cell below.
+   */
+  yMin?: number;
+  yMax?: number;
 }
 
 export interface GlyphAtlas {
-  /** Cell size in atlas pixels; every cell is square. */
+  /** Cell size in atlas pixels; every cell is square, and it is the em box. */
   cell: number;
   columns: number;
   rows: number;
+  /**
+   * Where the baseline sits inside a cell, in ems down from the cell's top. This is the one number
+   * that decides whether a descender is inside what gets sampled: a bake that put the baseline on
+   * the cell's bottom edge drew `g p y` without their tails, and every consumer agreed with it
+   * (#146). The bake writes it, the reader refuses an atlas that does not say.
+   */
+  ascent: number;
+  /** How far the font's own ink goes below that baseline, in ems. */
+  descent: number;
   /**
    * The characters the figures on screen are formatted with, as the bake wrote them down. The copy
    * table never spells `2 / 12` or `100%` — those are built at runtime — so the atlas names this
@@ -36,7 +52,10 @@ export interface GlyphQuad {
   char: string;
   /** Left edge, in ems from the run's origin. */
   x: number;
-  /** The quad rises from the baseline: its bottom edge sits on y = 0. */
+  /**
+   * The quad's bottom edge, in ems relative to the baseline: below it by whatever the cell has
+   * under the baseline, which is where a `g` keeps its tail.
+   */
   y: number;
   width: number;
   height: number;
@@ -58,7 +77,7 @@ export interface TextLayout {
 export function parseAtlas(json: unknown): GlyphAtlas {
   const data = json as Partial<GlyphAtlas> | null;
   if (data === null || typeof data !== 'object') throw new Error('atlas: not an object');
-  const { cell, columns, rows, metrics, readout } = data;
+  const { cell, columns, rows, metrics, readout, ascent, descent } = data;
   if (typeof cell !== 'number' || cell <= 0) throw new Error('atlas: bad cell');
   if (typeof columns !== 'number' || typeof rows !== 'number') throw new Error('atlas: bad grid');
   if (typeof readout !== 'string') throw new Error('atlas: bad readout alphabet');
@@ -76,7 +95,14 @@ export function parseAtlas(json: unknown): GlyphAtlas {
       throw new Error(`atlas: bad metric for ${JSON.stringify(char)}`);
     }
   }
-  return { cell, columns, rows, readout, metrics };
+  // Last, so an atlas that is wrong about its glyphs reports that first.
+  if (typeof ascent !== 'number' || typeof descent !== 'number' || ascent <= 0 || descent <= 0) {
+    throw new Error('atlas: bad baseline — re-bake with the ascent and the descent written down');
+  }
+  if (ascent + descent > 1.0001) {
+    throw new Error('atlas: the em box does not fit one cell');
+  }
+  return { cell, columns, rows, readout, ascent, descent, metrics };
 }
 
 /**
@@ -105,11 +131,13 @@ export function layoutText(text: string, atlas: GlyphAtlas, em: number): TextLay
       continue;
     }
     // One cell is one em: the bake drew each glyph at `cellPx / unitsPerEm`, so the cell IS the em
-    // box. The quad is a full cell; the pen moves by the glyph's own advance, like a font.
+    // box. The quad is a full cell — which means its bottom edge is *below* the baseline by whatever
+    // the cell has under it, or the tail of a `g` is outside what gets sampled. The pen still moves
+    // by the glyph's own advance, like a font.
     quads.push({
       char,
       x: pen,
-      y: 0,
+      y: -(1 - atlas.ascent) * em,
       width: em,
       height: em,
       u0: (metric.col * atlas.cell) / (atlas.columns * atlas.cell),
