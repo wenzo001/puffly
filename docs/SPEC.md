@@ -6475,3 +6475,15 @@ S1（`rodRemaining`）与 S5（`ash.ratio`）正是那两个量，**S2 接的是
 —— 如果无头页面掉帧、而 `dt` 又被 `Math.min(deltaMs, 64)` 夹住，那仿真时间就比墙钟短，
 峰值 208 可能只是"还没堆到"而不是"堆不动"。**下一格先量这个**（最便宜：读 `__pufflyScene.frames` 与
 `.stage` 上那个 sim 秒读数，与脚本自己的墙钟秒并排印一次即可，不用改任何产品码）。
+
+**候选①也被现量否掉了（同一晚，`node /tmp/puffly-glyphs/clock-check.mjs`）**：真实构建那一段
+**`fps = 60`、22 秒墙钟里 `frames` 走了 1349**（×16.6 ms ≈ 22.4 秒），而页内那条休息钟
+**`break` 从 `10:00` 走到 `09:37`（23 秒）** ⇒ **仿真时间 ≈ 墙钟时间，无头页面没有饿**。
+同一次读数里 **22 秒时 `poolSize` = 111**，而离线件在第 3 秒就已经 900 ⇒
+"208 只是还没堆到"这个说法**不成立**，两边确实是不同的堆法。
+
+⇒ 于是这一格现在剩下的唯一未读事实是：**离线 harness 不传参时，引擎自己默认选的是哪一支烟、哪一个场子**。
+应用那侧的默认是现读的：`DEFAULT_IDS = { cigarette:'classic', environment:'quiet-room', lighter:'wheel', ashtray:'stone' }`
+（`packages/game-content/src/index.ts:27-32`）。**如果两边默认就是同一对，那差异必然在别处**
+（`smoke.visibility` 或通风进了发射段），**下一格先读 harness 的默认值再决定往哪查** ——
+不要再往下推，这一路已经被"看着像机制、其实是猜"绊过两次（`densityScale` 一次、`fieldScale` 一次）。
