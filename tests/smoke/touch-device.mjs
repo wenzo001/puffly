@@ -3094,7 +3094,17 @@ try {
       .locator('.pill')
       .click({ timeout: 5000 })
       .catch(() => {});
-    await page.waitForTimeout(650);
+    // Wait for the transition instead of clicking again: the second click lands on whatever the pill
+    // became while the first one was still resolving, and once out of three rounds that was `lighter`
+    // — so this loop struck the lighter before the read below, and seven checks went red on a page
+    // that was working (measured 2026-10-11; the run either side of it read 161/162).
+    await page
+      .waitForFunction(
+        () => document.querySelector('.stage')?.dataset.affordance === 'lighter',
+        null,
+        { timeout: 4000, polling: 60 },
+      )
+      .catch(() => null);
   }
   // Read it here, before the strike: only the pick-up transition can have emitted a ring yet, so a
   // burst's accent can no longer stand in for it — the first attempt measured exactly that hole
@@ -3117,6 +3127,43 @@ try {
     return { visible, lid };
   })()`;
   const flameRead = () => page.evaluate(flameSrc);
+  // The cap is a rigid shell hung on one line, so two things must hold across the throw that no
+  // angle can express: the corner that lives on the hinge stays on it, and the shell's own span is
+  // the same number open and closed. `lid-hinge.test.ts` judged this of the painted cap and retired
+  // with it on 2026-10-10 (#145); this reads it off the transforms the scene applies. The probe hands
+  // back the shell's four bottom/top corners on its mid-plane plus the group's own world position —
+  // the hinge line runs through that — and the arithmetic outside picks the corner nearest it.
+  // (Taking the bottom edge's *centre* instead measured a drift of 0.71 of the shell's span on a
+  // working cap: the centre sits half a depth away from the line, so it is meant to travel.)
+  const hingeRead = () =>
+    page.evaluate(`(() => {
+      const ctx = window.__pufflyScene.context;
+      const scene = 'value' in ctx.scene ? ctx.scene.value : ctx.scene;
+      let mesh = null;
+      scene.traverse((o) => {
+        if (o.isMesh && o.parent?.name === 'lighter-lid') mesh = o;
+      });
+      if (mesh === null) return null;
+      mesh.updateWorldMatrix(true, true);
+      if (mesh.geometry.boundingBox === null) mesh.geometry.computeBoundingBox();
+      const bb = mesh.geometry.boundingBox;
+      const m = mesh.matrixWorld.elements;
+      const at = (x, y, z) => [
+        m[0] * x + m[4] * y + m[8] * z + m[12],
+        m[1] * x + m[5] * y + m[9] * z + m[13],
+        m[2] * x + m[6] * y + m[10] * z + m[14],
+      ];
+      const corners = [];
+      for (const y of [bb.min.y, bb.max.y]) {
+        for (const z of [bb.min.z, bb.max.z]) corners.push(at(0, y, z));
+      }
+      const g = mesh.parent.matrixWorld.elements;
+      // The world group is scaled by the ignition's push-in, so every length below is divided by the scale
+      // this frame is carrying: without that the two samples differ by the punch, not by the cap.
+      const wscale = Math.hypot(g[0], g[4], g[8]) || 1;
+      return { corners, pivot: [g[12], g[13], g[14]], angle: mesh.parent.rotation.x, wscale };
+    })()`);
+  const hingeClosed = await hingeRead();
   const flameIdle = await flameRead();
   // §S7's 冲击感 lasts 420 ms — shorter than every wait below — so it is recorded THROUGH the strike
   // rather than sampled after it. The recorder takes the peak the frames actually carried, and the peak
@@ -3201,6 +3248,70 @@ try {
     "3D: the ignition's flame, open cap and sparks are drawn by the scene (S2)",
     !flameIdle.visible && flameLit.visible && flameLit.lid < -0.5 && sparksSeen,
     `idle=${String(flameIdle.visible)} lit=${String(flameLit.visible)} lid=${flameLit.lid.toFixed(2)} sparks=${String(sparksSeen)}`,
+  );
+  // The cap swung — and a hinge owes two more things an angle cannot say. (1) The corner that lives
+  // on the line stays on it: measured 0.0000 of the shell's own span both shut and open. (2) The
+  // shell's long edge gets shorter on screen *by the cosine of the turn*, which is the only way a
+  // rigid body in front of an orthographic camera may lose length — a geometry that was rescaled to
+  // look open, or a lid smeared along y, reddens it. That second term is read inside one frame, so
+  // it cannot be confused by the world's own push-in. `lid-hinge.test.ts` judged both of these of the
+  // painted cap and retired with it on 2026-10-10 (#145). |control|: shifting the shell's offset
+  // inside the group reddens (1); the projection term is what a non-rigid "open" cannot fake.
+  const hingeOpen = await hingeRead();
+  const apart = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+  const span =
+    hingeClosed === null
+      ? 0
+      : apart(hingeClosed.corners[0], hingeClosed.corners[2]) / hingeClosed.wscale;
+  const hingeOk =
+    hingeClosed !== null && hingeOpen !== null && Math.abs(hingeOpen.angle) > 0.5 && span > 0;
+  // Which corner lives on the hinge is decided once, on the closed cap — the one nearest the group's
+  // own world position — and then followed through the throw.
+  let pinned = 0;
+  if (hingeOk) {
+    for (let i = 1; i < hingeClosed.corners.length; i++) {
+      if (
+        apart(hingeClosed.corners[i], hingeClosed.pivot) <
+        apart(hingeClosed.corners[pinned], hingeClosed.pivot)
+      )
+        pinned = i;
+    }
+  }
+  const onHinge = hingeOk
+    ? apart(hingeOpen.corners[pinned], hingeOpen.pivot) / (span * hingeOpen.wscale)
+    : -1;
+  const satClosed = hingeOk
+    ? apart(hingeClosed.corners[pinned], hingeClosed.pivot) / (span * hingeClosed.wscale)
+    : -1;
+  const hingeSwung = hingeOk
+    ? Math.max(...hingeOpen.corners.map((c, i) => apart(c, hingeClosed.corners[i]))) /
+      (span * hingeClosed.wscale)
+    : -1;
+  // corners[0] and corners[2] differ only in local y, so their separation IS the shell's long axis in
+  // world space. The screen sees its x and y components; a rigid turn by θ leaves |cos θ| of it on
+  // screen. Measured on a working cap: 0.3328 against cos θ = 0.3228 — the 0.01 gap is the ignition's
+  // own push-in, which scales the world group (zoom, zoom, 1) and not z (SceneStage's `placePunch`,
+  // and deliberately: the scene's z ladder is what keeps the plume under the chrome). A y axis leaned
+  // by an x/y-only scale is not a pure cosine any more, which is why the term below is a tolerance
+  // rather than an equality.
+  const [oa, ob] = hingeOk
+    ? [hingeOpen.corners[0], hingeOpen.corners[2]]
+    : [
+        [0, 0, 0],
+        [0, 0, 0],
+      ];
+  const edge3d = apart(oa, ob);
+  const edge2d = Math.hypot(oa[0] - ob[0], oa[1] - ob[1]);
+  const projected = hingeOk ? edge2d / edge3d : -1;
+  const cosine = Math.abs(Math.cos(hingeOpen?.angle ?? 0));
+  check(
+    '3D: the cap turns on a hinge — the hinged corner stays on the line and the shell shortens only by the projection (S2)',
+    hingeOk &&
+      Math.abs(onHinge - satClosed) < 0.02 &&
+      onHinge < 0.05 &&
+      hingeSwung > 0.5 &&
+      Math.abs(projected - cosine) < 0.02,
+    `onHinge=${onHinge.toFixed(4)} (closed ${satClosed.toFixed(4)}) swung=${hingeSwung.toFixed(3)} projected=${projected.toFixed(4)} vs cos=${cosine.toFixed(4)}`,
   );
   // The recorder's read, taken once every long wait above has finished: the peak it stored is the
   // strike's. |control|: with `placePunch` never called the peak stays 0 and the world group never
