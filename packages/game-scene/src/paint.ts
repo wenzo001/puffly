@@ -30,6 +30,43 @@ export const MAX_SMOKE_RADIUS_PX = 220;
  */
 export const IGNITION_IMPACT = { ttlMs: 420, zoom: 0.035, edge: 0.22 } as const;
 
+/**
+ * The punch's own clock: 1 on the frame the rod catches, then a linear release over `ttlMs`.
+ * Reduced motion is not a smaller punch — it is no punch, so the whole picture holds still.
+ */
+export function stepIgnition(impact: number, frameMs: number, reducedMotion: boolean): number {
+  if (reducedMotion) return 0;
+  return Math.max(0, impact - frameMs / IGNITION_IMPACT.ttlMs);
+}
+
+/**
+ * The eased shape the frame actually draws with. A release that leaves at a constant rate reads as a
+ * slow slide; `impact · (2 − impact)` keeps the first frames near the peak so the hit lands.
+ */
+export const ignitionPunch = (impact: number): number => impact * (2 - impact);
+
+/** How much closer the world stands: at the peak, 3.5% at the frame's edge and nothing at the pivot. */
+export const ignitionZoom = (punch: number, cartoon: number): number =>
+  1 + IGNITION_IMPACT.zoom * punch * cartoon;
+
+/** The other half of the same hit — the room closing in, on the very same punch. */
+export const ignitionEdgeAlpha = (punch: number, cartoon: number): number =>
+  IGNITION_IMPACT.edge * punch * cartoon;
+
+/**
+ * Where the pushed-in world has to sit for the ember to stay exactly where the core put it.
+ *
+ * The scene graph computes `world = position + scale · local`, so scaling a group by `zoom` about the
+ * ember means offsetting it by `ember · (1 − zoom)`. Everything off the pivot then moves outward by
+ * exactly the zoom, while the point under the player's thumb does not move at all (§37).
+ */
+export function punchPivot(
+  ember: readonly [number, number],
+  zoom: number,
+): { x: number; y: number } {
+  return { x: ember[0] * (1 - zoom), y: ember[1] * (1 - zoom) };
+}
+
 /** The deck's split, as a number: S6 writes 写实 80% / 卡通 20%. */
 export const DECK_SPLIT = 0.8;
 

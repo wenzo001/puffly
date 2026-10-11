@@ -3118,6 +3118,31 @@ try {
   })()`;
   const flameRead = () => page.evaluate(flameSrc);
   const flameIdle = await flameRead();
+  // §S7's 冲击感 lasts 420 ms — shorter than every wait below — so it is recorded THROUGH the strike
+  // rather than sampled after it. The recorder takes the peak the frames actually carried, and the peak
+  // of the world group's own scale, because "the number was computed" is not the claim: the claim is
+  // that the room leaned in and then let go.
+  await page.evaluate(() => {
+    const w = window;
+    w.__punchPeak = 0;
+    w.__punchScalePeak = 1;
+    const tick = () => {
+      try {
+        const scene3d = w.__pufflyScene;
+        w.__punchPeak = Math.max(w.__punchPeak, scene3d?.punch ?? 0);
+        const ctx = scene3d?.context;
+        const root = ctx ? ('value' in ctx.scene ? ctx.scene.value : ctx.scene) : null;
+        root?.traverse((o) => {
+          if (o.name === 'world') w.__punchScalePeak = Math.max(w.__punchScalePeak, o.scale.x);
+        });
+      } catch {
+        // A frame that cannot be read is not a failure of the picture; the assertion below only
+        // reports the peaks, so a lost sample shows up as a peak that never rose.
+      }
+      w.__punchRaf = window.requestAnimationFrame(tick);
+    };
+    w.__punchRaf = window.requestAnimationFrame(tick);
+  });
   await page
     .locator('.pill')
     .click({ timeout: 5000 })
@@ -3176,6 +3201,33 @@ try {
     "3D: the ignition's flame, open cap and sparks are drawn by the scene (S2)",
     !flameIdle.visible && flameLit.visible && flameLit.lid < -0.5 && sparksSeen,
     `idle=${String(flameIdle.visible)} lit=${String(flameLit.visible)} lid=${flameLit.lid.toFixed(2)} sparks=${String(sparksSeen)}`,
+  );
+  // The recorder's read, taken once every long wait above has finished: the peak it stored is the
+  // strike's. |control|: with `placePunch` never called the peak stays 0 and the world group never
+  // leaves 1; with the punch never released the wait below times out and the last term reddens.
+  const punch = await page.evaluate(() => {
+    window.cancelAnimationFrame(window.__punchRaf);
+    return {
+      peak: window.__punchPeak,
+      scale: window.__punchScalePeak,
+    };
+  });
+  // That it lets go is judged by waiting for the release, not by reading whichever moment the recorder
+  // happened to stop at. Measured 2026-10-11: the live value read 0.9748 when the first version of this
+  // check sampled it — the release was still running, because `advance()` pays at most 64 ms of sim per
+  // frame and a page this side of 60 fps spends 420 ms of punch over seconds of wall. (The same
+  // measurement ruled out the other theory: a break does not re-enter BURNING — four transitions walked,
+  // none into it — so nothing re-earned the punch; reading an instant was simply the wrong shape.) The
+  // budget is the release's 25 frames converted at the worst rate this page has been measured at (~5 fps,
+  // so ~5 s of wall) with room for a slower one.
+  const released = await page
+    .waitForFunction(() => window.__pufflyScene.punch === 0, null, { timeout: 9000, polling: 40 })
+    .then(() => true)
+    .catch(() => false);
+  check(
+    '3D: the ignition leans the room in on the cherry, then lets go (S7 · 冲击感)',
+    punch.peak > 0.9 && punch.scale > 1.03 && punch.scale <= 1.036 && released,
+    `punch peak ${punch.peak.toFixed(4)}, world scale peak ${punch.scale.toFixed(5)}, released ${String(released)}`,
   );
   // The paper pinches while the draw is held (S7/S15) — the painter's own `paperGive` at
   // `WAIST = 0.78`. Placed right behind the strike, where the state is the one this was measured

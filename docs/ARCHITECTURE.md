@@ -245,6 +245,16 @@ that split from rotting back into an app:
   on the halo's and the rim's own materials, the rock on the bowl's `rotation.z` after a real 磕灰.
   Each of those two has been reddened by muting exactly the output it reads.
 
+- **The ignition's push-in leans the room, not the interface.** S7's 「点火瞬间整体画面轻微推近 + 边缘压暗」
+  is four formulas in `game-scene` (`stepIgnition`, `ignitionPunch`, `ignitionZoom` /
+  `ignitionEdgeAlpha`, plus `punchPivot`) applied by `SceneStage.placePunch` to one node, `worldGroup`,
+  which holds everything that stands *in* the room — backdrop, table, the three props, the plume, the ash.
+  It is a group rather than a camera `zoom` because the chrome's plates answer DOM boxes that hold still:
+  leaning those as well would spend 420 ms breaking §37 for no picture. Only x and y scale — the 2D
+  transform had no third axis, and the scene's z ladder is what keeps the plume under the chrome's first
+  plate. The vignette has a single writer now (`placePunch`, the room's base plus `edge · punch · cartoon`);
+  it used to answer a `watch` on ambient alone, and two writers on one opacity is how a beat gets eaten.
+
 ## Performance
 
 SPEC.md §54 and §81 (6/9) are why the interface is kept cheap (the painted layer's own answers

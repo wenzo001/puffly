@@ -12,7 +12,7 @@
  * of a layout or a recipe; that is the mistake this repository has paid for twice.
  */
 import { TresCanvas } from '@tresjs/core';
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue';
 import {
   emberHeat,
   emberPresence,
@@ -46,6 +46,11 @@ import {
   LID_THROW_DEG,
   sparkStreak,
   cartoonScale,
+  ignitionEdgeAlpha,
+  ignitionPunch,
+  ignitionZoom,
+  punchPivot,
+  stepIgnition,
   stepTrayFeedback,
   trayRock,
   TRAY_FEEDBACK,
@@ -136,6 +141,11 @@ interface SceneProbe {
   context: unknown;
   /** The §2 S3 104 px stage ring. */
   stageRing: StageRingProbe;
+  /**
+   * The §S7 冲击感, eased: 0 on every frame that is not leaning in, ~1 for the few frames after the
+   * rod catches. A check wants the machine value rather than a screenshot of a 420 ms moment.
+   */
+  punch: number;
   /** The abstract mouth (S22): lip line + airflow column. */
   lip: LipProbe;
   /**
@@ -168,6 +178,7 @@ const probe: SceneProbe = {
   particles: 0,
   context: null,
   stageRing: { visible: false, frac: 0, seconds: '' },
+  punch: 0,
   lip: { visible: false, action: '', tier: 'S', columnWidthPx: 0, kind: '' },
   puffReady: false,
   lastExhale: null,
@@ -446,6 +457,20 @@ const trayRimMesh = shallowRef<THREE.Mesh | null>(null);
 const trayHaloMesh = shallowRef<THREE.Mesh | null>(null);
 /** The tray's memory of the last landing, stepped per frame like every other live reading here. */
 let trayFeedback: TrayFeedback = TRAY_FEEDBACK_START;
+
+/**
+ * The deck's 冲击感 (S7): 「点火瞬间整体画面轻微推近 + 边缘压暗」.
+ *
+ * `worldGroup` holds everything that stands *in* the room — the backdrop, the table, the three props,
+ * the plume, the ash — and it is deliberately the parent of nothing that is chrome. The pill, the rail
+ * and the cards answer DOM boxes that hold still, so leaning them in as well would spend 420 ms
+ * breaking §37 for no picture. The shape of the lean lives in `game-scene` (`stepIgnition` and its
+ * three readers); this file only decides where it is applied.
+ */
+const worldGroup = shallowRef<THREE.Group | null>(null);
+/** 1 on the frame the rod catches, then a linear release over the impact's own ttl. */
+let impact = 0;
+let lastPhase = '';
 let pileMaterial: THREE.MeshBasicMaterial | null = null;
 let pileSignature = '';
 let columnSignature = '';
@@ -2387,9 +2412,36 @@ function placeCherry(state: GameStateView | null): void {
   setHot(spillMaterial);
   if (spillMaterial !== null) spillMaterial.opacity = clamp01(0.11 * total * (1 - distance));
 }
-watch(vignetteAlphaNow, (next) => {
-  if (vignetteMaterial !== null) vignetteMaterial.opacity = next;
-});
+/**
+ * The frame's own push-in: where the world leans to, and how far the edges close.
+ *
+ * One writer for the vignette's opacity, on purpose. It used to answer a `watch` on the room's ambient
+ * alone, which is the whole of the base look — but the 冲击感 darkens the same corners for a few
+ * frames, and two writers on one opacity is how a beat gets eaten by whichever ran last.
+ */
+function placePunch(state: GameStateView | null, dt: number): void {
+  const phase = state?.cigarette.state ?? '';
+  if (phase === 'BURNING' && lastPhase !== 'BURNING') impact = 1;
+  lastPhase = phase;
+  impact = stepIgnition(impact, dt, props.game.rendererLook().reducedMotion);
+  const punch = ignitionPunch(impact);
+  probe.punch = Number(punch.toFixed(4));
+  const cartoon = cartoonScale(props.game.rendererLook().realism);
+  const zoom = ignitionZoom(punch, cartoon);
+  const group = worldGroup.value;
+  if (group !== null) {
+    // x and y only. The 2D layer's transform had no third axis, and the scene's z ladder is what keeps
+    // the plume under the chrome's first plate — leaning depth over would shuffle that for nothing.
+    group.scale.set(zoom, zoom, 1);
+    const ember = points.value.ember;
+    const world = ember === undefined ? [0, 0] : canvasToWorld(ember, box.value, aspect.value);
+    const pivot = punchPivot([world[0] ?? 0, world[1] ?? 0], zoom);
+    group.position.set(pivot.x, pivot.y, 0);
+  }
+  if (vignetteMaterial !== null) {
+    vignetteMaterial.opacity = clamp01(vignetteAlphaNow.value + ignitionEdgeAlpha(punch, cartoon));
+  }
+}
 
 let clockMs = 0;
 
@@ -2432,6 +2484,7 @@ function step(deltaMs: number): void {
     state !== null &&
     !state.cigarette.puff.active &&
     state.cigarette.puff.sinceReleaseMs >= TIMING.restSettleMs;
+  placePunch(state, dt);
   placeCherry(state);
   placeAsh(state);
   placePile(state);
@@ -4009,11 +4062,10 @@ function placeMouth(state: GameStateView | null): void {
     />
     <TresAmbientLight :intensity="0.35" />
 
-    <!-- The room's own backdrop — the sky's stops, the wall, the place's furniture, the two pools
-         of light — one group, fed by `backgroundStructure` every frame. -->
-    <primitive v-if="backdrop !== null" :object="backdrop" />
     <!-- The vignette: the room's corners, before anything stands in them. Built at `ready` — see
-         the note where it is made — so it arrives one tick late, via this v-if. -->
+         the note where it is made — so it arrives one tick late, via this v-if. It stays outside the
+         world group below: the 冲击感 leans the room in, and the frame is the one thing it must not
+         lean with. -->
     <primitive
       v-if="vignette !== null"
       :object="vignette"
@@ -4021,37 +4073,50 @@ function placeMouth(state: GameStateView | null): void {
       :scale="[vignetteSize, vignetteSize, 1]"
     />
 
-    <!-- The table: a slab, not a plane, so it catches the key light the way the 2D one does — and
-         in the room's own ink, so the slab and the painted band below the edge are one colour. -->
-    <TresMesh :position="[0, tableY, -0.4]">
-      <TresBoxGeometry :args="[frame.width * 1.2, WORLD_HEIGHT * 0.6, 0.3]" />
-      <TresMeshStandardMaterial :color="tableInk" :roughness="0.85" />
-    </TresMesh>
+    <!-- Everything that stands IN the room, under the one transform `placePunch` writes. The chrome is
+         deliberately not in here — its plates answer DOM boxes that hold still, and §37 is the rule
+         that a picture may not outrun. The rain and the grain are the stated exception: they ride in
+         the chrome group from P2, so they hold still for these 420 ms, which the 2D layer did not do. -->
+    <TresGroup ref="worldGroup" name="world">
+      <!-- The room's own backdrop — the sky's stops, the wall, the place's furniture, the two pools
+         of light — one group, fed by `backgroundStructure` every frame. -->
+      <primitive v-if="backdrop !== null" :object="backdrop" />
 
-    <!-- The lighter as the painted layer's own bands: a tank up to the shoulder, the chimney and
+      <!-- The table: a slab, not a plane, so it catches the key light the way the 2D one does — and
+         in the room's own ink, so the slab and the painted band below the edge are one colour. -->
+      <TresMesh :position="[0, tableY, -0.4]">
+        <TresBoxGeometry :args="[frame.width * 1.2, WORLD_HEIGHT * 0.6, 0.3]" />
+        <TresMeshStandardMaterial :color="tableInk" :roughness="0.85" />
+      </TresMesh>
+
+      <!-- The lighter as the painted layer's own bands: a tank up to the shoulder, the chimney and
          wick above it, and the cap on a hinge at the back. The body sits in the anchor's frame the
          way the 2D lays it out (top −0.3H, shoulder +0.14H, bottom +0.7H in its y-down local
          frame), so the aim point, the flame and the box finally agree on where the thing is. -->
-    <TresGroup :position="at('lighter')">
-      <!-- Tank: −0.7H…−0.14H. -->
-      <TresMesh :position="[0, -0.42 * lighter.h, 0]">
-        <TresBoxGeometry :args="[lighter.w, 0.56 * lighter.h, lighter.w * 0.7]" />
-        <TresMeshStandardMaterial :color="PROP_INK.lighterTank" :metalness="0.5" :roughness="0.4" />
-      </TresMesh>
-      <!-- Chimney and wick: −0.14H…−0.03H. -->
-      <TresMesh :position="[0, -0.085 * lighter.h, 0]">
-        <TresBoxGeometry :args="[lighter.w * 0.56, 0.11 * lighter.h, lighter.w * 0.5]" />
-        <TresMeshStandardMaterial color="#6d6259" :metalness="0.35" :roughness="0.7" />
-      </TresMesh>
-      <!-- The cap: hinged at the shoulder's back edge, `lighter.lid` its only input. Closed it
+      <TresGroup :position="at('lighter')">
+        <!-- Tank: −0.7H…−0.14H. -->
+        <TresMesh :position="[0, -0.42 * lighter.h, 0]">
+          <TresBoxGeometry :args="[lighter.w, 0.56 * lighter.h, lighter.w * 0.7]" />
+          <TresMeshStandardMaterial
+            :color="PROP_INK.lighterTank"
+            :metalness="0.5"
+            :roughness="0.4"
+          />
+        </TresMesh>
+        <!-- Chimney and wick: −0.14H…−0.03H. -->
+        <TresMesh :position="[0, -0.085 * lighter.h, 0]">
+          <TresBoxGeometry :args="[lighter.w * 0.56, 0.11 * lighter.h, lighter.w * 0.5]" />
+          <TresMeshStandardMaterial color="#6d6259" :metalness="0.35" :roughness="0.7" />
+        </TresMesh>
+        <!-- The cap: hinged at the shoulder's back edge, `lighter.lid` its only input. Closed it
            covers the chimney; at full throw the shell tips back and the wick comes out. -->
-      <TresGroup
-        ref="lighterLid"
-        name="lighter-lid"
-        :position="[0, -0.14 * lighter.h, -lighter.w * 0.35]"
-      >
-        <TresMesh :position="[0, 0.11 * lighter.h, lighter.w * 0.35]">
-          <!-- The shell is 0.22H tall and centred at half that above the hinge, so closed it spans
+        <TresGroup
+          ref="lighterLid"
+          name="lighter-lid"
+          :position="[0, -0.14 * lighter.h, -lighter.w * 0.35]"
+        >
+          <TresMesh :position="[0, 0.11 * lighter.h, lighter.w * 0.35]">
+            <!-- The shell is 0.22H tall and centred at half that above the hinge, so closed it spans
                shoulder → top and covers the chimney, and `lighter.lid` alone decides whether the
                wick is out. Width and depth are the tank's: a flip-top's cap is the same can.
 
@@ -4060,93 +4125,94 @@ function placeMouth(state: GameStateView | null): void {
                (it reads `geometry.attributes.position.count` for every mesh in the scene). The
                nested mesh below inherited the parent's 0.22H and so floated a line at 0.44H, above
                the lighter rather than on it; the two numbers were the same edge, counted twice. -->
-          <TresBoxGeometry :args="[lighter.w, 0.22 * lighter.h, lighter.w * 0.7]" />
-          <TresMeshStandardMaterial
-            :color="PROP_INK.lighterCap"
-            :metalness="0.55"
-            :roughness="0.3"
-          />
-          <!-- `box-shadow: inset 0 1px 0 rgba(255,255,255,.06)`, as the line it draws: the shell's
+            <TresBoxGeometry :args="[lighter.w, 0.22 * lighter.h, lighter.w * 0.7]" />
+            <TresMeshStandardMaterial
+              :color="PROP_INK.lighterCap"
+              :metalness="0.55"
+              :roughness="0.3"
+            />
+            <!-- `box-shadow: inset 0 1px 0 rgba(255,255,255,.06)`, as the line it draws: the shell's
                top face, a hair in front of it so it is not z-fighting with the can. -->
-          <TresMesh :position="[0, 0.11 * lighter.h, lighter.w * 0.01]">
-            <TresPlaneGeometry :args="[lighter.w * 1.035, edgePx]" />
-            <TresMeshBasicMaterial :color="PROP_INK.lighterEdge" />
+            <TresMesh :position="[0, 0.11 * lighter.h, lighter.w * 0.01]">
+              <TresPlaneGeometry :args="[lighter.w * 1.035, edgePx]" />
+              <TresMeshBasicMaterial :color="PROP_INK.lighterEdge" />
+            </TresMesh>
           </TresMesh>
-        </TresMesh>
+        </TresGroup>
       </TresGroup>
-    </TresGroup>
-    <TresMesh :position="at('pack')">
-      <!-- §2's `border: 1px solid rgba(255,255,255,.05)`: the plate behind, a hair larger, is the
+      <TresMesh :position="at('pack')">
+        <!-- §2's `border: 1px solid rgba(255,255,255,.05)`: the plate behind, a hair larger, is the
            only way a box can have an edge in this layer. -->
-      <TresMesh :position="[0, 0, -pack.w * 0.32]">
-        <TresPlaneGeometry :args="[pack.w + 2 * edgePx, pack.h + 2 * edgePx]" />
-        <TresMeshBasicMaterial :color="PROP_INK.packEdge" />
+        <TresMesh :position="[0, 0, -pack.w * 0.32]">
+          <TresPlaneGeometry :args="[pack.w + 2 * edgePx, pack.h + 2 * edgePx]" />
+          <TresMeshBasicMaterial :color="PROP_INK.packEdge" />
+        </TresMesh>
+        <TresBoxGeometry :args="[pack.w, pack.h, pack.w * 0.6]" />
+        <TresMeshStandardMaterial :color="PROP_INK.pack" :roughness="0.6" />
       </TresMesh>
-      <TresBoxGeometry :args="[pack.w, pack.h, pack.w * 0.6]" />
-      <TresMeshStandardMaterial :color="PROP_INK.pack" :roughness="0.6" />
-    </TresMesh>
-    <!--
+      <!--
       A disc facing the camera, squashed by the 2D layer's own ratio: the canvas draws the tray as an
       ellipse because its drawing implies a view from a little above, and the 3D layer reproduces that
       convention as geometry. Tilting the camera would have reproduced the look by breaking the 1:1
       mapping between the mirror's fractions and the screen.
     -->
-    <!-- The squash is on the LOCAL z axis on purpose: scale is applied before the rotation, and this
+      <!-- The squash is on the LOCAL z axis on purpose: scale is applied before the rotation, and this
          disc is turned a quarter turn about x — so its local z is what the screen reads as vertical.
          Squashing local y instead (the obvious guess) squashes the tray's thickness into the screen
          and leaves a perfect circle on it. -->
-    <TresGroup ref="trayGroup" name="tray" :position="at('ashtray')">
-      <TresMesh :rotation="[-Math.PI / 2, 0, 0]" :scale="[1, 1, TRAY_FLATTEN]">
-        <TresCylinderGeometry :args="[trayRadius, trayRadius, trayRadius * 0.28, 32]" />
-        <TresMeshStandardMaterial :color="PROP_INK.ashtray" :metalness="0.3" :roughness="0.5" />
-      </TresMesh>
-      <!-- §20's answer to a drag. The back rim is the only place a tray shows its material, and it is
+      <TresGroup ref="trayGroup" name="tray" :position="at('ashtray')">
+        <TresMesh :rotation="[-Math.PI / 2, 0, 0]" :scale="[1, 1, TRAY_FLATTEN]">
+          <TresCylinderGeometry :args="[trayRadius, trayRadius, trayRadius * 0.28, 32]" />
+          <TresMeshStandardMaterial :color="PROP_INK.ashtray" :metalness="0.3" :roughness="0.5" />
+        </TresMesh>
+        <!-- §20's answer to a drag. The back rim is the only place a tray shows its material, and it is
            also what the tray says while the rod is being carried toward it — the destination answers,
            so no control has to appear over the scene. Both rings are unit geometry scaled by the
            tray's own radius every frame, so a window that resizes the bowl never rebuilds a mesh.
            The 2D layer drew the rim as an arc from θ 1.05π to 1.95π with a line of 0.06 r, and the
            invitation's halo at 1.16 r across and 0.54 r down — flatter than the bowl, which is how a
            ring of light off a rim reads. -->
-      <TresMesh ref="trayRimMesh" name="tray-rim">
-        <TresRingGeometry :args="[0.94, 1, 48, 1, Math.PI * 1.05, Math.PI * 0.9]" />
-        <TresMeshBasicMaterial :transparent="true" :depth-write="false" :opacity="0" />
-      </TresMesh>
-      <TresMesh ref="trayHaloMesh" name="tray-halo">
-        <TresRingGeometry :args="[0.979, 1.021, 48]" />
-        <TresMeshBasicMaterial :transparent="true" :depth-write="false" :opacity="0" />
-      </TresMesh>
-    </TresGroup>
+        <TresMesh ref="trayRimMesh" name="tray-rim">
+          <TresRingGeometry :args="[0.94, 1, 48, 1, Math.PI * 1.05, Math.PI * 0.9]" />
+          <TresMeshBasicMaterial :transparent="true" :depth-write="false" :opacity="0" />
+        </TresMesh>
+        <TresMesh ref="trayHaloMesh" name="tray-halo">
+          <TresRingGeometry :args="[0.979, 1.021, 48]" />
+          <TresMeshBasicMaterial :transparent="true" :depth-write="false" :opacity="0" />
+        </TresMesh>
+      </TresGroup>
 
-    <!-- The rod: a cylinder between the two published points (its true ends), rotated by the
+      <!-- The rod: a cylinder between the two published points (its true ends), rotated by the
          angle they imply. `placeRod` pinches its rings while a draw is held (S7/S15). -->
-    <TresMesh
-      v-if="rod !== null"
-      ref="rodMesh"
-      name="rod"
-      :position="rod.mid"
-      :rotation="[0, 0, rod.angle - Math.PI / 2]"
-    >
-      <TresCylinderGeometry
-        :args="[(0.1 * ROD_THICKNESS_SHARE) / 2, (0.1 * ROD_THICKNESS_SHARE) / 2, 0.1, 12, 16]"
-      />
-      <!-- The ink is this frame's, not the template's: see `rodInkFor`. -->
-      <TresMeshStandardMaterial color="#f0e8da" />
-    </TresMesh>
+      <TresMesh
+        v-if="rod !== null"
+        ref="rodMesh"
+        name="rod"
+        :position="rod.mid"
+        :rotation="[0, 0, rod.angle - Math.PI / 2]"
+      >
+        <TresCylinderGeometry
+          :args="[(0.1 * ROD_THICKNESS_SHARE) / 2, (0.1 * ROD_THICKNESS_SHARE) / 2, 0.1, 12, 16]"
+        />
+        <!-- The ink is this frame's, not the template's: see `rodInkFor`. -->
+        <TresMeshStandardMaterial color="#f0e8da" />
+      </TresMesh>
 
-    <!--
+      <!--
       The plume: one point per live particle, coloured by the core's own tint and faded by its own
       alpha. The pool, its noise field and its lifetimes are the Canvas 2D layer's `ParticlePool` —
       the half of that renderer worth keeping — and how many puffs a second come out is the core's
       `smoke.emissionRate`, not this file's opinion.
     -->
-    <primitive v-if="puffs !== null" :object="puffs" />
+      <primitive v-if="puffs !== null" :object="puffs" />
 
-    <!-- The cherry's own light: halo in the air, spill on the table edge. Both additive. -->
-    <primitive v-if="halo !== null" :object="halo" />
-    <primitive v-if="spill !== null" :object="spill" />
+      <!-- The cherry's own light: halo in the air, spill on the table edge. Both additive. -->
+      <primitive v-if="halo !== null" :object="halo" />
+      <primitive v-if="spill !== null" :object="spill" />
 
-    <!-- Falling ash: one ellipse per fragment the core is carrying. -->
-    <primitive v-if="flakes !== null" :object="flakes" />
+      <!-- Falling ash: one ellipse per fragment the core is carrying. -->
+      <primitive v-if="flakes !== null" :object="flakes" />
+    </TresGroup>
 
     <!-- The HUD's two figures, painted from the baked atlas; the DOM under them keeps the taps
          and the screen reader's line while `html.scene3d-text` hides their ink. -->
