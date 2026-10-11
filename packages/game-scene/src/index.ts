@@ -68,7 +68,6 @@ export { layoutText, parseAtlas, type GlyphAtlas, type GlyphQuad, type TextLayou
 export { createPufflyRenderer, type RendererChoice } from './renderer';
 export {
   AIM_KEYS,
-  stageToWorld,
   stageUnitToWorld,
   parseAim,
   rodBetween,

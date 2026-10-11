@@ -83,7 +83,7 @@ const UPPER_REST_PX = 4;
 const LOWER_REST_PX = 3;
 const MIN_GAP_PX = 0.75;
 /** The column is a modest stream at the mouth — it widens and softens as it leaves. */
-const COLUMN_HALF_WIDTH_PX: Record<PuffTierId, number> = { S: 4, M: 6, L: 9 };
+export const COLUMN_BASE_HALF_WIDTH_PX: Record<PuffTierId, number> = { S: 4, M: 6, L: 9 };
 const COLUMN_LENGTH_PX = 96;
 const SEGMENT_GAP_PX = 6;
 /** Words the source leaves as words (最细 / 略细 / 最宽), mapped once, here. */
@@ -173,7 +173,7 @@ export function lipArt(action: LipAction): LipArt {
   const tier: PuffTierId = action.tier;
   const word = col.note === undefined ? 1 : (WORD_SCALE[col.note] ?? 1);
   const scale = col.scale ?? 1;
-  const nearW = COLUMN_HALF_WIDTH_PX[tier] * scale * word;
+  const nearW = COLUMN_BASE_HALF_WIDTH_PX[tier] * scale * word;
   const farW = nearW * (col.tipDiverges ? 1.8 : 1.7);
   const bendPx = col.spinDeg !== undefined ? 6 : col.sideVortex ? 8 : 0;
   const segments: ColumnSegment[] =
@@ -206,6 +206,4 @@ export function lipArt(action: LipAction): LipArt {
   };
 }
 
-/** The base widths the tiers are built on, exported for the scene’s own measurements. */
-export const COLUMN_BASE_HALF_WIDTH_PX = COLUMN_HALF_WIDTH_PX;
 export { COLUMN_LENGTH_PX, BASE_HALF_WIDTH_PX };
