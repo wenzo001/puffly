@@ -5793,7 +5793,7 @@ weather/paint/backdrop 成新家，props/room 合并式承接），7 个"混着�
 | plume-palette.test.ts | `packages/game-scene/src/__tests__/plume-palette.test.ts`（4 条，2026-10-11 回建） | 呼气整片取皮肤色 / 没有那一层时保留烟草自己的色 / 灰与火星永不被重染 / 颜色在出生时定死。**两次变异各红其所**：全类都染色 ⇒ 只红材质那条；干脆不染 ⇒ 红呼气与出生那 2 条；另加一条静态事实撑着"出生时定死"——全仓 `slot.tint` 只有一处赋值（`particles.ts:204`）。**顺带把 README 那句改口**：它原本说这条路径由 `skins.test.ts` 与真机 S17 判着，而那两者判的是皮肤形状与图鉴卡片长按，都不判烟羽颜色。**另一处佐证**：本节上面记的当年两次单点变异（不传 `plumeTint` ⇒ 只红"重染烟羽"；去掉材质守卫 ⇒ 只红"灰保留自身色"）与今天这份的落点一一对上 —— 回建的那份判的确实是同一件事 |
 | background-stillness.test.ts | `packages/game-core/src/__tests__/stillness.test.ts`（4 条）+ `rain-fall.test.ts` | 相邻帧不跳风、不跳湍流、静置里风与烟仍在走 —— 正是当年"alpha 不许闪、又不能冻成静照"那两条；雨那半由 rain-fall 的「still comes down, so the flicker was not cured by a freeze」接住。**"每帧 fill 次数恒定"没有对应读者**（那是画布调用计数，3D 里等价的该是 draw call 计数），归 #145 |
 | sprite-focus.test.ts | `packages/game-scene/src/__tests__/sprite.test.ts`（23 条） | 中间实边缘清、单调衰减所以烟里没有环、"caller 要 feather 才给 feather 空间、不要就保持原形" —— 三条主张都有活读者；"比出厂那版更紧"是当时两份剖面的对照，本就不复跑 |
-| ember-glow.test.ts | 半格：`packages/game-scene/src/__tests__/warm-pool.test.ts` 判那两团光按 Demo 的数 | **"辉光半径就取模拟给的 `glowRadius`、熄灭那一下是回暗不是往外炸"没有读者** —— `glowRadius` 在全部 live 判据里 0 命中 ⇒ #145 |
+| ember-glow.test.ts | 三条：`packages/game-scene/src/__tests__/warm-pool.test.ts`（两团光按 Demo 的数）+ 真机新增两条「the cherry’s halo is the simulation’s own glow radius」与「a cherry going dark dims instead of pushing outward」（2026-10-11） | 半径那一半现在判的是**同一帧里的四个数**：场景真把光晕 quad 缩到多大，对比核心给的 `glowRadius`、`flare` 与一个 stage 单位的世界尺寸（实测 28 帧采样、0 帧偏离声明过的增益 >2%）；回暗那一半判「亮度往下走的每一步里半径有没有变大」（8 步变暗、0 步外扩）。**产品侧变异实测**：增益 1.9 改成 2.4 ⇒ 165 条里**只红半径那一条**（28/28 帧，读数 1.1726 对 1.0003），回暗那条照旧绿 —— 两条互不顶班。为了能在同一帧里比，`SceneStage` 的探针多带一个 `cherry` 字段（只给判据读，生产不读它）⇒ #145 这一格闭合 |
 | ember-heat.test.ts | `packages/game-scene/src/__tests__/ember-heat.test.ts`（5 条，2026-10-11 回建）+ `lifecycle.test.ts` 新增那条"熄了还允许发光" | 斜坡本身判回来了：最低 writable 那一头是深橙不是黑也不是"关"、白芯只给满的那一下、往下走是**经过**暗红（单调、每步 <25、不落黑）、中间温度名副其实、以及"锚在核心写得出的那条带上而不是裸数字上"。三次变异：冷端改黑 ⇒ 红 4 条；白端封到 0.8 ⇒ 只红"白芯"那 1 条；把带换成裸 temperature ⇒ 红"冷端"与"锚在带上"2 条。**没判回来的那一半要写明**：当年那条"静置取**最后**一帧（刚松手还穿着抽吸的峰值）"是取样规矩，回建的那份判的是函数本身，不判谁在哪一帧读它 |
 | lid-hinge.test.ts | 两条都有读者了：真机读 `lighter-lid` 的 `rotation.x`（角度）+ 真机新增那条「the cap turns on a hinge」（2026-10-11） | 几何那半现在判的是**同一个 mesh 的两件事**：钉在合页那一端的角到合页线的距离（工作着的盖子实测 0.0000，两端都 0.0000），以及"壳子长边在屏幕上只剩 \|cos θ\|"（0.3328 对 0.3228 —— 那 0.01 差是点火那一下把世界组按 `(zoom, zoom, 1)` 缩放、不动 z 造成的，见 `placePunch`）。**产品侧变异实测**：把盖子的偏移从 0.11H 挪到 0.14H（合页不再在壳边上）⇒ 全套 162 条只红这一条，读数从 0.0000 变 0.1320。**这一格留下一条判据设计的教训**：只判"两次之差"是放得过这个变异的（之差只有 0.0044），必须有"绝对在合页线上"那一项 |
 | ash-flake.test.ts | 半格：`ash-pile.test.ts`（6 条）判盘里那堆的形状/落高/跟随缸子缩放/不出界；`ash-break.test.ts` 判"先断一拍" | **"每片碎屑长厚不相等、散开时保持圆、落在核心放的那个点而不是渲染器挑的点"没有读者**（live 里提到 flake 的两处判的是别的事）⇒ #145 |
@@ -5803,8 +5803,8 @@ weather/paint/backdrop 成新家，props/room 合并式承接），7 个"混着�
 **收口之后剩下没读者的四格**（都是"回建一条判据"或"明写归眼睛"两种结局之一，要先拍一次再动手，别一次动四格）。
 2026-10-11 动了其中一格：**余烬温度→颜色那条斜坡已经回建**（`packages/game-scene/src/__tests__/ember-heat.test.ts`
 5 条 + `lifecycle.test.ts` 那条"熄了还允许发光"，三次变异各红其所，见上面那张表）。
-**剩下两格半**：碎屑的形状与出处、`glowRadius` 与回暗方向；另加静置那格的
-"每帧绘制次数恒定"这一半。挂在 #145。（合页那一格 2026-10-11 也回了，见上面那行。）
+**剩下一格半**：碎屑的形状与出处；另加静置那格的
+"每帧绘制次数恒定"这一半。挂在 #145。（合页那一格与辉光半径那一格 2026-10-11 都回了，见上面两行。）
 
 **方法上的一次失败要留字**：这一轮我先把"关键词命中数"当"有没有活判据"用，
 `grep -lE 'contrast|darken|edge'` 一把命中 41 个测试文件 —— 那是噪声。命中文件名只能列候选，

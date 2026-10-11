@@ -155,6 +155,22 @@ interface SceneProbe {
    * is what happened on 2026-10-11, seven reds in one run and green in the runs either side of it.
    */
   puffReady: boolean;
+  /**
+   * The cherry's light as the last frame drew it: the core's own glow radius and flare, the diameter
+   * the halo quad was actually scaled to, what one stage unit is worth in world units, and the alpha.
+   * Two claims need all four in the same frame — that the drawn size *is* the simulation's radius
+   * through the declared gain (not a constant, not another number's ratio), and that a cherry going
+   * dark dims without pushing outward. They were `ember-glow.test.ts`'s and retired with the painted
+   * layer on 2026-10-10 (#145).
+   */
+  cherry: {
+    glowRadius: number;
+    flare: number;
+    haloDiameter: number;
+    unit: number;
+    opacity: number;
+    visible: boolean;
+  } | null;
   /** The most recent exhale recipe the engine handed the scene. */
   lastExhale: {
     tier: 'S' | 'M' | 'L' | null;
@@ -179,6 +195,7 @@ const probe: SceneProbe = {
   context: null,
   stageRing: { visible: false, frac: 0, seconds: '' },
   punch: 0,
+  cherry: null,
   lip: { visible: false, action: '', tier: 'S', columnWidthPx: 0, kind: '' },
   puffReady: false,
   lastExhale: null,
@@ -2386,7 +2403,22 @@ function placeCherry(state: GameStateView | null): void {
   const lit = showing && total > 0.02;
   haloMesh.visible = lit;
   spillMesh.visible = lit;
-  if (!lit || ember === undefined || at === undefined || state === null) return;
+  // Read before the early return: a check that watches the cherry go dark has to see the frame where
+  // it stopped, not a stale one.
+  const report = (drawn: boolean): void => {
+    probe.cherry = {
+      glowRadius: ember?.glowRadius ?? 0,
+      flare: ember?.flare ?? 0,
+      haloDiameter: Number(haloMesh.scale.x.toFixed(4)),
+      unit: Number(unitWorld.value.toFixed(6)),
+      opacity: Number((haloMaterial?.opacity ?? 0).toFixed(4)),
+      visible: drawn,
+    };
+  };
+  if (!lit || ember === undefined || at === undefined || state === null) {
+    report(false);
+    return;
+  }
 
   const world = canvasToWorld(at, box.value, aspect.value);
   const unit = unitWorld.value;
@@ -2401,6 +2433,7 @@ function placeCherry(state: GameStateView | null): void {
   haloMesh.position.set(world[0], world[1], 0.03);
   haloMesh.scale.set(haloRadius * 2, haloRadius * 2, 1);
   if (haloMaterial !== null) haloMaterial.opacity = clamp01(0.16 * total);
+  report(true);
 
   // The spill sits on the table edge, below the ember by the state's own layout.
   const edgeCanvasY = box.value.y + box.value.height * state.stage.layout.tableEdgeY;

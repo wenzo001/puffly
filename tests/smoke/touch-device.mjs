@@ -3321,6 +3321,49 @@ try {
       Math.abs(projected - cosine) < 0.02,
     `onHinge=${onHinge.toFixed(4)} (closed ${satClosed.toFixed(4)}) swung=${hingeSwung.toFixed(3)} projected=${projected.toFixed(4)} vs cos=${cosine.toFixed(4)}`,
   );
+  // The cherry's light carries the two claims `ember-glow.test.ts` used to make (#145): the halo the
+  // scene scales *is* the simulation's own glow radius through the declared gain — not a constant, not
+  // another number's ratio — and a cherry that is dimming does not push outward on the way down.
+  // Sampled across the strike's own decay, where the flare falls from its peak and the radius has to
+  // follow it. |control|: widening the gain in `placeCherry` reddens the first; a radius that rides
+  // `1 / opacity` reddens the second.
+  const cherrySamples = [];
+  const cherryUntil = Date.now() + 2600;
+  while (Date.now() < cherryUntil) {
+    const frame = await page.evaluate(() => window.__pufflyScene?.cherry ?? null);
+    if (frame !== null && frame.visible) cherrySamples.push(frame);
+    await page.waitForTimeout(90);
+  }
+  const offGain = [];
+  for (const frame of cherrySamples) {
+    const want = frame.glowRadius * (1.9 + frame.flare * 1.4) * frame.unit * 2;
+    if (want <= 0) continue;
+    if (Math.abs(frame.haloDiameter - want) / want > 0.02) {
+      offGain.push(`${frame.haloDiameter} vs ${want.toFixed(4)}`);
+    }
+  }
+  check(
+    '3D: the cherry\u2019s halo is the simulation\u2019s own glow radius, not another number\u2019s ratio (S2)',
+    cherrySamples.length >= 5 && offGain.length === 0,
+    `${String(cherrySamples.length)} frames sampled, ${String(offGain.length)} off by more than 2%${
+      offGain[0] === undefined ? '' : ` (e.g. ${offGain[0]})`
+    }`,
+  );
+  let dimming = 0;
+  let grewWhileDimming = 0;
+  for (let i = 1; i < cherrySamples.length; i++) {
+    const before = cherrySamples[i - 1];
+    const now = cherrySamples[i];
+    if (now.opacity < before.opacity - 1e-4) {
+      dimming += 1;
+      if (now.haloDiameter > before.haloDiameter * 1.02) grewWhileDimming += 1;
+    }
+  }
+  check(
+    '3D: a cherry going dark dims instead of pushing outward (S2)',
+    dimming >= 3 && grewWhileDimming === 0,
+    `${String(dimming)} dimming steps, ${String(grewWhileDimming)} of them grew`,
+  );
   // The recorder's read, taken once every long wait above has finished: the peak it stored is the
   // strike's. |control|: with `placePunch` never called the peak stays 0 and the world group never
   // leaves 1; with the punch never released the wait below times out and the last term reddens.
