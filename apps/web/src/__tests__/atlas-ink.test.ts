@@ -112,7 +112,10 @@ interface AtlasJson {
   rows: number;
   ascent?: number;
   descent?: number;
-  metrics: Record<string, { col: number; row: number; yMin?: number; yMax?: number }>;
+  metrics: Record<
+    string,
+    { col: number; row: number; yMin?: number; yMax?: number; notdef?: boolean }
+  >;
 }
 
 const atlasJson = JSON.parse(readFileSync(JSON_PATH, 'utf8')) as AtlasJson;
@@ -136,6 +139,20 @@ function cellInk(metric: AtlasJson['metrics'][string]): {
     if (hit) rows.push(r);
   }
   return { rows, below: rows.filter((r) => r >= baseline).length };
+}
+
+/** Every inked pixel of a cell, as `row:column` pairs — two cells match only shape for shape. */
+function cellSignature(metric: AtlasJson['metrics'][string]): string {
+  const cell = atlasJson.cell;
+  const x0 = metric.col * cell;
+  const y0 = metric.row * cell;
+  const hits: string[] = [];
+  for (let r = 0; r < cell; r++) {
+    for (let x = 0; x < cell; x++) {
+      if ((png.alpha[(y0 + r) * png.width + x0 + x] ?? 0) > 16) hits.push(`${r}:${x}`);
+    }
+  }
+  return hits.join(',');
 }
 
 describe('the baked atlas keeps the whole em box', () => {
@@ -168,6 +185,43 @@ describe('the baked atlas keeps the whole em box', () => {
       aInk.below,
       `${read('a', aInk)} — a tailless letter should stop above the baseline`,
     ).toBe(0);
+  });
+
+  it("knows which cells are the font's notdef box, and that they are one shared box", () => {
+    // The bake flags `notdef: true` on a cell it drew from the font's own .notdef glyph — a legal
+    // rectangle standing in for a character the font does not have (#138). Two things are pinned
+    // here, and neither one is a pass:
+    //  - the shipped set, so a new tofu shows up as a red rather than as a screenshot somebody
+    //    happens to look at;
+    //  - that these cells are pixel-identical. That is why the wordless tier cannot tell `◌`
+    //    (已掐灭, and the auto chip) from `⌁` (磕灰) from `∅` (no words at all): three marks the
+    //    design names, one rectangle on screen. `mark-alphabet.test.ts` can only say the code points
+    //    differ, and code points are the half a pixel never disagrees about.
+    // Choosing the fix is the A/B call in #138; whoever lands it updates this ledger with it.
+    const flagged = Object.entries(atlasJson.metrics)
+      .filter(([, metric]) => metric.notdef === true)
+      .map(([char]) => char);
+    console.log(`NOTDEF ${String(flagged.length)} ${flagged.join('')}`);
+    expect(
+      [...flagged].sort().join(''),
+      'the set of characters the baked font cannot draw changed — #138',
+    ).toBe([...'إابةتخدرصعغقلنوي∅⌁◌'].sort().join(''));
+    const shapes = new Set(
+      flagged.map((char) => {
+        const metric = atlasJson.metrics[char];
+        if (metric === undefined)
+          throw new Error(`the ledger names ${char}, the atlas has no such cell`);
+        return cellSignature(metric);
+      }),
+    );
+    expect(shapes.size, 'the notdef cells are not one shared box').toBe(1);
+    // The control: a letter the font really has must not share that box, or the comparison above
+    // would be matching noise against noise.
+    const known = atlasJson.metrics['a'];
+    if (known === undefined) throw new Error('the atlas has no a');
+    expect(shapes.has(cellSignature(known)), 'a real letter drew the same box as notdef').toBe(
+      false,
+    );
   });
 
   it('draws every glyph inside the box the bake claims for it', () => {

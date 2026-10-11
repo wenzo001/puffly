@@ -104,6 +104,7 @@ const scale = CELL / upm;
 const parts = [];
 const metrics = {};
 let noBox = 0;
+const missing = [];
 const t0 = performance.now();
 glyphs.forEach((char, index) => {
   const col = index % columns;
@@ -117,6 +118,13 @@ glyphs.forEach((char, index) => {
   // pixels against this file's own claim about where each glyph's ink belongs.
   const box = glyph.bbox;
   if (!Number.isFinite(box?.minY) || !Number.isFinite(box?.maxY)) noBox += 1;
+  // A font that has no such character answers with its `notdef` glyph, whose path is a perfectly
+  // legal rectangle — so "the grid has a cell for this character" was never the same claim as
+  // "the grid draws this character". Recording which cells are that rectangle is what lets a test
+  // tell the two apart (#138: the Arabic endonyms and the three 自动 chips ship as boxes, and
+  // `atlas-coverage.test.ts`'s "every locale's every character has a glyph" passes on them).
+  const notdef = glyph.id === 0 || glyph.name === 'notdef' || glyph.path?.commands?.length === 0;
+  if (notdef) missing.push(char);
   metrics[char] = {
     col,
     row,
@@ -125,6 +133,7 @@ glyphs.forEach((char, index) => {
     advance: glyph.advanceWidth / upm,
     yMin: Number.isFinite(box?.minY) ? box.minY / upm : -descent,
     yMax: Number.isFinite(box?.maxY) ? box.maxY / upm : ascent,
+    ...(notdef ? { notdef: true } : {}),
   };
 });
 const width = columns * CELL;
@@ -160,6 +169,7 @@ console.log(
     pngBytes: png.length,
     baseline: { ascent, descent },
     noBox,
+    notdef: missing.join(''),
     outlineMs: Math.round(t1 - t0),
     rasterMs: Math.round(t2 - t1),
     font: chosen.path,
