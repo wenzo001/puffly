@@ -294,13 +294,18 @@ and `StorageAdapter` (`game-storage`).
   how much of a spark's fall the table gives back, and how far the exhaled plume is lifted above the
   alpha Game Core authored for it. The last one goes through `intakeBurst`'s `plumeLift` rather than
   through the draw, because the lift has to land on the breath and on nothing else — and a particle
-  carries no kind for `drawSmoke` to ask about. `0.8` multiplies by exactly 1, so the deck's default is
+  carries no kind for the draw to ask about (`drawSmoke` was the 2D entry that used to ask; it retired
+  on 2026-10-10, and the rule it enforced is now the reason `plumeLift` exists at all). `0.8` multiplies
+  by exactly 1, so the deck's default is
   the shipped look rather than a change to it, and the ramp is written so each of the row's six detents
   is a different frame (a capped `(1 - realism) / 0.2` left four of them identical). Nothing in
-  `game-core` reads it either, and that is a tested claim rather than an intention:
-  realism.test.ts（2026-10-10 随 2D 光栅套件退役） runs one session at `0` and at `1` and compares
+  `game-core` reads it either — **and that half is currently true by inspection, not by test**: the
+  guard that pinned it, realism.test.ts（2026-10-10 随 2D 光栅套件退役）, ran one session at `0` and at `1`
+  and compared
   the whole state plus every event, which is the Frozen Core rule a skin already lives under, applied to
-  a look.
+  a look — and it retired with the raster suites without a successor. Today `grep -rn realism
+  packages/game-core/src` answers only the field declaration and its default. Restoring that red line as
+  a live judgement is #140; until then this sentence is the guard, which is the weaker thing.
 
 ## Verification layers
 

@@ -143,16 +143,24 @@ Every row is a word and a control, reached from the rail’s `settings` tab. Non
   frame, 50 of them were on screen. The rest had left. Air drag in the pool was a single 0.9/s borrowed
   from ash, and for an aerosol that is an order of magnitude too gentle: every one of the eleven
   cigarettes had its exhaled cloud entirely outside the stage two seconds after the breath, which is
-  the same defect the report described as 烟会到左上角. Smoke now has its own drag (12/s) and ash keeps
-  0.9/s, and no recipe number moved — the styles are still distinguishable, from a breath that barely
-  stirs to one that crosses a third of the frame. Rerun with
-  `npx vitest run packages/game-scene/src/__tests__/plume-on-stage.test.ts`.
+  the same defect the report described as 烟会到左上角. Smoke got its own drag then — 12/s at first,
+  and **6/s today** (`SMOKE_DRAG`, `packages/game-scene/src/intake.ts`: a first fix that let the whole
+  breath be born at once made 12 read as a travelling lump, so the birth got spread over the breath and
+  the drag came down) — while ash keeps 0.9/s, and no recipe number moved: the styles are still
+  distinguishable, from a breath that barely stirs to one that crosses a third of the frame. Rerun with
+  `npx vitest run packages/game-scene/src/__tests__/plume-on-stage.test.ts`, which today asks three
+  things of every cigarette the content ships — 95% of the cloud still in frame 1.2 s into the breath,
+  its centre still in frame at 2 s, and no more than 0.05 stage widths of sideways drift by 4 s.
 - **The thread is one thread.** With the smoke no longer flying off, the column got audited the same
   way: walk from the cherry to the top of the thread and count how much of the way some puff's own
   disc covers, and how tall the thread stands in puffs of its own size. All eleven cigarettes pass at
-  1.00 coverage and 5–24 puff-heights, and the two assertions were each proven to bite — thinning the
-  emission reddens the height, shrinking the puffs reddens the coverage. The constant 12 itself is the
-  fastest drag that keeps every breath on stage: at 8 two styles fail, at 6 four do. Rerun with
+  1.00 coverage and 5.9–24.9 puff-heights, and the two assertions were each proven to bite — thinning
+  the emission reddens the height, shrinking the puffs reddens the coverage. The drag constant is a
+  ladder rather than a guess, but the row this bullet used to quote (「at 8 two styles fail, at 6 four
+  do」) is gone: that sweep was read from a raster suite that retired on 2026-10-10, and the numbers
+  moved once the breath began to be born over time instead of all at once. The ladder as it reads now,
+  and why 6 rather than 12, is kept in `docs/SPEC.md`; the behaviour is guarded by
+  `plume-on-stage.test.ts`, named above. Rerun the thread with
   `npx vitest run packages/game-scene/src/__tests__/plume-continuity.test.ts`.
 - **The button does not sit on the table.** The chrome at the bottom of the screen is fixed pixels, so
   how much of the scene it eats depends on how tall the scene is: 16% of a portrait phone's height,
@@ -355,13 +363,13 @@ tapping. Nothing anywhere awards a streak, because a streak is a punishment with
 
 ## How it is verified
 
-| Command                                                 | What it proves                                                                                                                                                                                                                                                                                             |
-| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `npm test`                                              | 132 files / 1014 cases: the simulation and its state machine, replay determinism, statistics derived from the log, the boundaries above, and the two document guards — every `*.test.ts` cited here and in `docs/SPEC.md` must exist, and every `npm run …` must be a script the root package actually has |
-| `npm run typecheck`                                     | Every workspace, including the Vue shell                                                                                                                                                                                                                                                                   |
-| `npm run build` then `bash tests/smoke/served-build.sh` | The built app is servable from its subpath: entry script, manifest and service worker all answer                                                                                                                                                                                                           |
-| `node tests/smoke/touch-device.mjs <url>`               | **104 checks** (the suite prints its own total, so this is the last run here) in a real browser: a whole break performed with taps on an emulated phone and with a mouse in a desktop window, the chrome read against the state it claims, and a breath with light and dark inside it                      |
-| `node tests/smoke/readme-shots.mjs <url>`               | Not a check: it performs a break in the built artefact and rewrites the four pictures at the top of this file, then prints the machine values each frame was read at. What a frame should look like stays a human call                                                                                     |
+| Command                                                 | What it proves                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm test`                                              | 122 files / 1023 cases as measured on 2026-10-11 (the total moves with every guard added — this row is a reading, not a contract): the simulation and its state machine, replay determinism, statistics derived from the log, the boundaries above, and the two document guards — every `*.test.ts` cited here and in `docs/SPEC.md` must exist, and every `npm run …` must be a script the root package actually has |
+| `npm run typecheck`                                     | Every workspace, including the Vue shell                                                                                                                                                                                                                                                                                                                                                                              |
+| `npm run build` then `bash tests/smoke/served-build.sh` | The built app is servable from its subpath: entry script, manifest and service worker all answer                                                                                                                                                                                                                                                                                                                      |
+| `node tests/smoke/touch-device.mjs <url>`               | **160 checks** (measured on the served build 2026-10-11; the suite prints its own total) in a real browser: a whole break performed with taps on an emulated phone and with a mouse in a desktop window, the chrome read against the state it claims, and a breath with light and dark inside it                                                                                                                      |
+| `node tests/smoke/readme-shots.mjs <url>`               | Not a check: it performs a break in the built artefact and rewrites the four pictures at the top of this file, then prints the machine values each frame was read at. What a frame should look like stays a human call                                                                                                                                                                                                |
 
 The six steps above are run as one gate before a commit lands, in this order — format, lint with
 `--max-warnings 0`, typecheck, `npm test`, the subpath build (`PUBLIC_BASE=/puffly/`), the served
