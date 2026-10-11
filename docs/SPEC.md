@@ -652,6 +652,12 @@ scale
 比较两次跑动里渲染器**逐个索取**的 sprite 颜色（按下标对齐）：改之前 **60 片里 0 片换色**。
 现在烟羽在粒子出生那一刻就换掉烟雾类 burst 的颜色，材质类（`ember` 滤嘴、`ash` 灰、`impact` 托盘灰）
 保留 core 写给它们的颜色——皮肤可以改烟，不该把灰改成蓝色。
+（**2026-10-11 的一句总指路**：本文里"X.test.ts（2026-10-10 随 2D 光栅套件退役）"这种句子共 39 处、20 个名字，
+其中若干句仍按现在时在判。每一份今天的读者逐格列在文末「退役判据的去向」那张表里 —— 撞见标记先去那张表，
+别在原地猜那份判据还活不活。）
+
+（写这张表时踩到的一条格式规矩：**左列那些已经不存在的文件名不要加反引号** —— `tests/architecture.test.ts`
+  那条"文档点名的判据必须真的存在"会把反引号里的名字当活引用报红，本文其余 39 处退役标记因此一直是裸写的。）
 判据：plume-palette.test.ts（2026-10-10 随 2D 光栅套件退役）（4 条）。两条单点变异各自只红一条：
 调用点不传 `plumeTint` → 只红"repaints the plume…"；去掉材质那道 kind 守卫 → 只红
 "leaves the ash its own material colour"。另两条是防自证的正对照（两种候选色相距 >30）与确定性对照
@@ -2298,7 +2304,8 @@ reducedMotion + 力度随拨盘。
 
 真机这一格（`tests/smoke/touch-device.mjs` 新增一条；这一跑整套 161 条全绿）：**点火那一下必须穿过 recorder 采，不能事后看一眼** ——
 420 ms 在掉帧的页面上是好几秒墙钟（`advance()` 每帧最多记 64 ms 模拟时间）。实测
-`punch peak 0.9971, world scale peak 1.03490, released true`，那个 1.03490 与退役那套量的峰值是同一个数。
+`punch peak 0.9971, world scale peak 1.03490, released true`（第二次复跑读到 1.03488 —— 判据钉的是
+`> 1.03 且 ≤ 1.036` 这个区间，不是某一个数；峰值本身就落在 1.0349 附近，与退役那套量的峰值同一位小数）。
 第一版判据当时读的是"采样那一刻的值"，读到 0.9748 就把能用的功能判成坏的；顺手把另一种猜想也量掉了：
 一口里并不会重新进 BURNING（走一遍状态机：四次迁移，一次进 BURNING 都没有），所以那不是"又点了一次火"，
 是我取样取错了时刻 —— 改成等 release 到位（预算按最差 ~5 fps 折算 25 帧，给到 9 s）。
@@ -4716,7 +4723,7 @@ plume-contrast.test.ts（2026-10-10 随 2D 光栅套件退役） 那条「烟是
 **数**：`plume-layers.test.ts` 新开 **42 条**（11 只烟 × 3 个 `it.each`，加发牌比例、每七颗、分层共存、真的分开、
 散开次序、风口、事件无光晕、两条接线）；`npm test` = **121 档 919 条**（这片之前 120 档 877 条）；真机那 80 条
 没有新读者（这片不动 DOM），在同一份新 build 上复跑仍是 **80/80**。（这三个数都是 2026-10-08 那一次的账。
-今天现跑：`npm test` **125 档 1043 条**、真机 **161/161**，2026-10-11 量，出处与复跑口径见 README「How it is
+今天现跑：`npm test` **126 档 1047 条**、真机 **161/161**，2026-10-11 量，出处与复跑口径见 README「How it is
 verified」那一张表。）
 ### 烟盒今天能点：取烟有了自己的锚点，被点到的盒子会动（2026-10-08）
 
@@ -5734,20 +5741,37 @@ weather/paint/backdrop 成新家，props/room 合并式承接），7 个"混着�
 | 退役的那份 | 今天的读者 | 我核到哪一步 |
 | --- | --- | --- |
 | realism.test.ts | `packages/game-core/src/__tests__/realism-purity.test.ts`（7 条） | 本轮回建：六档比整场会话 + `quality` 阳性对照；牙实测过（核心偷读旋钮 ⇒ 红 5 条） |
-| ignition-punch.test.ts | `packages/game-scene/src/__tests__/ignition-punch.test.ts`（9 条）+ 真机 1 条 | 本轮回建，峰值/25 帧/回到 1.0/逐帧压暗四条都在；真机读到世界缩放峰值 **1.03490** |
+| ignition-punch.test.ts | `packages/game-scene/src/__tests__/ignition-punch.test.ts`（9 条）+ 真机 1 条 | 本轮回建，峰值/25 帧/回到 1.0/逐帧压暗四条都在；真机那条读到的世界缩放峰值两次 1.03490 / 1.03488（判据是区间 >1.03 且 ≤1.036） |
 | plume-lift.test.ts | `packages/game-scene/src/__tests__/plume-lift.test.ts`（4 条） | 本轮回建。**留一条自我更正**：第一版读出生时的 `alpha`（池子那时恒为 0）⇒ 两次变异全绿，是探针抓住的，不是读代码想到的 |
 | prop-placement.test.ts | 一半：`packages/game-scene/src/__tests__/stage.test.ts`（9 条）+ 真机「the rod is drawn where the core says」 | 同源那半逐条读过（分数→世界、四边落舞台边、杆角取自两个已公布点）。**"打火机与烟盒至少留半个触摸目标"那半今天没有判据** —— 全仓没有任何断言比较过两者位置，挂在 #124 |
 | place-features.test.ts | 一半：`packages/game-scene/src/__tests__/room.test.ts` | 颜色那条我读了标题（暖屋冷屋两张画）。**形状那半没有判据**：`backdrop.ts` 的 `geometry.details` 生产在读，没人比过两个场所的轮廓 ⇒ #144 |
-| warmth-scale.test.ts | `room.test.ts` | 读了它那条断言的标题与意图，正是当年三条的核心（暖冷是场所带的字段，不是渲染器的第二意见） |
+| warmth-scale.test.ts | room.test.ts | 读了它那条断言的标题与意图，正是当年三条的核心（暖冷是场所带的字段，不是渲染器的第二意见） |
 | paper-dimple.test.ts | `apps/web/src/__tests__/hint-art.test.ts`（import `DIP_SHARE`/`WAIST`）+ 真机"捏腰"那条 | 读了 import 与那段说明（两侧朝轴弯、最深在 WAIST、对照是两倍深度） |
 | rod-anchor.test.ts | `stage.test.ts` 的「takes the rod's angle from the two published points」+ 真机那条 | 两条都读过正文；真机那条本会话刚加过方向与静止两道闸 |
 | chrome-band.test.ts | `apps/web/src/__tests__/chrome-furniture.test.ts` + `packages/game-core/src/__tests__/stage.test.ts`（读 `CHROME_CLEAR_Y`） | 两条都读了断言：前者「matches the band the pill actually paints」与「is handed the height by every resize, or the line stays decorative」正是"下沿家具是像素不是比例"这半；后者另有一条「no prop lies under the chrome, in any shape of stage」把当年那张 12 形状表接住了 |
 | plume-column.test.ts | `plume-continuity.test.ts`（12 条，今天印 coverage 1.00 / heights 5.9–24.9） | 本会话现跑过，读的正是它打印的那三行 |
 | rendering.test.ts | §15 字段表与 §54 预算：`stage.test.ts`、`particles` 一侧**未逐条核**；§48「拿深冻的活快照喂场景读者」那半**今天没有同名读者** | `grep -rl freeze --include='*.test.ts'` 只答出 `rain-fall.test.ts` 里不相干的一处。要么编译期 `DeepReadonly` 就算够（那就是 ARCHITECTURE 那句话该改口），要么补运行时深冻 —— 这条留在剩下的 13 处里 |
 
-**还没定性的 9 份**（外加 `rendering` 的另两半、ARCHITECTURE 里 `prop-placement` 与 `rendering` 的两处指针）——按上面那张表的规矩逐格读正文，别按关键词命中数下结论（这一轮我先试了关键词法，
-`contrast|darken|edge` 一把命中 41 个文件，那就是噪声不是判据）：`ash-flake` `background-stillness`
-`ember-glow` `ember-heat` `lid-hinge` `pack-object` `plume-contrast` `plume-palette` `sprite-focus`。
-挂在 #142。
+**剩下 9 份的定性**（同一把尺子：读断言正文，不读关键词命中数）：
+
+| 退役的那份 | 今天的读者 | 我核到哪一步 |
+| --- | --- | --- |
+| plume-palette.test.ts | `packages/game-scene/src/__tests__/plume-palette.test.ts`（4 条，2026-10-11 回建） | 呼气整片取皮肤色 / 没有那一层时保留烟草自己的色 / 灰与火星永不被重染 / 颜色在出生时定死。**两次变异各红其所**：全类都染色 ⇒ 只红材质那条；干脆不染 ⇒ 红呼气与出生那 2 条；另加一条静态事实撑着"出生时定死"——全仓 `slot.tint` 只有一处赋值（`particles.ts:204`）。**顺带把 README 那句改口**：它原本说这条路径由 `skins.test.ts` 与真机 S17 判着，而那两者判的是皮肤形状与图鉴卡片长按，都不判烟羽颜色。**另一处佐证**：本节上面记的当年两次单点变异（不传 `plumeTint` ⇒ 只红"重染烟羽"；去掉材质守卫 ⇒ 只红"灰保留自身色"）与今天这份的落点一一对上 —— 回建的那份判的确实是同一件事 |
+| background-stillness.test.ts | `packages/game-core/src/__tests__/stillness.test.ts`（4 条）+ `rain-fall.test.ts` | 相邻帧不跳风、不跳湍流、静置里风与烟仍在走 —— 正是当年"alpha 不许闪、又不能冻成静照"那两条；雨那半由 rain-fall 的「still comes down, so the flicker was not cured by a freeze」接住。**"每帧 fill 次数恒定"没有对应读者**（那是画布调用计数，3D 里等价的该是 draw call 计数），归 #145 |
+| sprite-focus.test.ts | `packages/game-scene/src/__tests__/sprite.test.ts`（23 条） | 中间实边缘清、单调衰减所以烟里没有环、"caller 要 feather 才给 feather 空间、不要就保持原形" —— 三条主张都有活读者；"比出厂那版更紧"是当时两份剖面的对照，本就不复跑 |
+| ember-glow.test.ts | 半格：`packages/game-scene/src/__tests__/warm-pool.test.ts` 判那两团光按 Demo 的数 | **"辉光半径就取模拟给的 `glowRadius`、熄灭那一下是回暗不是往外炸"没有读者** —— `glowRadius` 在全部 live 判据里 0 命中 ⇒ #145 |
+| ember-heat.test.ts | 无 | `cherryHot` 生产在读（SceneStage 烧色），但"只有那口气给白芯、静置是橙、冷却经过暗红而不是直接关、中间温度名副其实"在 live 判据里一条都没有（唯一命中 temperature 的 `exhale-tier.test.ts` 判的是口长分级）⇒ #145 |
+| lid-hinge.test.ts | 半格：真机读 `lighter-lid` 的 `rotation.x`（翻到 −1.36 rad、松手回关） | 角度有读者，**"合页那一端一动不动 + 刚体长度在投影里只按刚体的方式缩短"没有**（后者是光栅时代的画法判据）⇒ #145 |
+| ash-flake.test.ts | 半格：`ash-pile.test.ts`（6 条）判盘里那堆的形状/落高/跟随缸子缩放/不出界；`ash-break.test.ts` 判"先断一拍" | **"每片碎屑长厚不相等、散开时保持圆、落在核心放的那个点而不是渲染器挑的点"没有读者**（live 里提到 flake 的两处判的是别的事）⇒ #145 |
+| pack-object.test.ts | 部分：`pack-tap.test.ts`（点着有反馈、在核心里）+ §37 那一族（DOM `.hit` 与锚点） | "身上有个洞比自身任何明暗都暗"与"包膜是两端淡出的渐变"是像素判据，随 #117 退役；"命中圈盖住画出的轮廓且止于此"在 3D 里换了主语（画的是盒子、点是 DOM 圈），**这一格今天只能算换了判法、没算有人判** ⇒ 归 #124（道具形状那格一起拍） |
+| plume-contrast.test.ts | 无机器读者 —— 按分工归眼睛 | 四条全是"合成后的帧上烟与屋子谁压过谁"。今天活着的相邻读者是 `room.test.ts`（调色板同源、暖屋冷屋两张画）；剩下的正是 **#135**（底色比稿子亮约 6 倍）等他拍的那格。README「Whether the smoke is the smoke」已把这条分工写明，所以这不是漏，是**同一格里机器与眼睛各管一半** |
+
+**收口之后剩下没读者的四格**（都是"回建一条判据"或"明写归眼睛"两种结局之一，要先拍一次再动手，别一次动四格）：
+碎屑的形状与出处、`glowRadius` 与回暗方向、余烬温度→颜色那条斜坡、翻盖的合页不动点；另加静置那格的
+"每帧绘制次数恒定"这一半。挂在 #145。
+
+**方法上的一次失败要留字**：这一轮我先把"关键词命中数"当"有没有活判据"用，
+`grep -lE 'contrast|darken|edge'` 一把命中 41 个测试文件 —— 那是噪声。命中文件名只能列候选，
+判据必须读到断言标题/正文；而"半格有着落"要写成两半，不能并成一格打勾。
 
 本轮顺带把三处"今天的总数"改成现跑：`npm test` **125 档 1043 条**、真机 **161/161**（2026-10-11）。

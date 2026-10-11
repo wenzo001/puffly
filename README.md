@@ -111,9 +111,13 @@ Every row is a word and a control, reached from the rail’s `settings` tab. Non
   `grep -n "unlock:" packages/game-content/src/environments.ts` prints which room sits on which.
   Picking one is also measured rather than assumed: the same state painted against two rooms changes
   most of the colours the background asks for, and a selection that never reached the state would
-  fail its own test. (That pixel test, and the 2D suites with it, retired on 2026-10-10; the palette
-  path stays guarded by `npx vitest run apps/web/src/__tests__/skins.test.ts` and the real-device
-  S17 checks.)
+  fail its own test. (That pixel test, and the 2D suites with it, retired on 2026-10-10. What answers
+  for that half now is `npx vitest run packages/game-scene/src/__tests__/room.test.ts`, which reads the
+  palette the scene paints with and asks that a warm room and a cold one be different pictures;
+  `npx vitest run apps/web/src/__tests__/skins.test.ts` guards the other half — that a skin stays four
+  colours and at most one place pointer, and carries no number. Whether the two rooms actually look
+  different is a human call, and the device suite's S17 checks judge the archive card's long-press,
+  not the palette.)
 - **All four layers are layers** — a skin is 纸面, 余烬, 烟羽 and 光池, and the third one used to
   reach only the haze behind the smoke, where its alpha tops out at 0.033. That was measured by
   recording every colour the renderer asks a sprite for: with a palette whose only non-default layer
@@ -121,7 +125,11 @@ Every row is a word and a control, reached from the rail’s `settings` tab. Non
   each puff is born, while the filter, the ash and the dust off the tray keep what the tobacco has.
   What is already in the air when you switch stays as it was for a few seconds — smoke that has left
   the rod does not get a second colour. (The 0-of-60 reading came from a raster suite that retired
-  on 2026-10-10; the real-device S17 checks are where the claim lives now.)
+  on 2026-10-10; the rule it left behind is judged now by
+  `npx vitest run packages/game-scene/src/__tests__/plume-palette.test.ts` — four cases: the breath takes
+  the skin's colour on every particle, an absent layer leaves the tobacco's own colour alone, ash and
+  sparks are never repainted, and the colour is fixed at birth because `slot.tint` is written in exactly
+  one place. Whether the result is a colour you'd choose stays a human call.)
   A skin may also name one room — the deck's 「外加一个环境预设」, which the brief's own hard
   constraint seemed to forbid until it was ruled in. It is a pointer to a room that already exists
   and only moves the player into one they have already reached: 一套皮肤带来一个地方，但颜色不是钥匙.
@@ -365,7 +373,7 @@ tapping. Nothing anywhere awards a streak, because a streak is a punishment with
 
 | Command                                                 | What it proves                                                                                                                                                                                                                                                                                                                                                                                                        |
 | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `npm test`                                              | 125 files / 1043 cases as measured on 2026-10-11 (the total moves with every guard added — this row is a reading, not a contract): the simulation and its state machine, replay determinism, statistics derived from the log, the boundaries above, and the two document guards — every `*.test.ts` cited here and in `docs/SPEC.md` must exist, and every `npm run …` must be a script the root package actually has |
+| `npm test`                                              | 126 files / 1047 cases as measured on 2026-10-11 (the total moves with every guard added — this row is a reading, not a contract): the simulation and its state machine, replay determinism, statistics derived from the log, the boundaries above, and the two document guards — every `*.test.ts` cited here and in `docs/SPEC.md` must exist, and every `npm run …` must be a script the root package actually has |
 | `npm run typecheck`                                     | Every workspace, including the Vue shell                                                                                                                                                                                                                                                                                                                                                                              |
 | `npm run build` then `bash tests/smoke/served-build.sh` | The built app is servable from its subpath: entry script, manifest and service worker all answer                                                                                                                                                                                                                                                                                                                      |
 | `node tests/smoke/touch-device.mjs <url>`               | **161 checks** (measured on the served build 2026-10-11; the suite prints its own total) in a real browser: a whole break performed with taps on an emulated phone and with a mouse in a desktop window, the chrome read against the state it claims, and a breath with light and dark inside it                                                                                                                      |
