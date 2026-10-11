@@ -2946,6 +2946,28 @@ try {
     window.requestAnimationFrame(tick);
   });
 
+  // Which tab the rail is lit on, and what the scene's four plates are doing about it. Read here,
+  // while the rod is still on the table (`light`), and again after a breath has moved the row along —
+  // the claim is the transition, not the position: a plate that only ever works for the tab that
+  // happened to be lit at the first frame is invisible from then on.
+  const railPlates = () =>
+    page.evaluate(() => {
+      const ctx = window.__pufflyScene.context;
+      const scene = 'value' in ctx.scene ? ctx.scene.value : ctx.scene;
+      const ops = [];
+      scene.traverse((o) => {
+        if (/^rail-tab-[0-3]$/.test(String(o.name ?? '')))
+          ops[Number(o.name.slice(-1))] = +(o.material.opacity ?? 0).toFixed(2);
+      });
+      return {
+        ops,
+        on: [...document.querySelectorAll('.rail .tab')].findIndex(
+          (tab) => tab.dataset.on === 'true',
+        ),
+        phase: document.querySelector('.stage')?.dataset.phase ?? '',
+      };
+    });
+  const railAtTable = await railPlates();
   // §2's two warm lights, read where they are actually stood up. The pool used to be handed a centre
   // and a radius in px on a field the scene multiplies by the frame, which placed it 149
   // canvas-widths to the right of the screen — measured on the served build (2026-10-11): no
@@ -3221,6 +3243,25 @@ try {
     pinchSeen === null
       ? 'never pinched'
       : `waist ${pinchSeen.waist.toFixed(4)} ends ${pinchSeen.ends.toFixed(4)}`,
+  );
+  // §1's lit tab is the only filled thing in the row: a gradient plate with the dark §1 ink on it.
+  // The ink is mirrored off the DOM, so when the plate does not arrive the label is brown-on-charcoal
+  // and the row says nothing about where the cigarette is. |control|: dropping `material.opacity = 1`
+  // out of `fillCard`'s gradient branch reddens this — that branch used to leave whatever the flat
+  // branch had written, and a tab that started quiet stayed at 0 after the row moved onto it
+  // (measured on the served build 2026-10-11: the lit tab's plate at opacity 0, geometry and stops in
+  // place). The assertion needs the row to have actually moved, and says so when it has not.
+  const litAfterBreath = await railPlates();
+  const plateOf = (read) => read.ops[read.on] ?? -1;
+  const quietOf = (read) => Math.max(...read.ops.map((op, index) => (index === read.on ? -1 : op)));
+  check(
+    '3D: the lit tab is the one with a plate under it, and it follows the row (S6 · §1)',
+    railAtTable.phase === 'light' &&
+      litAfterBreath.phase !== 'light' &&
+      plateOf(railAtTable) > 0.9 &&
+      plateOf(litAfterBreath) > 0.9 &&
+      quietOf(litAfterBreath) < 0.1,
+    `at the table tab ${String(railAtTable.on)} plate ${String(plateOf(railAtTable))} (${railAtTable.phase}) → after the breath tab ${String(litAfterBreath.on)} plate ${String(plateOf(litAfterBreath))} (${litAfterBreath.phase}), others ${String(quietOf(litAfterBreath))}, ops ${JSON.stringify(litAfterBreath.ops)}`,
   );
   // The plume's rung on the ladder: the pool's `depth` is simulation (0.25..1), not a z. The first
   // version handed it to the scene right after 0.02, so every puff sat at 0.3..1.0 — in front of

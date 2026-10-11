@@ -700,18 +700,21 @@ function onSceneReady(context: unknown): void {
   hudRig.value = buildRig();
   pillRig.value = buildRig();
 
-  const buildCard = (z: number): CardRig => {
+  const buildCard = (z: number, name = ''): CardRig => {
     const material = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false });
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
     mesh.frustumCulled = false;
     mesh.visible = false;
     mesh.position.z = z;
+    // Named where a browser check has to point at one specific plate — the rail's four tabs are the
+    // only cards whose fill arrives and leaves with the state, so that is where the claim lives.
+    mesh.name = name;
     rigGroup.add(mesh);
     return { mesh, material, signature: '', baseY: 0, baseOpacity: 1 };
   };
   pillCardRig.value = buildCard(0.05);
   railRig.value = buildCard(0.068);
-  tabRigs.value = [buildCard(0.07), buildCard(0.07), buildCard(0.07), buildCard(0.07)];
+  tabRigs.value = [0, 1, 2, 3].map((index) => buildCard(0.07, `rail-tab-${String(index)}`));
   catCardRig.value = buildCard(0.06);
   archiveCardRig.value = buildCard(0.09);
 
@@ -2700,6 +2703,13 @@ function fillCard(rig: CardRig, element: HTMLElement | null, shrink: number): vo
       // Vertex colours are what carry the stops; without this the card paints a flat white.
       material.vertexColors = true;
       material.color.set('#ffffff');
+      // A gradient background is a painted thing: the opacity has to come back to 1. The flat branch
+      // below writes an opacity for every case it sees — including `background: none`, which is 0 —
+      // and a card that starts quiet and later gets a gradient (the rail's tabs, the selected chips)
+      // kept that 0. Measured on the served build 2026-10-11: the lit tab's plate sat at opacity 0
+      // with its gradient geometry in place, so the tab's dark §1 ink had no orange under it and the
+      // selected row read as blank.
+      material.opacity = 1;
     } else {
       const flat = parseColour(style.backgroundColor);
       positions.push(-0.5, -0.5, 0, 0.5, -0.5, 0, -0.5, 0.5, 0, 0.5, 0.5, 0);
