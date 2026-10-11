@@ -28,3 +28,11 @@ export function blockAfter(source: string, condition: RegExp): string {
   }
   throw new Error('unbalanced braces');
 }
+
+/**
+ * Source with its comments gone. A guard that reads a file which explains the rule it guards will
+ * otherwise be satisfied by that prose: a deleted attribute still matched the sentence naming it.
+ */
+export function stripComments(text: string): string {
+  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/<!--[\s\S]*?-->/g, '');
+}

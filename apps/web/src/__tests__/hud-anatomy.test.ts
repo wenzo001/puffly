@@ -13,6 +13,7 @@
 
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { blockAfter, stripComments } from './sourceProbe';
 
 const HUD = readFileSync(new URL('../components/HudBar.vue', import.meta.url), 'utf8');
 const TOKENS = readFileSync(new URL('../styles/global.css', import.meta.url), 'utf8');
@@ -117,9 +118,11 @@ describe('the ring is §2’s ring (页头 40×40)', () => {
   });
 
   it('keeps the track at the 22% the Demo says a player needs to see the whole break', () => {
-    const track = HUD.slice(HUD.indexOf('.track {'));
+    // The rule alone, cut by braces. A fixed-length window from the selector ran on into `.arc`,
+    // which also declares `stroke-width: 3`, so deleting the track's own stroke width stayed green.
+    const track = blockAfter(stripComments(HUD), /\.track \{/);
     expect(track).toMatch(/var\(--soft-white\) 22%, transparent/);
-    expect(track.slice(0, 220)).toMatch(/stroke-width: 3;/);
+    expect(track).toMatch(/stroke-width: 3;/);
   });
 });
 

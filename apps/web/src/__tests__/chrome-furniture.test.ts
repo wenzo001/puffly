@@ -10,6 +10,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { CHROME_BAND_PX, CHROME_EDGE_PX } from '@puffly/game-core';
+import { blockAfter, stripComments } from './sourceProbe';
 
 const PILL = readFileSync(new URL('../components/CtaPill.vue', import.meta.url), 'utf8');
 const RAIL = readFileSync(new URL('../components/TabRail.vue', import.meta.url), 'utf8');
@@ -57,12 +58,16 @@ describe('the two bottom controls are the Demo’s widths, not their content’s
   });
 
   it('the capsule spans the phone with §2’s 20 px margins and its items share it', () => {
-    expect(RAIL).toContain('width: calc(100% - 40px)');
-    expect(RAIL).toContain('max-width: 350px');
-    expect(RAIL).toContain('height: 62px');
-    expect(RAIL).toContain('border-radius: 32px');
+    // Each figure read from the rule that owns it, comments gone. Whole-file reads were not enough:
+    // `border-radius: 32px` is in `.rail` *and* in `.tab`, so deleting the capsule's own radius left
+    // the check green — and `.tab`'s `flex: 1` sits in the line above its own explanation.
+    const rail = blockAfter(stripComments(RAIL), /\.rail \{/);
+    expect(rail).toContain('width: calc(100% - 40px)');
+    expect(rail).toContain('max-width: 350px');
+    expect(rail).toContain('height: 62px');
+    expect(rail).toContain('border-radius: 32px');
     // §2's `.item` is `flex: 1`; a min-width would let four labels shrink-wrap the capsule again.
-    const tab = RAIL.slice(RAIL.indexOf('.tab {'));
+    const tab = blockAfter(stripComments(RAIL), /\.tab \{/);
     expect(tab, 'the tabs no longer share the capsule').toContain('flex: 1');
     expect(tab, 'a min-width puts the shrink-wrap back').not.toContain('min-width: 6');
     // §2 gives the item the capsule's own radius and lets the browser clamp it.

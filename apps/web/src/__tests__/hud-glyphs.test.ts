@@ -3,9 +3,12 @@
  * flame, three airflow lines, a swirl with its dot, and three fading ash lines — and never a digit.
  * The symbols live in one component (`DemoGlyph.vue`) so this test reads both files: HudBar has to
  * pick the right name per screen, and the component has to carry the Demo's own geometry and ink.
+ * Source text buys structure only — that the right rule carries the turn and the box is 26px. Whether
+ * the mark lands inside the ring is a rendered fact, and it took a composited screenshot to see.
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { blockAfter, stripComments } from './sourceProbe';
 
 const HUD = readFileSync(new URL('../components/HudBar.vue', import.meta.url), 'utf8');
 const GLYPH = readFileSync(new URL('../components/DemoGlyph.vue', import.meta.url), 'utf8');
@@ -108,19 +111,21 @@ describe('DemoGlyph carries the Demo’s own five symbols', () => {
   });
 
   it('turns the dial on the arc, so the symbol keeps a square screen matrix', () => {
-    // §2 rotates the *circle* (`transform="rotate(-90 20 20)"`). When the rotation sat on
+    // §2 rotates the *circle* (`rotate(-90 20 20)` on the arc). When the rotation sat on
     // `.ring svg` instead, it also turned the symbol — and the scene places its own copy from that
     // element's `getScreenCTM()`, so a quarter-turned matrix left the ring drawing empty.
-    // Comments are stripped first: this file explains the old rule, and a guard that reads its own
-    // prose as code would fail for the wrong reason.
-    const css = HUD.replace(/\/\*[\s\S]*?\*\//g, '');
-    const dial = css.slice(css.indexOf('.ring svg {'));
-    expect(dial.slice(0, 200)).not.toContain('rotate(');
-    expect(HUD).toContain('transform="rotate(-90 20 20)"');
-    // And the symbol is §2’s 26×26 box, not a fill of the ring.
-    const mark = css.slice(css.indexOf('.ring svg.mark {'));
-    expect(mark.slice(0, 260)).toMatch(/width: 26px;/);
-    expect(mark.slice(0, 260)).toMatch(/height: 26px;/);
-    expect(mark.slice(0, 260)).not.toContain('rotate(');
+    // Each check reads one rule body or one tag, comments gone: a fixed-length window from
+    // `.ring svg` reaches on into `.ring svg.mark`, so one rule would answer for the other; and this
+    // file explains the old rule, so prose naming a literal must not be able to satisfy its guard.
+    const code = stripComments(HUD);
+    expect(blockAfter(code, /\.ring svg \{/)).not.toContain('rotate(');
+    expect(stripComments(ringBlock())).toMatch(
+      /class="arc"[\s\S]{0,120}?transform="rotate\(-90 20 20\)"/,
+    );
+    // And the symbol is §2's 26×26 box, not a fill of the ring — and it carries no turn of its own.
+    const mark = blockAfter(code, /\.ring svg\.mark \{/);
+    expect(mark).toMatch(/width: 26px;/);
+    expect(mark).toMatch(/height: 26px;/);
+    expect(mark).not.toContain('rotate(');
   });
 });
