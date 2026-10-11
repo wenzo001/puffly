@@ -1162,10 +1162,17 @@ warmth-scale.test.ts（2026-10-10 随 2D 光栅套件退役） 把两端和单�
   用升幅去换颗数 ⇒ 红 3 条）。**这一格还留了一条自我更正**：第一版判据读的是出生时的 `particle.alpha`，
   而池子在 `update()` 里才把 `alphaPeak` 展开成 alpha —— 出生时 alpha 恒为 0，于是前两条变异全绿。
   是探针（改输入必须报红）当场把它抓出来的，不是靠读代码想到的。
-- place-features 四条 → **形状那一半没有活判据**。今天活着的是 `backdrop.ts` 的 `geometry.details`
-  （每场所播种的墙面杂物，生产侧在读）与 `room.test.ts` 的**颜色**差异；"逐个 id 真的画进像素 / 同一 kind
-  下没有两处 furnish 相同 / 词表 14 个全被用上"这三条问的是**轮廓**，3D 里没有任何判据比过两个场所的形状。
-  挂在 #144，别当已验收。）
+- place-features 四条 → **形状那一半今天有判据了**（2026-10-11 回建：
+  `packages/game-scene/src/__tests__/place-shape.test.ts` 7 条）：同一个 `kind` 下 35 对场所两两不是同一张图、
+  五条几何通道各自只属于谁（steps 只属 stairwell、ridge 只属 mountain、neon 只属 street 那三处）、
+  杂物词表四格全可达、同一次 break 里不抖而换日才动、level 也在种子里。三次单点变异各红其所
+  （种子里去掉场所 id ⇒ 只红"两两不同"那一条；salt 里去掉日子 ⇒ 只红"换日才动"；
+  把 steps 漏给 corner ⇒ 只红"通道各属谁"）。
+  **仍然没有读者的只剩"逐个 id 真的画进像素"那一条**：3D 里的等价物是 mesh 可见性或离屏合成，
+  要不要为此重建一条像素级判据归他拍（2D 那一套 2026-10-10 才整批退役），仍挂在 #144。
+  另外两条今天**换了形状、不是丢了也没法照原样回建**：词表当年 14 个 feature id，今天是 4 个杂物
+  kind × 5 种几何通道；"出厂九处仍是空的"今天不成立（21 处每处都播种 5 件，没有故意留白的九处），
+  所以这一格不补那条"留白是有意的"，只在此写明它换成了什么。）
 
 23. Environment System
 
@@ -5767,7 +5774,7 @@ weather/paint/backdrop 成新家，props/room 合并式承接），7 个"混着�
 | ignition-punch.test.ts | `packages/game-scene/src/__tests__/ignition-punch.test.ts`（9 条）+ 真机 1 条 | 本轮回建，峰值/25 帧/回到 1.0/逐帧压暗四条都在；真机那条读到的世界缩放峰值两次 1.03490 / 1.03488（判据是区间 >1.03 且 ≤1.036） |
 | plume-lift.test.ts | `packages/game-scene/src/__tests__/plume-lift.test.ts`（4 条） | 本轮回建。**留一条自我更正**：第一版读出生时的 `alpha`（池子那时恒为 0）⇒ 两次变异全绿，是探针抓住的，不是读代码想到的 |
 | prop-placement.test.ts | 一半：`packages/game-scene/src/__tests__/stage.test.ts`（9 条）+ 真机「the rod is drawn where the core says」 | 同源那半逐条读过（分数→世界、四边落舞台边、杆角取自两个已公布点）。**"打火机与烟盒至少留半个触摸目标"那半今天没有判据** —— 全仓没有任何断言比较过两者位置，挂在 #124 |
-| place-features.test.ts | 一半：`packages/game-scene/src/__tests__/room.test.ts` | 颜色那条我读了标题（暖屋冷屋两张画）。**形状那半没有判据**：`backdrop.ts` 的 `geometry.details` 生产在读，没人比过两个场所的轮廓 ⇒ #144 |
+| place-features.test.ts | 两条：`packages/game-scene/src/__tests__/room.test.ts`（颜色）+ `packages/game-scene/src/__tests__/place-shape.test.ts`（形状，2026-10-11 回建 7 条） | 颜色那条我读了标题（暖屋冷屋两张画）。形状那半今天有人比了：同 kind 下 35 对场所两两不同一张图、五种几何通道各属谁、词表四格可达、换日才动 —— 三次变异各红其所。**只剩"真的画进像素"这一格没有机器读者**（3D 里等价物是 mesh 可见性或离屏合成，要不要重建像素判据归他拍）⇒ #144 |
 | warmth-scale.test.ts | room.test.ts | 读了它那条断言的标题与意图，正是当年三条的核心（暖冷是场所带的字段，不是渲染器的第二意见） |
 | paper-dimple.test.ts | `apps/web/src/__tests__/hint-art.test.ts`（import `DIP_SHARE`/`WAIST`）+ 真机"捏腰"那条 | 读了 import 与那段说明（两侧朝轴弯、最深在 WAIST、对照是两倍深度） |
 | rod-anchor.test.ts | `stage.test.ts` 的「takes the rod's angle from the two published points」+ 真机那条 | 两条都读过正文；真机那条本会话刚加过方向与静止两道闸 |
