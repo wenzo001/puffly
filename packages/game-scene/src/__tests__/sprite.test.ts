@@ -107,6 +107,33 @@ describe('a card is a rounded rectangle, not a disc', () => {
     expect(alphaAt(1, 1)).toBe(255);
     expect(alphaAt(63, 1)).toBe(255);
   });
+
+  it('keeps a wide stadium its full height — the pill is 342 × 62 with r31 on both ends', () => {
+    // The pill's own numbers: 31 px is 18 % of the half-width and 100 % of the half-height. The
+    // middle of the top edge is a straight run of the card, so it has to be painted; only the two
+    // ends are round. |control|: dividing the corner arc by one radius for both axes (what this
+    // replaces) turns the whole card into a 12 px band — measured on the served build 2026-10-11,
+    // where the button's own pixels were rgb(239,113,40) for 12 rows out of 62.
+    const size = 65;
+    const data = roundedRect(size, 0.181, 1).image.data as Uint8Array;
+    const alphaAt = (x: number, y: number): number => data[(y * size + x) * 4 + 3] as number;
+    expect(alphaAt(32, 32)).toBe(255);
+    expect(alphaAt(32, 63)).toBe(255);
+    expect(alphaAt(32, 1)).toBe(255);
+    // The ends stay round: the corner is outside the arc, the middle of the end cap is inside it.
+    expect(alphaAt(1, 1)).toBeLessThan(60);
+    expect(alphaAt(1, 32)).toBe(255);
+  });
+
+  it('and keeps a tall one its full width, the same rule the other way', () => {
+    const size = 65;
+    const data = roundedRect(size, 1, 0.181).image.data as Uint8Array;
+    const alphaAt = (x: number, y: number): number => data[(y * size + x) * 4 + 3] as number;
+    expect(alphaAt(63, 32)).toBe(255);
+    expect(alphaAt(1, 32)).toBe(255);
+    expect(alphaAt(1, 1)).toBeLessThan(60);
+    expect(alphaAt(32, 1)).toBe(255);
+  });
 });
 
 describe('a control border is a frame, not a fill', () => {

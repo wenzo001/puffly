@@ -180,21 +180,22 @@ function roundedMask(
       // The edge bounds and the radius that turns them — per axis, so a card on a wide quad keeps
       // round corners instead of stretched ones. A radius never exceeds its half-span, the way CSS
       // clamps.
-      const edgeX = Math.max(1e-6, spanX - Math.min(cornerX, spanX));
-      const edgeY = Math.max(1e-6, spanY - Math.min(cornerY, spanY));
-      const radius = Math.min(Math.min(cornerX, spanX), Math.min(cornerY, spanY));
-      const cx = Math.max(0, dx - edgeX) / Math.max(1e-6, radius);
-      const cy = Math.max(0, dy - edgeY) / Math.max(1e-6, radius);
+      const rx = Math.min(cornerX, spanX);
+      const ry = Math.min(cornerY, spanY);
+      const edgeX = Math.max(1e-6, spanX - rx);
+      const edgeY = Math.max(1e-6, spanY - ry);
+      const cx = Math.max(0, dx - edgeX) / Math.max(1e-6, rx);
+      const cy = Math.max(0, dy - edgeY) / Math.max(1e-6, ry);
       const distance = Math.hypot(cx, cy);
+      // The feather is a width in texels and so wants a single number; the smaller radius is the one
+      // whose arc the softness would otherwise smear the most.
+      const soft = Math.max(1e-6, Math.min(rx, ry));
       mask[y * size + x] =
         distance <= 1
           ? 1
           : Math.max(
               0,
-              Math.min(
-                1,
-                (1 + feather / (centre * radius) - distance) * ((centre * radius) / feather),
-              ),
+              Math.min(1, (1 + feather / (centre * soft) - distance) * ((centre * soft) / feather)),
             );
     }
   }
