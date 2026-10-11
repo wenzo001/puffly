@@ -772,12 +772,20 @@ const hintCentre = async (page) => {
   });
   check('a coarse pointer caps DPR at 2', ratio <= 2.05, `canvas is ${ratio}x`);
 
-  const target = (
-    await page.evaluate(() =>
-      getComputedStyle(document.documentElement).getPropertyValue('--tap-target'),
-    )
-  ).trim();
-  check('a coarse pointer gets 54px targets', target === '54px', target);
+  // Two reds that look alike are one red too many: the 54 px target comes from a media query, so a
+  // page whose emulation did not apply reports the desktop default and reads exactly like a product
+  // that lost its finger sizing. Measured 2026-10-11 — one round in four reported 44 px on a build
+  // that was fine before it and after it (#147). So the emulation is named on its own line first.
+  const pointer = await page.evaluate(() => ({
+    coarse: window.matchMedia('(pointer: coarse)').matches,
+    target: getComputedStyle(document.documentElement).getPropertyValue('--tap-target').trim(),
+  }));
+  check(
+    'the emulated phone is a coarse-pointer device',
+    pointer.coarse === true,
+    `(pointer: coarse).matches=${String(pointer.coarse)} --tap-target=${pointer.target}`,
+  );
+  check('a coarse pointer gets 54px targets', pointer.target === '54px', pointer.target);
 
   // Sampled before anything is lit: an idle room has drift and dust, but no breath in it.
   const before = await airSample(page);
