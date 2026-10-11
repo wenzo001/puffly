@@ -3868,14 +3868,17 @@ try {
   // rounding. The ratio tolerance is the same fraction of a ratio of ~1.8.
   // |control|: adding a constant to the x the mesh is placed at reddens the offset and nothing else;
   // drawing every flake `size × size·1.1` (ignoring `length`) reddens the ratio and nothing else.
+  // It used to also demand two fragment-frames. Measured 2026-10-11: a page under load delivered the
+  // whole fall in exactly one frame, and the check reddened a correct picture — the same mistake #148
+  // was about. The substantive anti-vacuity is that a frame carrying the *broken piece* was seen
+  // (`pieceFrames >= 1`); one of those judges both terms, so the frame count is reported, not required.
   const ashRec = await page.evaluate(() => {
     window.cancelAnimationFrame(window.__ashRaf);
     return window.__ashRec;
   });
   check(
     '3D: each falling flake is drawn where the core put it, at the length the core gave it (S5)',
-    ashRec.paired >= 2 &&
-      ashRec.frames >= 2 &&
+    ashRec.paired >= 1 &&
       ashRec.pieceFrames >= 1 &&
       ashRec.worstPos < 1e-3 &&
       ashRec.worstRatio < 0.02,
