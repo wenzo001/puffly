@@ -67,9 +67,24 @@ Adapters therefore consume two different things and never mix them:
 | `EngineEvent` | discrete `burst` / `world` / `session` / `transition` / `unlock` | scene (particles), audio (cues), storage (log) |
 
 `GameStateView = DeepReadonly<GameState>` is what the core hands out, so the §48 rule "the scene
-must not modify game state" is a compile error rather than a convention. rendering.test.ts（2026-10-10 随 2D 光栅套件退役） then
-proves it at runtime by handing the scene's reader a **deep-frozen live snapshot** and driving a whole
-break through it: any write would throw a TypeError instead of corrupting the simulation.
+must not modify game state" is a compile error rather than a convention. The runtime half of that was
+`rendering.test.ts`'s（2026-10-10 随 2D 光栅套件退役）: it handed the scene's reader a **deep-frozen live
+snapshot** and drove a whole break through it, so any write would have thrown a TypeError instead of
+corrupting the simulation. That proof no longer has a successor — the compile-time freeze is still
+there, the runtime one is gone (SPEC.md 里「退役判据的去向」那张表, the `rendering.test.ts` row).
+
+### The mirror guarantees readability, not what is on screen（2026-10-11）
+
+`.stage[data-*]` and the computed styles the scene reads exist so the scene *can* paint; they are not
+evidence of what the player sees. In the default tier the panel's ground, the card faces and most
+rows' glyphs are drawn by the scene: `SceneStage.vue`'s `maskSurfacePaint()` deliberately writes
+`background-color` / `border-color` as inline transparent on the nodes it has taken over and marks
+them with `data-scene-surface` — it cannot use `visibility`, which would take hit-testing with it.
+So claims like "these two boxes overlap" or "this layer's background is see-through" **cannot be
+judged from the DOM**: either read `data-scene-surface` first and exclude intentionally masked nodes,
+or judge the composed frame, which is what `tests/smoke/`'s screenshot path is for. Measured the hard
+way: two checks written off DOM geometry that evening reported 12 word-on-word clashes and one
+transparent bar — all four were the designed behaviour, and both checks were withdrawn.
 
 ## One copy of every fact
 
