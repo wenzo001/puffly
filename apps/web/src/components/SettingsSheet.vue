@@ -269,8 +269,8 @@ watch(
          detents are the 档位 — S15's own note asks for levels read off tick marks rather than more
          words — and step 20 puts one exactly on the deck's 80/20. It is a look and nothing else:
          moving it cannot change how long the rod burns, how many puffs it has, or how much ash it
-         makes (the Frozen Core rule, the same one a skin lives under), and realism.test.ts（2026-10-10 随 2D 光栅套件退役） runs
-         one session at both ends of the track and compares the whole simulation to prove it. -->
+         makes (the Frozen Core rule, the same one a skin lives under), and realism-purity.test.ts runs
+         a break at both ends of the track and compares the whole simulation to prove it. -->
     <div class="row" data-setting="realism">
       <span v-if="word('settings.realism') !== null" class="label">{{
         word('settings.realism')

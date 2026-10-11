@@ -50,8 +50,8 @@ export const EXHALE_LIFT = 0.5;
  * and the breath keeps the alpha the simulation authored for it. Below it the cartoon side grows up
  * to double, which is where 「比真实更脆」 earns its keep.
  *
- * Nothing in the simulation may consult this. realism.test.ts（2026-10-10 随 2D 光栅套件退役） runs one session at each end and
- * compares the entire state, because that is the difference between a look and a cheat.
+ * Nothing in the simulation may consult this. `realism-purity.test.ts` (in `game-core`) runs a whole break
+ * at each detent and compares the entire state, because that is the difference between a look and a cheat.
  */
 export const cartoonScale = (realism: number): number => {
   const level = Number.isFinite(realism) ? Math.min(1, Math.max(0, realism)) : DECK_SPLIT;

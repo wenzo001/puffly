@@ -299,13 +299,15 @@ and `StorageAdapter` (`game-storage`).
   by exactly 1, so the deck's default is
   the shipped look rather than a change to it, and the ramp is written so each of the row's six detents
   is a different frame (a capped `(1 - realism) / 0.2` left four of them identical). Nothing in
-  `game-core` reads it either — **and that half is currently true by inspection, not by test**: the
-  guard that pinned it, realism.test.ts（2026-10-10 随 2D 光栅套件退役）, ran one session at `0` and at `1`
-  and compared
-  the whole state plus every event, which is the Frozen Core rule a skin already lives under, applied to
-  a look — and it retired with the raster suites without a successor. Today `grep -rn realism
-  packages/game-core/src` answers only the field declaration and its default. Restoring that red line as
-  a live judgement is #140; until then this sentence is the guard, which is the weaker thing.
+  `game-core` reads it either, and that is a tested claim rather than an intention:
+  `realism-purity.test.ts` runs one whole break at each of the row's six detents and compares the state
+  plus every event against the same break at 0, with a positive control beside it — `quality`, a setting
+  the core *does* read, must make two sessions differ, or the six comparisons above prove nothing.
+  (The rule's first guard, realism.test.ts（2026-10-10 随 2D 光栅套件退役）, retired with the raster suites
+  without a successor and left the sentence standing on a `grep` for a day; that gap is #140, closed on
+  2026-10-11 by the file named above, whose bite was measured the same way — a core-side read of the knob
+  reddened 5 of the 6 detent cases and left the control green.) What this pins is the Frozen Core rule a
+  skin already lives under, applied to a look.
 
 ## Verification layers
 

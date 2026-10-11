@@ -4,7 +4,7 @@
  * Structural on purpose, the way `reverb-row.test.ts` reads the sheet: apps/web has no component
  * harness, so `sourceProbe`'s rule applies — these checks buy "the call exists, in the branch that
  * means it, and once", and nothing more. What the dial *does* to the picture is judged in
- * realism.test.ts（2026-10-10 随 2D 光栅套件退役）, and what it must never do to the burn is
+ * realism-purity.test.ts (in `game-core`), and what it must never do to the burn is
  * judged there too; this file is about the row being a row and about the shell handing the number to
  * the renderer at all.
  *
