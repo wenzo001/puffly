@@ -32,16 +32,27 @@ interface Walk {
 }
 
 /** An unattended burn: lit, then left alone until the cherry has nothing to eat. */
-function walk(id: string): Walk {
+async function walk(id: string): Promise<Walk> {
   const h = harness({ content: DEFAULT_CONTENT, cigaretteId: id });
   lit(h);
   const total = h.state().cigarette.burnMsTotal;
   let waited = 0;
+  let steps = 0;
   let readyAt = -1;
   while (h.state().cigarette.rodRemaining > 0.0005 && waited < total * 1.1) {
     h.run(STEP_MS * 3);
     waited += STEP_MS * 3;
     if (readyAt < 0 && h.state().cigarette.ash.ready) readyAt = waited / total;
+    // The walk is real CPU work — about 25 600 engine steps a rod — and a worker that does a whole
+    // roster in one synchronous stretch cannot answer vitest's own heartbeat. Measured on this
+    // build 2026-10-11: the eleven rods in one stretch ran 4.58 s without a single one of its
+    // 100 ms timers firing, and on a contended full-suite run that same file was measured at 66 s,
+    // past the ~30 s a worker gets to report a task — which is how a run with 1067 tests passed
+    // and no failed assertion still leaves the gate red. Nothing here is on a wall clock (the loop
+    // advances by `STEP_MS`), so handing the thread back cannot move a number: it only lets the
+    // worker be reachable while it thinks.
+    steps += 1;
+    if (steps % 2000 === 0) await new Promise((resolve) => setTimeout(resolve, 0));
   }
   const gusts = h.events.filter(
     (event) => event.kind === 'world' && event.occurrence.type === WorldEventId.ASH_FALL,
@@ -55,8 +66,13 @@ function walk(id: string): Walk {
 }
 
 /** Measured once and read by both claims below, so the two cannot be about different runs. */
-let measured: Walk[] | null = null;
-const walks = (): Walk[] => (measured ??= DEFAULT_CONTENT.cigarettes.map((rod) => walk(rod.id)));
+let measured: Promise<Walk[]> | null = null;
+const walks = (): Promise<Walk[]> =>
+  (measured ??= (async () => {
+    const walked: Walk[] = [];
+    for (const rod of DEFAULT_CONTENT.cigarettes) walked.push(await walk(rod.id));
+    return walked;
+  })());
 
 describe('a gust may take the ash, but never the rod’s last column (§18, §22)', () => {
   // The budget is for the whole roster's lives walked once, and it is stated because the walk is
@@ -66,8 +82,8 @@ describe('a gust may take the ash, but never the rod’s last column (§18, §22
   // 2026-10-08 raised it again: on a box already carrying two browser suites, this test was killed at
   // the 30 s ceiling it had itself been given, with every ASH line printed and no assertion involved.
   // A ceiling for CPU work is a statement about the machine, so it gets the margin, not the claim.
-  it('leaves every rod the content ships a column worth flicking', () => {
-    for (const w of walks()) {
+  it('leaves every rod the content ships a column worth flicking', async () => {
+    for (const w of await walks()) {
       console.log(
         `ASH ${w.id.padEnd(10)} readyAt=${w.readyAt.toFixed(3)} gusts=${String(w.gusts)} ` +
           `early=${String(w.earlyGusts)}`,
@@ -78,10 +94,10 @@ describe('a gust may take the ash, but never the rod’s last column (§18, §22
     }
   }, 90_000);
 
-  it('still lets the room knock the ash off while the rod has more to give', () => {
+  it('still lets the room knock the ash off while the rod has more to give', async () => {
     // The other half. A guard that simply refused every gust would leave the case above green and
     // quietly delete §22's weather from the ash, so this asks for the gust itself, on every rod.
-    for (const w of walks()) {
+    for (const w of await walks()) {
       expect(w.gusts, `${w.id} never met an ash-falling gust`).toBeGreaterThan(0);
       expect(w.earlyGusts, `${w.id} only met gusts at the very end`).toBeGreaterThan(0);
     }
