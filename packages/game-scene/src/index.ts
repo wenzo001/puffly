@@ -70,9 +70,7 @@ export {
   AIM_KEYS,
   stageUnitToWorld,
   parseAim,
-  rodBetween,
   rodEnds,
-  toWorld,
   WORLD_HEIGHT,
   canvasToWorld,
   parseStageBox,
@@ -85,7 +83,6 @@ export {
 
 // The moved formulas — the painted layer's numbers, now the scene's own.
 export {
-  MAX_FRAME_MS,
   MAX_SMOKE_RADIUS_PX,
   IGNITION_IMPACT,
   ignitionEdgeAlpha,

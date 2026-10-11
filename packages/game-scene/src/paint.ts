@@ -14,8 +14,6 @@ import type { Burst, QualityMode, SkinPalette } from '@puffly/game-core';
 import type { IntakeOptions } from './intake';
 import type { SceneEffect } from './effects';
 
-/** Anything longer than this is a stalled tab, not a frame; smoke must not teleport. */
-export const MAX_FRAME_MS = 50;
 /** A single puff may never cover the stage, whatever the lifetime maths says (§54, §58). */
 export const MAX_SMOKE_RADIUS_PX = 220;
 

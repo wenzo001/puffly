@@ -36,32 +36,6 @@ export function parseAim(text: string): Partial<Record<AimKey, AimPoint>> {
 /** World height of the visible stage; the width follows the canvas aspect so nothing is stretched. */
 export const WORLD_HEIGHT = 4;
 
-export function toWorld(point: AimPoint, aspect: number): readonly [number, number, number] {
-  return [(point.x - 0.5) * WORLD_HEIGHT * aspect, (0.5 - point.y) * WORLD_HEIGHT, 0];
-}
-
-/** A rod drawn between the two published points, so its angle comes from the core and not a guess. */
-export function rodBetween(
-  body: AimPoint,
-  ember: AimPoint,
-  aspect: number,
-): {
-  readonly mid: readonly [number, number, number];
-  readonly length: number;
-  readonly angle: number;
-} {
-  const { pivot, tip } = rodEnds(body, ember);
-  const a = toWorld(pivot, aspect);
-  const b = toWorld(tip, aspect);
-  const dx = b[0] - a[0];
-  const dy = b[1] - a[1];
-  return {
-    mid: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, 0],
-    length: Math.hypot(dx, dy) || 1e-6,
-    angle: Math.atan2(dy, dx),
-  };
-}
-
 /**
  * The rod's two true ends from the published pair — (the point 45 % along the rod, the tip).
  *
