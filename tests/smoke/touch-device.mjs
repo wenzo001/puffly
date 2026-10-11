@@ -2321,8 +2321,8 @@ try {
       // around, and this is the check that says it may not.
       (await sceneFlip(page)).length === 0,
     `lean ${zhLean.toFixed(4)}→${arLean.toFixed(4)}, n ${zhScene.n}→${arScene.n}, ` +
-      `x ${zhScene.meanX.toFixed(1)}→${arScene.meanX.toFixed(1)}, tilt ${zhScene.tilt.toFixed(0)}→${arScene.tilt.toFixed(0)}, ` +
-      `tilt ${zhScene.tilt.toFixed(0)} vs ${arScene.tilt.toFixed(0)}, flipped=${JSON.stringify(await sceneFlip(page))}`,
+      `x ${zhScene.meanX.toFixed(1)}/${String(Math.round(zhScene.box[2] / 2))}→${arScene.meanX.toFixed(1)}/${String(Math.round(arScene.box[2] / 2))}, tilt ${zhScene.tilt.toFixed(0)}→${arScene.tilt.toFixed(0)}, ` +
+      `flipped=${JSON.stringify(await sceneFlip(page))}`,
   );
 
   // Tier three is a whole interface, not a colour: the same controls, the same positions, no
@@ -3551,14 +3551,18 @@ try {
     const scene = 'value' in ctx.scene ? ctx.scene.value : ctx.scene;
     let built = -1;
     let mid = null;
+    let drawn = null;
     scene.traverse((o) => {
       if (o.name === 'rod') {
         built = o.geometry?.parameters?.height ?? -1;
         mid = [o.position.x, o.position.y];
+        // The tube's own axis is local +y, and the template turns it by `angle - π/2`; adding the
+        // quarter turn back is what makes the two angles comparable.
+        drawn = o.rotation.z + Math.PI / 2;
       }
     });
     if (body === undefined || ember === undefined || mid === null)
-      return { built, mid, expected: null };
+      return { built, mid, drawn, expected: null };
     const aspect = window.innerWidth / Math.max(1, window.innerHeight);
     const world = (x, y) => [(x - 0.5) * 4 * aspect, (0.5 - y) * 4];
     const pivot = [ember[0] - (ember[0] - body[0]) / 0.55, ember[1] - (ember[1] - body[1]) / 0.55];
@@ -3567,22 +3571,38 @@ try {
     return {
       built,
       mid,
+      drawn,
       expected: {
         length: Math.hypot(b[0] - a[0], b[1] - a[1]),
         mid: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2],
+        // Which end burns is a direction, and the mirror S24 forbids is exactly a flip of this one
+        // number. A tube looks the same from both ends, so the comparison is modulo a half turn.
+        angle: Math.atan2(b[1] - a[1], b[0] - a[0]),
       },
     };
   });
+  const angleOff = (() => {
+    if (rodFit.expected === null || rodFit.drawn === null) return 99;
+    const d = rodFit.drawn - rodFit.expected.angle;
+    // A tube looks the same from both ends, so what matters is the distance to the nearest half turn
+    // — not the distance to zero, which would call a correct rod a half turn off.
+    const wrapped = ((((d + Math.PI / 2) % Math.PI) + Math.PI) % Math.PI) - Math.PI / 2;
+    return Math.abs(wrapped);
+  })();
   check(
     '3D: the rod is drawn where the core says (true ends, centred on the rod)',
     rodFit.expected !== null &&
       rodFit.built > 0 &&
       Math.abs(rodFit.built - rodFit.expected.length) < 0.02 &&
       Math.hypot(rodFit.mid[0] - rodFit.expected.mid[0], rodFit.mid[1] - rodFit.expected.mid[1]) <
-        0.02,
+        0.02 &&
+      // |control|: reflecting the drawn angle (`-rod.angle` on the rod's `:rotation`) reddens this —
+      // mid and length survive a mirror, the direction does not. Measured 2026-10-11: with that
+      // reflection in place every one of the 159 checks still passed, which is why this line exists.
+      angleOff < 0.03,
     rodFit.expected === null
       ? 'no aim or rod'
-      : `len ${rodFit.built.toFixed(3)}/${rodFit.expected.length.toFixed(3)} mid off ${Math.hypot(rodFit.mid[0] - rodFit.expected.mid[0], rodFit.mid[1] - rodFit.expected.mid[1]).toFixed(3)}`,
+      : `len ${rodFit.built.toFixed(3)}/${rodFit.expected.length.toFixed(3)} mid off ${Math.hypot(rodFit.mid[0] - rodFit.expected.mid[0], rodFit.mid[1] - rodFit.expected.mid[1]).toFixed(3)} angle off ${angleOff.toFixed(4)}`,
   );
   // The char front (§17, S12): the paper behind the cherry chars and glows, so the band exists and
   // is sized whenever the ember is alive. |control|: gating on `total > 0` keeps it hidden and
