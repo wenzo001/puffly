@@ -145,13 +145,6 @@ export function cherryHot(temperature: number): Rgb {
 }
 
 /**
- * The venue's share of the puff's width (S21 通风系数): a sealed place lets the ribbon hang, a
- * forecourt tears it out sideways. Anchored at 1 and only ever adding, because the core's
- * `smoke.dispersion` also carries the rod and the ashtray — taking that straight into the radius
- * would shrink the calibrated picture of every room at once. The brightness half of the same
- * coefficient arrives through `field.visibility`.
- */
-/**
  * A flint spark as a streak — the same three numbers every reader draws: the colour mixed off the
  * particle's own tint, an alpha that rides `× 3` (a spark lives two frames and has to be seen in
  * them), and the stroke's width in stage units. From/to are the particle's own previous and
@@ -169,6 +162,13 @@ export function sparkStreak(particle: { alpha: number; radius: number; tint: Rgb
   };
 }
 
+/**
+ * The venue's share of the puff's width (S21 通风系数): a sealed place lets the ribbon hang, a
+ * forecourt tears it out sideways. Anchored at 1 and only ever adding, because the core's
+ * `smoke.dispersion` also carries the rod and the ashtray — taking that straight into the radius
+ * would shrink the calibrated picture of every room at once. The brightness half of the same
+ * coefficient arrives through `field.visibility`.
+ */
 export function puffSpread(ventilation: number): number {
   return 1 + ventDraught(ventilation) * 0.45;
 }
