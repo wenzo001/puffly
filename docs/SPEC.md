@@ -1147,6 +1147,20 @@ warmth-scale.test.ts（2026-10-10 随 2D 光栅套件退役） 把两端和单�
 词表 14 个全被用上 / 出厂九处仍是空的）、warmth-scale.test.ts（2026-10-10 随 2D 光栅套件退役） 三条、`level-ladder.test.ts` 七条
 （新增"档数==场所数"）、`scenes.test.ts` 的总数从 9 改成 21。
 
+（**2026-10-11 逐格定性这三处退役标记**，方法是"今天谁在读它管的那个量"，不是看文件名还在不在：
+- warmth-scale 三条 → **有着落**。它的核心那条（暖冷是场所自己带的字段，暖屋与冷屋必须是两张画）今天由
+  `packages/game-scene/src/__tests__/room.test.ts` 判（「moves when the place moves: a warm room and a cold one
+  are different pictures」）—— 换了名字，不是丢了。
+- plume-lift → **今天补回来了**，`packages/game-scene/src/__tests__/plume-lift.test.ts`（4 条：升的是呼气不是灰与火星、
+  只升 alpha 不多给颗粒、出厂 1.5× 上界 2×）。三次单点变异各红其所（全类都升 ⇒ 红灰那 1 条；干脆不升 ⇒ 红呼气那 1 条；
+  用升幅去换颗数 ⇒ 红 3 条）。**这一格还留了一条自我更正**：第一版判据读的是出生时的 `particle.alpha`，
+  而池子在 `update()` 里才把 `alphaPeak` 展开成 alpha —— 出生时 alpha 恒为 0，于是前两条变异全绿。
+  是探针（改输入必须报红）当场把它抓出来的，不是靠读代码想到的。
+- place-features 四条 → **形状那一半没有活判据**。今天活着的是 `backdrop.ts` 的 `geometry.details`
+  （每场所播种的墙面杂物，生产侧在读）与 `room.test.ts` 的**颜色**差异；"逐个 id 真的画进像素 / 同一 kind
+  下没有两处 furnish 相同 / 词表 14 个全被用上"这三条问的是**轮廓**，3D 里没有任何判据比过两个场所的形状。
+  挂在 #144，别当已验收。）
+
 23. Environment System
 
 环境必须是数据驱动。
@@ -4702,7 +4716,7 @@ plume-contrast.test.ts（2026-10-10 随 2D 光栅套件退役） 那条「烟是
 **数**：`plume-layers.test.ts` 新开 **42 条**（11 只烟 × 3 个 `it.each`，加发牌比例、每七颗、分层共存、真的分开、
 散开次序、风口、事件无光晕、两条接线）；`npm test` = **121 档 919 条**（这片之前 120 档 877 条）；真机那 80 条
 没有新读者（这片不动 DOM），在同一份新 build 上复跑仍是 **80/80**。（这三个数都是 2026-10-08 那一次的账。
-今天现跑：`npm test` **124 档 1039 条**、真机 **161/161**，2026-10-11 量，出处与复跑口径见 README「How it is
+今天现跑：`npm test` **125 档 1043 条**、真机 **161/161**，2026-10-11 量，出处与复跑口径见 README「How it is
 verified」那一张表。）
 ### 烟盒今天能点：取烟有了自己的锚点，被点到的盒子会动（2026-10-08）
 
@@ -5589,7 +5603,8 @@ SHOT {"name":"desktop-settings","lit":"not attempted","ring":"1","alt":"100%","f
 两条 `Test timed out`（plume-lift.test.ts（2026-10-10 随 2D 光栅套件退役） 那条 20 s 上限、
 place-features.test.ts（2026-10-10 随 2D 光栅套件退役） 那条 30 s 上限），断言一个字没红。
 同一台机器、load 仍是 13，把这两个文件单独跑：8.5 s 与 10.2 s，8 条全绿。（复跑口径当时写的是这两个文件；
-2026-10-10 它们随 2D 光栅套件退役。）
+2026-10-10 它们随 2D 光栅套件退役。2026-10-11 在 `game-scene` 重建的那份 `plume-lift.test.ts` 是另一个文件，
+4 条（单独跑 13 ms、全量里 32 ms），与这里那 20 s 上限无关。）
 两条上限各自的注释里已经写着测量数，这一轮没有动任何断言，也没有为了绿灯去放宽判据。
 
 **这一轮的三处补账**：① `apps/web/src/components/DataRail.vue` 的注释写着「the seven destinations」，

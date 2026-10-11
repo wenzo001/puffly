@@ -74,7 +74,9 @@ export const DECK_SPLIT = 0.8;
  * How far above the core's own alpha the breath sits at one unit of cartoon. 0.5 is a step, not a
  * doubling: measured on the shipped classic at full intensity, the brightest disc of the breath goes
  * from 0.0758 to 0.1137, which lifts it just past the rod's own idle thread (0.0975) — visible, and
- * nowhere near the white ball a larger factor makes. plume-lift.test.ts（2026-10-10 随 2D 光栅套件退役） bounds both ends.
+ * nowhere near the white ball a larger factor makes. `plume-lift.test.ts` bounds both ends (it retired
+ * with the Canvas 2D suites on 2026-10-10 and was rebuilt here on 2026-10-11, on the birth peak — the
+ * pool leaves `alpha` at 0 until `update()`, so a judge that reads `alpha` at spawn compares zeros).
  */
 export const EXHALE_LIFT = 0.5;
 
