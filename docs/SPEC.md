@@ -6556,3 +6556,30 @@ S1（`rodRemaining`）与 S5（`ash.ratio`）正是那两个量，**S2 接的是
 `content`（夹具 900 / 发货 886）、`qualityScale`（high 与 auto 都是 1）、`plume.count`（±15% 量级）、
 仿真饥饿（60 fps、休息钟 22 秒墙钟走 23 秒）、按位置回收（**根本没有这条规则**）。
 剩的就是上面 ① 与 ②。
+
+**① 也现量否掉了，而且剩下的那一维已经指到具体一行**（`node /tmp/puffly-glyphs/duty-check.mjs`，
+按仓里自己的配方等 `puffReady` 再按、12 次按住）：
+
+```
+DUTY {"wallSeconds":75, "samples":1506, "dutyPctLit":97, "peakPoolSize":188,
+      "phases":{"light":38,"puff":984,"tray":484}, "pressesSent":12}
+```
+
+⇒ **那 75 秒里 97% 的时间杆子都在 `puff`/`tray` 相**，12 次按压全部送出，峰值仍是 **188**。
+所以"208 是我驱动不足"这个说法**不成立** —— 发货那台在"几乎全程点着"的状态下，
+就是只占着 188–208 颗，而 ① 排除后剩下的那一维落在**具体一行**上：
+
+`field.emissionRate = active ? SMOKE.baseEmissionPerSecond × field.density : 0`（`systems/smoke.ts:141`）
+⇒ 环境发射被 **`field.density`** 乘过。34/秒 × 约 11 秒寿命 ≈ 374 是 `density = 1` 的读法，
+实测 188 对 374 ≈ **0.5** ⇒ **发货那台跑起来的 `field.density` 大约在 0.5 档**，
+而离线件（同一支 `classic`、同一个 `quiet-room`）拿到的是 886 ⇒ 两边 `field.density` 不同。
+
+**顺手把"这条实验到底有没有接上"也验了**（不然"两行读数相同"会同时兼容两种解释）：
+`createEngine` **确实吃** `cigaretteId` / `environmentId`（`engine.ts:223-228` 两处三元）
+⇒ 我那一趟"换成应用那一套选择"是真接上的，它给出与基线相同的 886 只能读成
+**"harness 默认本来就是这一对"**，不是"选项被忽略"。
+
+**要再往下就必须在产品侧多露一个数**（`field.density` 进把手）——那是**又一次把手改动**，
+按"最小落地"的口径我不自己加：**这一格到此收在"机制缩到一行 + 需要一件新量具"，等一句话**。
+今晚的完整排除清单（全部现量）：`densityScale`、`fieldScale`、`qualityScale`、`plume.count` 量级、
+`content`、会话选择（已确认选项生效）、仿真饥饿、**驱动占空比（97%）**、按位置回收（无此规则）。
