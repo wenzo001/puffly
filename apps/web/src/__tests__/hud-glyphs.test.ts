@@ -106,4 +106,21 @@ describe('DemoGlyph carries the Demo’s own five symbols', () => {
   it('spaces the ash lines at the Demo’s 4.5, not a round 5', () => {
     expect(GLYPH).toMatch(/:y="7 \+ i \* 4\.5"/);
   });
+
+  it('turns the dial on the arc, so the symbol keeps a square screen matrix', () => {
+    // §2 rotates the *circle* (`transform="rotate(-90 20 20)"`). When the rotation sat on
+    // `.ring svg` instead, it also turned the symbol — and the scene places its own copy from that
+    // element's `getScreenCTM()`, so a quarter-turned matrix left the ring drawing empty.
+    // Comments are stripped first: this file explains the old rule, and a guard that reads its own
+    // prose as code would fail for the wrong reason.
+    const css = HUD.replace(/\/\*[\s\S]*?\*\//g, '');
+    const dial = css.slice(css.indexOf('.ring svg {'));
+    expect(dial.slice(0, 200)).not.toContain('rotate(');
+    expect(HUD).toContain('transform="rotate(-90 20 20)"');
+    // And the symbol is §2’s 26×26 box, not a fill of the ring.
+    const mark = css.slice(css.indexOf('.ring svg.mark {'));
+    expect(mark.slice(0, 260)).toMatch(/width: 26px;/);
+    expect(mark.slice(0, 260)).toMatch(/height: 26px;/);
+    expect(mark.slice(0, 260)).not.toContain('rotate(');
+  });
 });

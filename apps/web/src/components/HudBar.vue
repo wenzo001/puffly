@@ -249,6 +249,7 @@ const desk = computed((): Array<{ key: CopyKey; value: string; press: boolean }>
           cx="20"
           cy="20"
           r="17"
+          transform="rotate(-90 20 20)"
           :stroke-dasharray="`${(reading.fraction * CIRCUMFERENCE).toFixed(2)} ${String(CIRCUMFERENCE)}`"
         />
       </svg>
@@ -358,8 +359,24 @@ const desk = computed((): Array<{ key: CopyKey; value: string; press: boolean }>
   inset: 0;
   width: 100%;
   height: 100%;
-  /* The arc starts at the top and runs the way the rod burns. */
-  transform: rotate(-90deg);
+  /* The dash start is NOT here. This rule used to carry `transform: rotate(-90deg)` to make the
+     arc begin at 12 o'clock, but it is a descendant selector and the screen's own symbol is an
+     `svg` inside `.ring` too — so the symbol was rotated with the dial, and the scene, which reads
+     that element's `getScreenCTM()` to place its copy, was handed a quarter-turned matrix
+     (measured `[0,-1.538,1.538,0,58,50]`) and drew nothing inside the ring at all. The Demo turns
+     the arc on the arc: `transform="rotate(-90 20 20)"` on the circle itself. */
+}
+
+/* §2's `.ring40 .glyph`: the symbol is a 26×26 box centred in the 40×40 ring, not a fill of it.
+   It is a plain grid item here — `.ring` is `display: grid; place-items: center` — so the centring
+   is already done; adding `left:50%` on top of that counted the offset twice (measured: the box
+   landing flush against the ring's right edge, 7px past centre). */
+.ring svg.mark {
+  position: static;
+  inset: auto;
+  width: 26px;
+  height: 26px;
+  transform: none;
 }
 
 /* 22%, not one shade less: below it the player cannot see how much of the break is left. */
