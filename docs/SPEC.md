@@ -2946,6 +2946,10 @@ DISCARDED）。这条是必须的，不是顺手 —— 状态机、声音（`cu
 判据 ember-heat.test.ts（2026-10-10 随 2D 光栅套件退役） 五条：吸气那一下到白芯、静置那一头是橙（取**最后**一帧，刚松手时还穿着抽吸的峰值）、
 熄灭途中确实经过暗红并且**越来越暗**、按温度排序后红→白单调（把两段调包只有这条红）、
 正在死的烟头**每一帧都报 `lit=false` 而同时仍被画**（这条与上一条各管一半，缺一半就放行一个谎）。
+（**2026-10-11 回建**：斜坡本身今天又有判据了 —— `packages/game-scene/src/__tests__/ember-heat.test.ts` 5 条，
+"熄了仍允许发光"那一半由 `lifecycle.test.ts` 的「a dead cherry may still give light, and is still not
+burning」接住（同一帧里 `lit` 为假而 `glowRadius` 仍 > 0）。**仍然没有回来的是两条取样规矩**：
+"静置取最后一帧"与"两段 stop 调包"判的是当时那份怎么读、画的是谁，今天这两条都不判 —— 别当成全还了。）
 烟头本体用形状认领：三 stop、中间那枚在 0.7 —— glow 的 stop 在 0/0.4/1，光池在别处。
 
 变异五处各红其所：尺子改回吃原始温度（2 条：橙与暗红）、恢复硬清零（3 条：暗红、"亮着但不烧"、时长）、
@@ -5790,14 +5794,16 @@ weather/paint/backdrop 成新家，props/room 合并式承接），7 个"混着�
 | background-stillness.test.ts | `packages/game-core/src/__tests__/stillness.test.ts`（4 条）+ `rain-fall.test.ts` | 相邻帧不跳风、不跳湍流、静置里风与烟仍在走 —— 正是当年"alpha 不许闪、又不能冻成静照"那两条；雨那半由 rain-fall 的「still comes down, so the flicker was not cured by a freeze」接住。**"每帧 fill 次数恒定"没有对应读者**（那是画布调用计数，3D 里等价的该是 draw call 计数），归 #145 |
 | sprite-focus.test.ts | `packages/game-scene/src/__tests__/sprite.test.ts`（23 条） | 中间实边缘清、单调衰减所以烟里没有环、"caller 要 feather 才给 feather 空间、不要就保持原形" —— 三条主张都有活读者；"比出厂那版更紧"是当时两份剖面的对照，本就不复跑 |
 | ember-glow.test.ts | 半格：`packages/game-scene/src/__tests__/warm-pool.test.ts` 判那两团光按 Demo 的数 | **"辉光半径就取模拟给的 `glowRadius`、熄灭那一下是回暗不是往外炸"没有读者** —— `glowRadius` 在全部 live 判据里 0 命中 ⇒ #145 |
-| ember-heat.test.ts | 无 | `cherryHot` 生产在读（SceneStage 烧色），但"只有那口气给白芯、静置是橙、冷却经过暗红而不是直接关、中间温度名副其实"在 live 判据里一条都没有（唯一命中 temperature 的 `exhale-tier.test.ts` 判的是口长分级）⇒ #145 |
+| ember-heat.test.ts | `packages/game-scene/src/__tests__/ember-heat.test.ts`（5 条，2026-10-11 回建）+ `lifecycle.test.ts` 新增那条"熄了还允许发光" | 斜坡本身判回来了：最低 writable 那一头是深橙不是黑也不是"关"、白芯只给满的那一下、往下走是**经过**暗红（单调、每步 <25、不落黑）、中间温度名副其实、以及"锚在核心写得出的那条带上而不是裸数字上"。三次变异：冷端改黑 ⇒ 红 4 条；白端封到 0.8 ⇒ 只红"白芯"那 1 条；把带换成裸 temperature ⇒ 红"冷端"与"锚在带上"2 条。**没判回来的那一半要写明**：当年那条"静置取**最后**一帧（刚松手还穿着抽吸的峰值）"是取样规矩，回建的那份判的是函数本身，不判谁在哪一帧读它 |
 | lid-hinge.test.ts | 半格：真机读 `lighter-lid` 的 `rotation.x`（翻到 −1.36 rad、松手回关） | 角度有读者，**"合页那一端一动不动 + 刚体长度在投影里只按刚体的方式缩短"没有**（后者是光栅时代的画法判据）⇒ #145 |
 | ash-flake.test.ts | 半格：`ash-pile.test.ts`（6 条）判盘里那堆的形状/落高/跟随缸子缩放/不出界；`ash-break.test.ts` 判"先断一拍" | **"每片碎屑长厚不相等、散开时保持圆、落在核心放的那个点而不是渲染器挑的点"没有读者**（live 里提到 flake 的两处判的是别的事）⇒ #145 |
 | pack-object.test.ts | 部分：`pack-tap.test.ts`（点着有反馈、在核心里）+ §37 那一族（DOM `.hit` 与锚点） | "身上有个洞比自身任何明暗都暗"与"包膜是两端淡出的渐变"是像素判据，随 #117 退役；"命中圈盖住画出的轮廓且止于此"在 3D 里换了主语（画的是盒子、点是 DOM 圈），**这一格今天只能算换了判法、没算有人判** ⇒ 归 #124（道具形状那格一起拍） |
 | plume-contrast.test.ts | 无机器读者 —— 按分工归眼睛 | 四条全是"合成后的帧上烟与屋子谁压过谁"。今天活着的相邻读者是 `room.test.ts`（调色板同源、暖屋冷屋两张画）；剩下的正是 **#135**（底色比稿子亮约 6 倍）等他拍的那格。README「Whether the smoke is the smoke」已把这条分工写明，所以这不是漏，是**同一格里机器与眼睛各管一半** |
 
-**收口之后剩下没读者的四格**（都是"回建一条判据"或"明写归眼睛"两种结局之一，要先拍一次再动手，别一次动四格）：
-碎屑的形状与出处、`glowRadius` 与回暗方向、余烬温度→颜色那条斜坡、翻盖的合页不动点；另加静置那格的
+**收口之后剩下没读者的四格**（都是"回建一条判据"或"明写归眼睛"两种结局之一，要先拍一次再动手，别一次动四格）。
+2026-10-11 动了其中一格：**余烬温度→颜色那条斜坡已经回建**（`packages/game-scene/src/__tests__/ember-heat.test.ts`
+5 条 + `lifecycle.test.ts` 那条"熄了还允许发光"，三次变异各红其所，见上面那张表）。
+**剩下三格**：碎屑的形状与出处、`glowRadius` 与回暗方向、翻盖的合页不动点；另加静置那格的
 "每帧绘制次数恒定"这一半。挂在 #145。
 
 **方法上的一次失败要留字**：这一轮我先把"关键词命中数"当"有没有活判据"用，

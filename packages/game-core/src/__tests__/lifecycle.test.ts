@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SessionEventType } from '@puffly/game-core';
+import { SessionEventType, THRESHOLDS } from '@puffly/game-core';
 import { harness, lit, sessionTypes } from './harness';
 
 /** The states a lit, still-eating rod can be read in — everything the flame has not finished. */
@@ -167,6 +167,19 @@ describe('the break, end to end (§8, §11)', () => {
     h.run(5200);
     expect(h.state().cigarette.rodRemaining).toBe(0);
     expect(h.state().cigarette.state).toBe('EXTINGUISHED');
+  });
+
+  it('a dead cherry may still give light, and is still not burning (§11)', () => {
+    // The state machine owns the difference the deck draws between 熄灭前辉光收敛 and a rod that is
+    // eating: `out` takes the burn away and leaves the glow. Without this, the picture of a cherry
+    // going out is either still burning or suddenly black.
+    const h = harness();
+    lit(h);
+    h.run(5200);
+    const ember = h.state().cigarette.ember;
+    expect(ember.lit, 'the tip is out').toBe(false);
+    expect(ember.brightness, 'the tip is out').toBeLessThan(THRESHOLDS.litBrightness);
+    expect(ember.glowRadius, `glow at the moment it went out`).toBeGreaterThan(0);
   });
 
   it('stubbing out in the tray, then letting go, discards it and turns up a fresh rod (§20)', () => {
