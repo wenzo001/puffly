@@ -1911,12 +1911,22 @@ try {
   let heldRead = beforeCeiling;
   let selfEnded = false;
   let waitedMs = 0;
-  while (waitedMs < 6000 && !selfEnded) {
+  // The budget below is wall clock while the ceiling is simulation time, and the scene records at
+  // most 64 ms of simulation per frame: a page starved to a few frames a second spends a fifth of a
+  // second of sim per second of wall, so the old 6 s window closed before the hold had reached its
+  // own ceiling (measured 2026-10-11 — 99% → 98%, finger still down, no force figure, with the runs
+  // either side of it green: #148). 14 s covers the slowest rate this suite has been measured at, and
+  // the frame rate is printed so a red says which side broke.
+  const framesAt = await page.evaluate(() => window.__pufflyScene?.frames ?? 0);
+  const clockAt = Date.now();
+  while (waitedMs < 14000 && !selfEnded) {
     await page.waitForTimeout(150);
     waitedMs += 150;
     heldRead = await chrome();
     selfEnded = heldRead.figures.some((text) => /^\d+$/.test(text));
   }
+  const framesEnd = await page.evaluate(() => window.__pufflyScene?.frames ?? 0);
+  const heldFps = ((framesEnd - framesAt) / Math.max(1, Date.now() - clockAt)) * 1000;
   await page.mouse.up();
   // The release after the self-end must buy nothing: still exactly one draw. The count is back
   // in the row only once the exhale has cleared, so wait for the figure rather than for a delay.
@@ -1933,7 +1943,7 @@ try {
       heldRead.phase === 'puff' &&
       drawCount(afterRelease) === drawCount(beforeCeiling) + 1,
     `held=${JSON.stringify(beforeCeiling.figures)} → ${JSON.stringify(heldRead.figures)} ` +
-      `after ${String(waitedMs)}ms with the finger still down, released=` +
+      `after ${String(waitedMs)}ms with the finger still down at ${heldFps.toFixed(1)} fps, released=` +
       `${JSON.stringify(afterRelease.figures)} after ${String(settledMs)}ms more`,
   );
 
