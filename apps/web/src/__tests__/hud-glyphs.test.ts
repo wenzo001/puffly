@@ -74,4 +74,36 @@ describe('DemoGlyph carries the Demo’s own five symbols', () => {
   it('gives the ash lines the Demo’s three fades', () => {
     expect(GLYPH).toContain('0.85, 0.6, 0.35');
   });
+
+  // The four numbers below are transcribed from §2 of the Demo (the ring’s own glyph markup, read
+  // out of a browser 2026-10-11 and kept in docs/SPEC.md). They are the part this file’s own header
+  // has always claimed to check — “the component has to carry the Demo’s own geometry” — and did not:
+  // names, a viewBox and three inks say nothing about where a bar sits or which way a swirl turns.
+  it('sits the rod on the Demo’s line, with the ember at its height', () => {
+    // rect x=3 y=10.5 15×3.4 + the filter band on the same line; circle cx=21 cy=12.2 r=2.
+    expect(GLYPH).toMatch(/<rect x="3" y="10\.5" width="15" height="3\.4"/);
+    expect(GLYPH).toMatch(/<rect x="3" y="10\.5" width="5" height="3\.4"/);
+    expect(GLYPH).toMatch(/<circle cx="21" cy="12\.2" r="2"/);
+  });
+
+  it('draws the airflow as the Demo’s three warmths, not one ink thrice', () => {
+    // S3: #FFD9A0 over #C9A97F over #8E7A5C — the stack reads as air cooling as it falls.
+    expect(GLYPH).toMatch(/airTop: '#FFD9A0'/);
+    expect(GLYPH).toMatch(/airMid: '#C9A97F'/);
+    expect(GLYPH).toMatch(/airLow: '#8E7A5C'/);
+    const air = GLYPH.slice(GLYPH.indexOf(`name === 'airflow'`));
+    for (const key of ['airTop', 'airMid', 'airLow']) {
+      expect(air.slice(0, 600), key).toContain(`palette.${key}`);
+    }
+  });
+
+  it('turns the exhale swirl the way the Demo turns it', () => {
+    // The Demo’s own path and dot: out to 19 13, back down to −5 5; the dot at cx=13.
+    expect(GLYPH).toContain('d="M9 17C11 12 16 10.5 19 13c2 2.5-1 5.5-5 5"');
+    expect(GLYPH).toMatch(/<circle cx="13" cy="13\.6" r="1\.8"/);
+  });
+
+  it('spaces the ash lines at the Demo’s 4.5, not a round 5', () => {
+    expect(GLYPH).toMatch(/:y="7 \+ i \* 4\.5"/);
+  });
 });

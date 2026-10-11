@@ -52,6 +52,11 @@ const palette = computed(() => {
         flameInner: '#F5C08A',
         accent: '#2A1408',
         soft: '#2A1408',
+        // The Demo draws the airflow stack only for the header ring; the other surfaces get one ink,
+        // which is what they had before §2's ring markup was read out.
+        airTop: '#2A1408',
+        airMid: '#2A1408',
+        airLow: '#2A1408',
       };
     case 'cont':
       return {
@@ -62,6 +67,9 @@ const palette = computed(() => {
         flameInner: '#FF8A3D',
         accent: '#FF8A3D',
         soft: '#EDE5DA',
+        airTop: '#EDE5DA',
+        airMid: '#EDE5DA',
+        airLow: '#EDE5DA',
       };
     case 'tab':
       return {
@@ -72,6 +80,9 @@ const palette = computed(() => {
         flameInner: 'currentColor',
         accent: 'currentColor',
         soft: 'currentColor',
+        airTop: 'currentColor',
+        airMid: 'currentColor',
+        airLow: 'currentColor',
       };
     case 'hud':
     default:
@@ -81,6 +92,10 @@ const palette = computed(() => {
         flameInner: '#FFD9A0',
         accent: '#FF8A3D',
         soft: '#FFD9A0',
+        // S3's stack is three warmths, not one ink thrice: air cooling as it falls out of the mouth.
+        airTop: '#FFD9A0',
+        airMid: '#C9A97F',
+        airLow: '#8E7A5C',
       };
   }
 });
@@ -101,9 +116,9 @@ const TRAY_OPACITIES = [0.85, 0.6, 0.35] as const;
   >
     <!-- 取烟 / 烟支： paper tube, filter band, ember. -->
     <template v-if="name === 'rod'">
-      <rect x="3" y="11" width="15" height="3.4" rx="1.7" :fill="palette.paper" />
-      <rect x="3" y="11" width="5" height="3.4" rx="1.7" :fill="palette.filter" />
-      <circle cx="21" cy="12.7" r="2" :fill="palette.ember" />
+      <rect x="3" y="10.5" width="15" height="3.4" rx="1.7" :fill="palette.paper" />
+      <rect x="3" y="10.5" width="5" height="3.4" rx="1.7" :fill="palette.filter" />
+      <circle cx="21" cy="12.2" r="2" :fill="palette.ember" />
     </template>
 
     <!-- 点燃： the Demo's teardrop. -->
@@ -113,23 +128,23 @@ const TRAY_OPACITIES = [0.85, 0.6, 0.35] as const;
       :fill="palette.flameOuter"
     />
 
-    <!-- 吸入： three airflow lines. -->
+    <!-- 吸入： three airflow lines, cooling as they fall. -->
     <template v-else-if="name === 'airflow'">
-      <rect x="7.5" y="5.5" width="11" height="2.8" rx="1.4" :fill="palette.soft" />
-      <rect x="7.5" y="11.6" width="11" height="2.8" rx="1.4" :fill="palette.soft" />
-      <rect x="7.5" y="17.7" width="11" height="2.8" rx="1.4" :fill="palette.soft" />
+      <rect x="7.5" y="5.5" width="11" height="2.8" rx="1.4" :fill="palette.airTop" />
+      <rect x="7.5" y="11.6" width="11" height="2.8" rx="1.4" :fill="palette.airMid" />
+      <rect x="7.5" y="17.7" width="11" height="2.8" rx="1.4" :fill="palette.airLow" />
     </template>
 
     <!-- 吐烟 (header S4): swirl with an ember dot. -->
     <template v-else-if="name === 'swirl-dot'">
       <path
-        d="M9 17C11 12 16 10.5 13.6 13c-2 2.5-1 5.5 5 5"
+        d="M9 17C11 12 16 10.5 19 13c2 2.5-1 5.5-5 5"
         fill="none"
         :stroke="palette.accent"
         stroke-width="2"
         stroke-linecap="round"
       />
-      <circle cx="13.6" cy="13.6" r="1.8" :fill="palette.soft" />
+      <circle cx="13" cy="13.6" r="1.8" :fill="palette.soft" />
     </template>
 
     <!-- 磕灰 (header S5): three stacked ash lines, fading. -->
@@ -138,7 +153,7 @@ const TRAY_OPACITIES = [0.85, 0.6, 0.35] as const;
         v-for="(opacity, i) in TRAY_OPACITIES"
         :key="i"
         x="7"
-        :y="7 + i * 5"
+        :y="7 + i * 4.5"
         width="12"
         height="3"
         rx="1.5"
