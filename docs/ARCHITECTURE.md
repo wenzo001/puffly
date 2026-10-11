@@ -233,14 +233,17 @@ that split from rotting back into an app:
   The scan that watches the language watches this field through the pure layer too, because a
   simulation that obeyed a ceiling would be a lock wearing a statistic's clothes — and the copy
   table is scanned for the sentences that would praise or threaten;
-- **the tray's answer to a carried rod is owed, not done (§20, task #134).** The 2D layer drew three
-  readings of it — a lit rim while the rod is being carried toward the tray, a rock when ash lands,
-  a mound that grows with the load — and the 3D scene inherited only the mound's *box* (the Demo's
-  126 × 22, gated on the tray's grams). The retirement counted this: the deleted package's 24 exports
-  that have no name left in the tree are all canvas entry points except that one, whose guard lived
-  in the suites retired with it. So the tray today holds ash and says nothing back, and the honest
-  place to look before re-implementing it is the retirement commit's parent — 本笔父提交即退役前的
-  最后一份 2D 源码 (`git show <那一笔>^:packages/game-renderer/src/props.ts`, `TrayFeedback`).
+- **the tray's answer to a carried rod is back (§20, task #134).** The 2D layer drew three readings
+  of it — a lit rim while the rod is being carried toward the tray, a rock when ash lands, a mound
+  that grows with the load — and the 3D scene had inherited only the mound's *box* (the Demo's
+  126 × 22, gated on the tray's grams). The retirement counted that loss: of the deleted package's
+  24 exports with no name left in the tree, all but one are canvas entry points, and the one that is
+  not — `TrayFeedback` — had its guard in the suites retired with it. The model now lives here
+  (`props.ts`: `TRAY_FEEDBACK`, `stepTrayFeedback`, `trayRock`, transcribed from
+  `git show <退役那一笔>^:packages/game-renderer/src/props.ts`), the scene steps it every frame
+  (`SceneStage.placeTray`), and the two device checks read the answer off the meshes: the invitation
+  on the halo's and the rim's own materials, the rock on the bowl's `rotation.z` after a real 磕灰.
+  Each of those two has been reddened by muting exactly the output it reads.
 
 ## Performance
 

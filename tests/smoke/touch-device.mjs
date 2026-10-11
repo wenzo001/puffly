@@ -239,6 +239,20 @@ const sceneProbe = (page) =>
       : null;
   });
 
+/** The tray's two answers as the scene is holding them: the rim's ink, and how far it is tilted. */
+const trayInk = (page) =>
+  page.evaluate(() => {
+    const ctx = window.__pufflyScene.context;
+    const scene = 'value' in ctx.scene ? ctx.scene.value : ctx.scene;
+    let rim = null;
+    let rock = null;
+    scene.traverse((o) => {
+      if (o.name === 'tray-rim') rim = +(o.material.opacity ?? 0).toFixed(3);
+      if (o.name === 'tray') rock = +o.rotation.z.toFixed(4);
+    });
+    return rim === null ? null : { rimAlpha: rim, rock };
+  });
+
 const pressSurface = (page, at, down) =>
   page.evaluate(
     ([x, y, isDown]) => {
@@ -315,6 +329,28 @@ async function holdDraw(page, minSeconds) {
   };
   const first = await attempt();
   return first.started ? first : await attempt();
+}
+
+/**
+ * Get an alight rod into the hand, through the pill — the design's one gesture.
+ *
+ * The pill does whatever `data-affordance` names, so the same few lines serve every state the checks
+ * before left the break in: 取烟, 点着, or nothing at all when a rod is already burning. A block that
+ * instead inherits whatever the previous one happened to leave is how the tray's answer went red with
+ * no product change (measured 2026-10-11: the checks ahead of it had put the rod out, and a press on
+ * an extinguished one is the discard, not a drag).
+ */
+async function lightRod(page) {
+  for (let step = 0; step < 6; step += 1) {
+    const affordance = await page.evaluate(
+      () => document.querySelector('.stage')?.dataset.affordance ?? '',
+    );
+    if (affordance === 'puff' || affordance === 'flick') return affordance;
+    await wakeChrome(page, '.pill').catch(() => {});
+    await clickAt(page.locator('.pill'));
+    await page.waitForTimeout(700);
+  }
+  return '';
 }
 
 /**
@@ -2889,6 +2925,27 @@ try {
     dustCount > 0,
     `dust ${String(dustCount)}`,
   );
+  // §20's rock is an impulse the tray takes at the moment ash lands, and a landing happens once in a
+  // while, not on request — so this watches for the largest tilt the bowl ever takes during the block
+  // rather than trying to be awake at the right instant. The frame loop is the page's own, so it sees
+  // every frame the scene draws even when the wall clock is starved.
+  await page.evaluate(() => {
+    window.__trayRock = 0;
+    const tick = () => {
+      const ctx = window.__pufflyScene?.context;
+      if (ctx !== undefined && ctx !== null) {
+        const scene = 'value' in ctx.scene ? ctx.scene.value : ctx.scene;
+        scene.traverse((o) => {
+          if (o.name === 'tray') {
+            window.__trayRock = Math.max(window.__trayRock, Math.abs(o.rotation.z));
+          }
+        });
+      }
+      window.requestAnimationFrame(tick);
+    };
+    window.requestAnimationFrame(tick);
+  });
+
   // §2's two warm lights, read where they are actually stood up. The pool used to be handed a centre
   // and a radius in px on a field the scene multiplies by the frame, which placed it 149
   // canvas-widths to the right of the screen — measured on the served build (2026-10-11): no
@@ -3056,12 +3113,17 @@ try {
   // and read then: the claim stays "the strike gets the cap to its open angle", not "it was there at
   // the moment I chose to look".
   let flameLit = await flameRead();
-  const lidSettledBy = Date.now() + 3000;
+  let sawMotion = false;
+  const lidSettledBy = Date.now() + 6000;
   for (;;) {
     const next = await flameRead();
-    const still = Math.abs(next.lid - flameLit.lid) < 0.005;
+    const moved = Math.abs(next.lid - flameLit.lid) >= 0.005;
+    sawMotion = sawMotion || moved;
     flameLit = next;
-    if (still || Date.now() >= lidSettledBy) break;
+    // A page starved to ~5 fps answers two 80 ms polls with the *same* frame, so "unchanged" is only
+    // evidence of settling once the angle has been seen to move (measured 2026-10-11: the loop broke
+    // mid-throw at -0.27 of -1.36 and called a working cap broken).
+    if ((sawMotion && !moved) || Date.now() >= lidSettledBy) break;
     await page.waitForTimeout(80);
   }
   // The flint's sparks arrive on the sim's own clock (~1 s after the strike here), so this waits
@@ -3340,6 +3402,133 @@ try {
     '3D: the tray’s pile carries §2’s ramp the right way up (light end out, dark end in the tray)',
     ashMeshes.pile !== 'MISSING' && ashMeshes.pile.top > ashMeshes.pile.bottom,
     JSON.stringify(ashMeshes.pile),
+  );
+
+  // §20's tray answers a drag: its rim warms and a halo rises just outside the bowl while the rod is
+  // being carried toward it. This is the behaviour the 3D rewrite dropped and the retirement counted
+  // (#134), so what is guarded here is the wiring — the scene must move those two materials when the
+  // core says a drag is heading for the tray. The invitation eases over 140 ms of the simulation's
+  // own clock, so the read waits on the halo instead of sampling at a guessed moment.
+  const lit = await lightRod(page);
+  const aimForTray = await propsOf(page);
+  const overTray = await stagePoint(page, aimForTray.ashtray.x, aimForTray.ashtray.y);
+  const atRod = await stagePoint(page, aimForTray.body.x, aimForTray.body.y);
+  const movePointer = (at, kind) =>
+    page.evaluate(
+      ([x, y, type]) => {
+        document.querySelector('.hit')?.dispatchEvent(
+          new PointerEvent(type, {
+            clientX: x,
+            clientY: y,
+            pointerId: 1,
+            pointerType: 'touch',
+            isPrimary: true,
+            bubbles: true,
+          }),
+        );
+      },
+      [at.x, at.y, kind],
+    );
+  const rimIdle = await trayInk(page);
+  await movePointer(atRod, 'pointerdown');
+  await movePointer(overTray, 'pointermove');
+  const invited = await page
+    .waitForFunction(
+      () => {
+        const ctx = window.__pufflyScene.context;
+        const scene = 'value' in ctx.scene ? ctx.scene.value : ctx.scene;
+        let halo = null;
+        let rim = null;
+        scene.traverse((o) => {
+          if (o.name === 'tray-halo') halo = o;
+          if (o.name === 'tray-rim') rim = o;
+        });
+        if (halo === null || rim === null) return null;
+        const haloAlpha = +(halo.material.opacity ?? 0).toFixed(3);
+        // The predicate is the invitation itself. Reading the two materials as soon as they exist
+        // returned on the first poll, which is a frame after the press was dispatched — the engine
+        // had not eased anything yet, and the same gesture read green on one run and red on the next
+        // (measured 2026-10-11: three runs, two different answers, no product change).
+        if (halo.visible !== true || haloAlpha <= 0.02) return null;
+        return {
+          haloVisible: true,
+          haloAlpha,
+          rimAlpha: +(rim.material.opacity ?? 0).toFixed(3),
+        };
+      },
+      null,
+      { timeout: 6000, polling: 80 },
+    )
+    .then((handle) => handle.jsonValue())
+    .catch(async () => {
+      const ink = await trayInk(page);
+      return ink === null ? null : { haloVisible: false, haloAlpha: 0, ...ink };
+    });
+  // Back over the rod before the finger lifts: releasing on the tray would be the flick or the
+  // discard, and this check is about the invitation, not about ending the break.
+  await movePointer(atRod, 'pointermove');
+  await movePointer(atRod, 'pointerup');
+  check(
+    '3D: the tray answers a drag — its rim warms and a halo comes up outside the bowl (§20)',
+    invited !== null &&
+      rimIdle !== null &&
+      invited.haloVisible === true &&
+      invited.haloAlpha > 0.02 &&
+      invited.rimAlpha > rimIdle.rimAlpha,
+    `affordance=${lit || 'none'} idle ${JSON.stringify(rimIdle)} invited ${JSON.stringify(invited)}`,
+  );
+
+  // And the tray has to answer a landing, not only an approach: an object that takes no impulse has
+  // no weight on screen. The gesture is the player's own 磕灰 — a tap on the standing column, which
+  // the core resolves to `ash` and turns into a flick. The watcher installed above with the warm
+  // lights records the largest |rotation.z| the bowl ever takes, so what is read is "did it ever
+  // move" rather than "was this poll awake at the right instant".
+  // Whether a column is standing is readable off the mirror: `anchors.ash` sits exactly on the tip
+  // until the ash is long enough to be a tap candidate, then moves off it (anchors.ts). Getting that
+  // far is a real wait, not a formality — measured on the served build (2026-10-11) the two points
+  // separate after ~12 s of burning, which is five ceiling draws of 1.2 s from a fresh light. Six is
+  // that with room, and the two counts are reported because 「没有可磕的灰」and「灰落了而碗不动」are
+  // different faults. A standing column always clears the core's own flick threshold (every rod's
+  // ashVisibleFraction is below ASH_MIN_LENGTH), so a tap that tipped nothing gets pressed again.
+  const standingAsh = (aim) =>
+    aim.ash !== undefined && (aim.ash.x !== aim.ember.x || aim.ash.y !== aim.ember.y);
+  // Its own alight rod, for the same reason the check above takes one: the invitation's press is
+  // held while the scene is being read, and a break left standing there is not the state this
+  // gesture needs (measured 2026-10-11: with the halo muted on purpose, the six-second wait ran the
+  // rod out and this loop reported 「no column」instead of 「no tilt」).
+  await lightRod(page);
+  let rockAim = await propsOf(page);
+  let rockPhase = await scenePhase(page);
+  let draws = 0;
+  while (draws < 6 && !standingAsh(rockAim) && LIT.test(rockPhase)) {
+    await holdDraw(page, 1.2);
+    draws += 1;
+    rockAim = await propsOf(page);
+    rockPhase = await scenePhase(page);
+  }
+  let peakRock = -1;
+  let taps = 0;
+  let hadColumn = false;
+  while (taps < 3 && peakRock <= 0.005 && standingAsh(rockAim)) {
+    hadColumn = true;
+    const at = await stagePoint(page, rockAim.ash.x, rockAim.ash.y);
+    await waitPuffReady(page);
+    await page.evaluate(() => {
+      window.__trayRock = 0;
+    });
+    await pressSurface(page, at, true);
+    await pressSurface(page, at, false);
+    taps += 1;
+    await page
+      .waitForFunction(() => window.__trayRock > 0.005, null, { timeout: 4000, polling: 60 })
+      .catch(() => null);
+    peakRock = await page.evaluate(() => window.__trayRock ?? -1);
+    rockAim = await propsOf(page);
+  }
+  check(
+    '3D: ash landing tips the tray and it settles back — the bowl has weight (§20)',
+    peakRock > 0.005,
+    `peak |rotation.z| ${String(peakRock)} rad after ${String(draws)} draw(s) and ${String(taps)} tap(s), column=${String(hadColumn)} phase=${rockPhase}, against a full-tilt amplitude of 0.05`,
   );
   // The rod, where the core says: the mesh's own mid sits at the true rod's middle and its built
   // length is that rod's world length. The pair is (0.45-of-the-rod, tip), so the check extrapolates

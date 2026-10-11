@@ -26,6 +26,11 @@ export {
   DIP_SHARE,
   WAIST,
   paperGive,
+  TRAY_FEEDBACK,
+  TRAY_FEEDBACK_START,
+  stepTrayFeedback,
+  trayRock,
+  type TrayFeedback,
 } from './props';
 export {
   roomBackdrop,

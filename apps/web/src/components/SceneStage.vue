@@ -46,6 +46,11 @@ import {
   LID_THROW_DEG,
   sparkStreak,
   cartoonScale,
+  stepTrayFeedback,
+  trayRock,
+  TRAY_FEEDBACK,
+  TRAY_FEEDBACK_START,
+  type TrayFeedback,
   dustMotes,
   NEAR_DEPTH,
   RAIN_TINT,
@@ -431,6 +436,16 @@ const columnMesh = shallowRef<THREE.Mesh | null>(null);
 let columnMaterial: THREE.MeshBasicMaterial | null = null;
 /** The tray's pile of tapped ash (§2 S5) and the pixel box its stadium was baked at. */
 let pileMesh: THREE.Mesh | null = null;
+/**
+ * §20's tray: the group that takes the rock, and the two rings that answer a drag. The pile of ash
+ * hangs off the rig group rather than this one, so `placePile` turns its own offset by the same
+ * angle the bowl swings — one object, two parents, one motion.
+ */
+const trayGroup = shallowRef<THREE.Group | null>(null);
+const trayRimMesh = shallowRef<THREE.Mesh | null>(null);
+const trayHaloMesh = shallowRef<THREE.Mesh | null>(null);
+/** The tray's memory of the last landing, stepped per frame like every other live reading here. */
+let trayFeedback: TrayFeedback = TRAY_FEEDBACK_START;
 let pileMaterial: THREE.MeshBasicMaterial | null = null;
 let pileSignature = '';
 let columnSignature = '';
@@ -2007,14 +2022,77 @@ function placePile(state: GameStateView | null): void {
   }
   const anchor = at('ashtray');
   pileMesh.scale.set(metrics.width, metrics.height, 1);
+  // The pile lies in the tray's plane, so the tray's rock carries it — same angle, same pivot,
+  // even though this mesh hangs off the rig group rather than the tray's own.
+  const rock = trayRock(trayFeedback, state?.nowMs ?? 0);
   // In front of the tray's own face: the disc is a cylinder `trayRadius * 0.28` deep, so its
   // camera-side cap sits at 0.14 of the radius.
   pileMesh.position.set(
-    anchor[0],
-    anchor[1] + metrics.dy,
+    anchor[0] - metrics.dy * Math.sin(rock),
+    anchor[1] + metrics.dy * Math.cos(rock),
     anchor[2] + trayRadius.value * 0.14 + 0.0005,
   );
   pileMesh.visible = true;
+}
+
+/**
+ * §20's tray answers a drag: the rock a landing leaves, and the rim and halo that say 这儿 while the
+ * rod is being carried to it.
+ *
+ * The three readings come from `stepTrayFeedback` — the retired 2D layer's own constants, kept in
+ * `game-scene/props` — and this function only lays them down. The invitation is what lets an object
+ * answer without becoming a control: the tray is always in the scene (ash falls into it whether or
+ * not anyone is dragging), so what appears on a drag is its rim warming and a halo just outside the
+ * bowl, never a new button over the picture.
+ */
+function placeTray(state: GameStateView | null, dt: number): void {
+  const group = trayGroup.value;
+  if (group === null) return;
+  if (state === null) {
+    trayFeedback = TRAY_FEEDBACK_START;
+    group.rotation.z = 0;
+    return;
+  }
+  trayFeedback = stepTrayFeedback(trayFeedback, {
+    grams: state.ashtray.grams,
+    dropped: state.cigarette.ash.dropped,
+    dragged: state.cigarette.pose.dragged,
+    dtMs: dt,
+    cartoon: cartoonScale(props.game.rendererLook().realism),
+  });
+  group.rotation.z = trayRock(trayFeedback, state.nowMs);
+  const radius = trayRadius.value;
+  const invite = trayFeedback.invited;
+  const style = state.style.ashtray;
+  const rim = trayRimMesh.value;
+  if (rim !== null) {
+    const material = rim.material as THREE.MeshBasicMaterial;
+    const tinted = mixRgb(style.rim, TRAY_FEEDBACK.rimWarm, invite * 0.7);
+    rim.visible = true;
+    rim.scale.set(radius, radius * TRAY_FLATTEN, 1);
+    material.color.setRGB(
+      (tinted[0] ?? 0) / 255,
+      (tinted[1] ?? 0) / 255,
+      (tinted[2] ?? 0) / 255,
+      THREE.SRGBColorSpace,
+    );
+    material.opacity = clamp01(
+      0.25 + style.reflect + state.world.light.ambient * 0.3 + invite * 0.45,
+    );
+  }
+  const halo = trayHaloMesh.value;
+  if (halo !== null) {
+    const material = halo.material as THREE.MeshBasicMaterial;
+    halo.visible = invite > 0.02;
+    halo.scale.set(radius * TRAY_FEEDBACK.halo.across, radius * TRAY_FEEDBACK.halo.down, 1);
+    material.color.setRGB(
+      (TRAY_FEEDBACK.haloWarm[0] ?? 0) / 255,
+      (TRAY_FEEDBACK.haloWarm[1] ?? 0) / 255,
+      (TRAY_FEEDBACK.haloWarm[2] ?? 0) / 255,
+      THREE.SRGBColorSpace,
+    );
+    material.opacity = invite * 0.5;
+  }
 }
 
 /**
@@ -2354,6 +2432,7 @@ function step(deltaMs: number): void {
   placeCherry(state);
   placeAsh(state);
   placePile(state);
+  placeTray(state, dt);
   placeRod(state);
   placeColumn(state);
   placeChar(state);
@@ -4006,14 +4085,27 @@ function placeMouth(state: GameStateView | null): void {
          disc is turned a quarter turn about x — so its local z is what the screen reads as vertical.
          Squashing local y instead (the obvious guess) squashes the tray's thickness into the screen
          and leaves a perfect circle on it. -->
-    <TresMesh
-      :position="at('ashtray')"
-      :rotation="[-Math.PI / 2, 0, 0]"
-      :scale="[1, 1, TRAY_FLATTEN]"
-    >
-      <TresCylinderGeometry :args="[trayRadius, trayRadius, trayRadius * 0.28, 32]" />
-      <TresMeshStandardMaterial :color="PROP_INK.ashtray" :metalness="0.3" :roughness="0.5" />
-    </TresMesh>
+    <TresGroup ref="trayGroup" name="tray" :position="at('ashtray')">
+      <TresMesh :rotation="[-Math.PI / 2, 0, 0]" :scale="[1, 1, TRAY_FLATTEN]">
+        <TresCylinderGeometry :args="[trayRadius, trayRadius, trayRadius * 0.28, 32]" />
+        <TresMeshStandardMaterial :color="PROP_INK.ashtray" :metalness="0.3" :roughness="0.5" />
+      </TresMesh>
+      <!-- §20's answer to a drag. The back rim is the only place a tray shows its material, and it is
+           also what the tray says while the rod is being carried toward it — the destination answers,
+           so no control has to appear over the scene. Both rings are unit geometry scaled by the
+           tray's own radius every frame, so a window that resizes the bowl never rebuilds a mesh.
+           The 2D layer drew the rim as an arc from θ 1.05π to 1.95π with a line of 0.06 r, and the
+           invitation's halo at 1.16 r across and 0.54 r down — flatter than the bowl, which is how a
+           ring of light off a rim reads. -->
+      <TresMesh ref="trayRimMesh" name="tray-rim">
+        <TresRingGeometry :args="[0.94, 1, 48, 1, Math.PI * 1.05, Math.PI * 0.9]" />
+        <TresMeshBasicMaterial :transparent="true" :depth-write="false" :opacity="0" />
+      </TresMesh>
+      <TresMesh ref="trayHaloMesh" name="tray-halo">
+        <TresRingGeometry :args="[0.979, 1.021, 48]" />
+        <TresMeshBasicMaterial :transparent="true" :depth-write="false" :opacity="0" />
+      </TresMesh>
+    </TresGroup>
 
     <!-- The rod: a cylinder between the two published points (its true ends), rotated by the
          angle they imply. `placeRod` pinches its rings while a draw is held (S7/S15). -->

@@ -10,6 +10,7 @@
  * 2D layer is gone and these are the only copy (the parity test that used to pin the two together
  * retired with it).
  */
+import type { Rgb } from '@puffly/shared';
 import { wander } from './noise';
 
 /**
@@ -182,4 +183,98 @@ export function paperGive(length: number, thickness: number, dip: number, x: num
     }
   }
   return half + closest;
+}
+
+/**
+ * §20's tray answers a drag — the readings the retired 2D layer drove `drawAshtray` with, kept here
+ * so the scene and whatever draws next read one set of numbers.
+ *
+ * Three facts, none of which the tray is told by a control: how full it is, that something just
+ * landed in it, and that the rod is being carried toward it. The 2D layer had all three since the
+ * tray first answered a drag; the 3D rewrite drew the bowl and the pile and lost them, and the
+ * retirement counted the loss (task #134). The constants are that layer's own, transcribed rather
+ * than re-derived: `TRAY_FULL_GRAMS 0.36`, an impulse of `0.5` per dropped unit draining over
+ * `620 ms`, an invitation easing over `140 ms`, and a rock of `cos(now/46) · wobble · 0.05` radians.
+ */
+export const TRAY_FEEDBACK = {
+  /** How many grams make the mound read as full. */
+  fullGrams: 0.36,
+  /** Below this the bowl reads as empty, and §2's pile is not drawn at all. */
+  moundFloor: 0.02,
+  /** The impulse one unit of dropped ash leaves behind, before the realism dial. */
+  perDrop: 0.5,
+  /** ms for a full-tilt rock to settle back to level. */
+  drainMs: 620,
+  /** ms for the invitation to arrive and go. */
+  easeMs: 140,
+  /** The rock's own period, in ms of the simulation's clock. */
+  periodMs: 46,
+  /** Its amplitude at full tilt, in radians. */
+  amplitude: 0.05,
+  /** The two warm inks the 2D layer mixed with: the rim toward it as the invite grows … */
+  rimWarm: [255, 214, 150] as Rgb,
+  /** … and the halo outside the rim, drawn at half the invite's alpha. */
+  haloWarm: [255, 196, 128] as Rgb,
+  /** The halo's own ellipse, in fractions of the tray's radius: wider than the bowl, flatter. */
+  halo: { across: 1.16, down: 0.54 },
+} as const;
+
+export interface TrayFeedback {
+  /** 0..1: how full the mound of ash has grown. */
+  load: number;
+  /** 0..1 decaying impulse, replayed every time ash lands. */
+  wobble: number;
+  /** 0..1 while the rod is being carried somewhere. */
+  invited: number;
+  /** The ash count this was last stepped against; -1 before the first frame. */
+  dropped: number;
+}
+
+export const TRAY_FEEDBACK_START: TrayFeedback = {
+  load: 0,
+  wobble: 0,
+  invited: 0,
+  dropped: -1,
+};
+
+/**
+ * One frame of the tray's answer.
+ *
+ * `cartoon` is the realism dial's own multiplier, so a player who asks for 写实 gets a tray that
+ * behaves like an object and one who asks for 卡通 gets the exaggerated rock — the same dial every
+ * other exaggeration on this stage goes through, which is why it is an argument and not a constant.
+ */
+export function stepTrayFeedback(
+  previous: TrayFeedback,
+  frame: {
+    grams: number;
+    dropped: number;
+    dragged: boolean;
+    dtMs: number;
+    cartoon: number;
+  },
+): TrayFeedback {
+  const { fullGrams, perDrop, drainMs, easeMs } = TRAY_FEEDBACK;
+  const landed =
+    previous.dropped >= 0 && frame.dropped > previous.dropped
+      ? (frame.dropped - previous.dropped) * perDrop * frame.cartoon
+      : 0;
+  const wobble = Math.max(0, Math.min(1, previous.wobble + landed) - frame.dtMs / drainMs);
+  const ease = Math.min(1, frame.dtMs / easeMs);
+  return {
+    load: Math.max(0, Math.min(1, frame.grams / fullGrams)),
+    wobble,
+    invited: previous.invited + ((frame.dragged ? 1 : 0) - previous.invited) * ease,
+    dropped: frame.dropped,
+  };
+}
+
+/**
+ * The tray's tilt this frame. Cosine, not sine: a released oscillator starts at full tilt and
+ * settles back to level, which is what makes the object look like it has weight.
+ */
+export function trayRock(feedback: TrayFeedback, nowMs: number): number {
+  const { periodMs, amplitude } = TRAY_FEEDBACK;
+  if (feedback.wobble <= 0) return 0;
+  return Math.cos(nowMs / periodMs) * feedback.wobble * amplitude;
 }

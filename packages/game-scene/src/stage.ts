@@ -1,8 +1,10 @@
 /**
  * Stage coordinates → scene coordinates.
  *
- * The core owns the geometry (SPEC §79) and the shell mirrors it as five canvas fractions on
- * `.stage[data-aim]`. The scene reads that mirror and nothing else: a second copy of the layout is
+ * The core owns the geometry (SPEC §79) and the shell mirrors it onto `.stage[data-aim]` as canvas
+ * fractions. That mirror carries the points a finger can hit, which is a wider set than the five the
+ * scene draws from, so `AIM_KEYS` here is a filter and not a copy of the shell's list. The scene reads
+ * that mirror and nothing else: a second copy of the layout is
  * exactly the mistake the old browser layer made twice, and both times it reported a working game
  * as a broken one.
  *
