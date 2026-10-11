@@ -2859,6 +2859,44 @@ try {
     dustCount > 0,
     `dust ${String(dustCount)}`,
   );
+  // §2's two warm lights, read where they are actually stood up. The pool used to be handed a centre
+  // and a radius in px on a field the scene multiplies by the frame, which placed it 149
+  // canvas-widths to the right of the screen — measured on the served build (2026-10-11): no
+  // pool-sized quad was in the scene at all, so the room had one light instead of two and the
+  // 暖光 the Demo draws was missing. |control|: putting `x: box.x + spot.x * box.width` back reads a
+  // centre of hundreds here and reddens this.
+  const pools = await page.evaluate(() => {
+    const ctx = window.__pufflyScene.context;
+    const scene = 'value' in ctx.scene ? ctx.scene.value : ctx.scene;
+    const found = {};
+    scene.traverse((o) => {
+      if (o.name === 'pool-bloom' || o.name === 'pool-warm') {
+        found[o.name] = {
+          vis: o.visible,
+          x: +o.position.x.toFixed(2),
+          y: +o.position.y.toFixed(2),
+          // The camera frame is 4 world units tall, so anything much past that is off the screen.
+          halfWidth: +(o.scale.x / 2).toFixed(2),
+          opacity: +(o.material.opacity ?? -1).toFixed(3),
+        };
+      }
+    });
+    return found;
+  });
+  const warm = pools['pool-warm'];
+  check(
+    '3D: both warm lights stand inside the frame, on the screen §2 draws (§2 S1)',
+    warm !== undefined &&
+      warm.vis &&
+      pools['pool-bloom']?.vis === true &&
+      Math.abs(warm.x) < 2 &&
+      Math.abs(warm.y) < 2 &&
+      warm.halfWidth > 0.3 &&
+      warm.halfWidth < 2 &&
+      warm.opacity >= 0.09 &&
+      warm.opacity <= 0.22,
+    JSON.stringify(pools),
+  );
   // S2's ignition: the flame on the lighter, from the same metrics the painted layer draws it
   // with (`flameMetrics`). Read as a state pair rather than pixels — the flame's screen size and
   // place move with the sim's flicker, and a fixed band once read the *hint word* instead — while
@@ -2929,7 +2967,20 @@ try {
   await page
     .waitForFunction(`${flameSrc}.visible`, null, { timeout: 6000, polling: 60 })
     .catch(() => null);
-  const flameLit = await flameRead();
+  // The cap's throw is an animation, and the lid's angle is the figure this check compares. Reading
+  // the frame the flame appears in caught the lid mid-throw (-0.48 of -1.36 rad on 2026-10-11, where
+  // the fixed 220 ms wait this replaced always landed after it), so wait for the lid to stop moving
+  // and read then: the claim stays "the strike gets the cap to its open angle", not "it was there at
+  // the moment I chose to look".
+  let flameLit = await flameRead();
+  const lidSettledBy = Date.now() + 3000;
+  for (;;) {
+    const next = await flameRead();
+    const still = Math.abs(next.lid - flameLit.lid) < 0.005;
+    flameLit = next;
+    if (still || Date.now() >= lidSettledBy) break;
+    await page.waitForTimeout(80);
+  }
   // The flint's sparks arrive on the sim's own clock (~1 s after the strike here), so this waits
   // for the pass rather than sampling at a guessed moment; the streaks themselves were probe-
   // checked (7 of them, short dashes off the chimney). The budget is that arrival converted at the
