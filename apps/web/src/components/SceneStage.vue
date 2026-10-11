@@ -142,6 +142,17 @@ interface SceneProbe {
   /** The §2 S3 104 px stage ring. */
   stageRing: StageRingProbe;
   /**
+   * The fragments the core is carrying right now, as the core writes them: canvas fractions and the
+   * piece's own size and length. `placeAsh` turns each one into a world position through the same
+   * `canvasToWorld` every other prop uses, and into an instance whose own two axis lengths carry that
+   * fragment's length against its thickness. The device check rebuilds both from the numbers this layer
+   * reads them from — `.stage[data-stage-box]` and the window's aspect — which is what makes "the flake
+   * lands where the simulation put it, drawn as long as the simulation made it, not as this layer
+   * chose" a claim a machine can judge. It was `ash-flake.test.ts`'s, retired with the painted layer
+   * (#145).
+   */
+  ash: { x: number; y: number; size: number; length: number }[];
+  /**
    * The §S7 冲击感, eased: 0 on every frame that is not leaning in, ~1 for the few frames after the
    * rod catches. A check wants the machine value rather than a screenshot of a 420 ms moment.
    */
@@ -194,6 +205,7 @@ const probe: SceneProbe = {
   particles: 0,
   context: null,
   stageRing: { visible: false, frac: 0, seconds: '' },
+  ash: [],
   punch: 0,
   cherry: null,
   lip: { visible: false, action: '', tier: 'S', columnWidthPx: 0, kind: '' },
@@ -624,6 +636,7 @@ function onSceneReady(context: unknown): void {
   ashMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   ashMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(ASH_CAPACITY * 3), 3);
   ashMesh.frustumCulled = false;
+  ashMesh.name = 'ash-flakes';
   ashMesh.count = 0;
   flakes.value = ashMesh;
 
@@ -1849,6 +1862,12 @@ function placeAsh(state: GameStateView | null): void {
   const ashMesh = flakes.value;
   if (ashMesh === null) return;
   const falling = state?.cigarette.ash.falling ?? [];
+  probe.ash = falling.slice(0, 12).map((fragment) => ({
+    x: fragment.origin.x,
+    y: fragment.origin.y,
+    size: fragment.size,
+    length: fragment.length,
+  }));
   const style = state?.style.cigarette.ash;
   const unit = unitWorld.value;
   let n = 0;

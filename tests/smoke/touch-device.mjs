@@ -3774,6 +3774,66 @@ try {
   let peakRock = -1;
   let taps = 0;
   let hadColumn = false;
+  // The same window is where a flake gets born, so the placement claim below records every frame
+  // from here on instead of sampling once: the broken piece lives about a third of a second
+  // (`ash-break.test.ts`'s own title) and a poll would be judging whichever instant it woke at.
+  await page.evaluate(() => {
+    const rec = {
+      frames: 0,
+      pieceFrames: 0,
+      paired: 0,
+      worstPos: 0,
+      worstRatio: 0,
+      pieceRatio: 0,
+      mesh: 'none',
+    };
+    let mesh = null;
+    const tick = () => {
+      const probe = window.__pufflyScene;
+      const core = probe?.ash ?? [];
+      if (core.length > 0) {
+        const ctx = probe.context;
+        const scene = 'value' in ctx.scene ? ctx.scene.value : ctx.scene;
+        if (mesh === null)
+          scene.traverse((o) => {
+            if (o.isInstancedMesh && o.name === 'ash-flakes') mesh = o;
+          });
+        const stageEl = document.querySelector('.stage');
+        const box = (stageEl?.dataset.stageBox ?? '').split(',').map(Number);
+        if (mesh !== null && box.length === 4 && box[2] > 0 && box[3] > 0) {
+          rec.mesh = 'found';
+          const aspect = window.innerWidth / Math.max(1, window.innerHeight);
+          const stageWidth = 4 * (box[2] / box[3]) * aspect;
+          const arr = mesh.instanceMatrix.array;
+          rec.frames += 1;
+          if (core.some((f) => f.length > 0)) rec.pieceFrames += 1;
+          for (let n = 0; n < Math.min(core.length, mesh.count); n++) {
+            const f = core[n];
+            const nx = (f.x - box[0]) / box[2];
+            const ny = (f.y - box[1]) / box[3];
+            rec.worstPos = Math.max(
+              rec.worstPos,
+              Math.hypot(
+                arr[n * 16 + 12] - (nx - 0.5) * stageWidth,
+                arr[n * 16 + 13] - (0.5 - ny) * 4,
+              ),
+            );
+            // The instance's own axis lengths, so the fragment's `rotation` drops out: a z-rotation
+            // puts cos·sx and sin·sx in the first column, cos·sy and -sin·sy in the second.
+            const sx = Math.hypot(arr[0], arr[1]);
+            const sy = Math.hypot(arr[4], arr[5]);
+            const want = f.length > 0 ? f.length / (f.size * 1.1) : 2 / 1.1;
+            rec.worstRatio = Math.max(rec.worstRatio, Math.abs(sx / sy - want));
+            if (f.length > 0) rec.pieceRatio = Math.max(rec.pieceRatio, sx / sy);
+            rec.paired += 1;
+          }
+        }
+      }
+      window.__ashRaf = window.requestAnimationFrame(tick);
+    };
+    window.__ashRec = rec;
+    window.__ashRaf = window.requestAnimationFrame(tick);
+  });
   while (taps < 3 && peakRock <= 0.005 && standingAsh(rockAim)) {
     hadColumn = true;
     const at = await stagePoint(page, rockAim.ash.x, rockAim.ash.y);
@@ -3794,6 +3854,36 @@ try {
     '3D: ash landing tips the tray and it settles back — the bowl has weight (§20)',
     peakRock > 0.005,
     `peak |rotation.z| ${String(peakRock)} rad after ${String(draws)} draw(s) and ${String(taps)} tap(s), column=${String(hadColumn)} phase=${rockPhase}, against a full-tilt amplitude of 0.05`,
+  );
+  // Where a flake is drawn is the core's own `fragment.origin`, and how long it is drawn is the
+  // core's own `fragment.length` — neither is a point or a size this layer picks. `ash-flake.test.ts`
+  // judged both of the painted layer and retired with it on 2026-10-10 (#145); here every frame of the
+  // 磕灰 above is judged, off the instance matrices paired by index with the list the core handed over.
+  // The expected point is rebuilt from the two numbers the product itself reads —
+  // `.stage[data-stage-box]` and the window's aspect, the same pair the rod check below uses — because
+  // an order test passes a rigid shift of the whole cloud, and a shift is exactly what "this layer chose
+  // its own points" looks like. `canvasToWorld`'s arithmetic is judged in `stage.test.ts`; what is judged
+  // here is that `placeAsh` runs it on this fragment's origin with this frame's box.
+  // 1e-3 world units is ~0.025% of the stage's height: far below any wrong mapping, far above Float32
+  // rounding. The ratio tolerance is the same fraction of a ratio of ~1.8.
+  // |control|: adding a constant to the x the mesh is placed at reddens the offset and nothing else;
+  // drawing every flake `size × size·1.1` (ignoring `length`) reddens the ratio and nothing else.
+  const ashRec = await page.evaluate(() => {
+    window.cancelAnimationFrame(window.__ashRaf);
+    return window.__ashRec;
+  });
+  check(
+    '3D: each falling flake is drawn where the core put it, at the length the core gave it (S5)',
+    ashRec.paired >= 2 &&
+      ashRec.frames >= 2 &&
+      ashRec.pieceFrames >= 1 &&
+      ashRec.worstPos < 1e-3 &&
+      ashRec.worstRatio < 0.02,
+    `${String(ashRec.paired)} fragment-frame(s) over ${String(ashRec.frames)} frame(s), ${String(
+      ashRec.pieceFrames,
+    )} of them carrying the broken piece (drawn at ratio ${ashRec.pieceRatio.toFixed(
+      2,
+    )}:1); worst offset ${ashRec.worstPos.toFixed(6)} world units, worst ratio error ${ashRec.worstRatio.toFixed(4)} (mesh ${ashRec.mesh === 'found' ? 'found' : 'NOT FOUND'})`,
   );
   // The rod, where the core says: the mesh's own mid sits at the true rod's middle and its built
   // length is that rod's world length. The pair is (0.45-of-the-rod, tip), so the check extrapolates
