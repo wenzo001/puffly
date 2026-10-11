@@ -459,6 +459,8 @@ const flameThroat = shallowRef<THREE.Mesh | null>(null);
 let flameMaterial: THREE.MeshBasicMaterial | null = null;
 let flameThroatMaterial: THREE.MeshBasicMaterial | null = null;
 let flameSignature = '';
+/** The pixel box the pill's halo texture was baked at, so the falloff stays one CSS px per texel. */
+let pillGlowSignature = '';
 
 /**
  * The room itself, as meshes: the sky's three stops, the wall band, the table edge's nosing, the
@@ -1132,12 +1134,15 @@ function onSceneReady(context: unknown): void {
   badgeQuad.value = badge;
   rigGroup.add(badge);
   pillGlowMaterial = new THREE.MeshBasicMaterial({
-    map: roundedRect(128, 0.5),
     transparent: true,
     depthWrite: false,
-    blending: THREE.AdditiveBlending,
+    // Source-over, the way the browser composites the `box-shadow` this copies. Additive was a slab:
+    // the halo's own alpha added light over the lit table instead of darkening it the way the DOM
+    // does, which is what made the bottom of the screen read as one orange plate (§2's shadow is
+    // `0 10px 28px -6px rgba(217,87,25,.42)` — a 28 px falloff hugging a 342 × 62 button).
   });
   const pillGlowMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), pillGlowMaterial);
+  pillGlowMesh.name = 'pill-glow';
   pillGlowMesh.frustumCulled = false;
   pillGlowMesh.visible = false;
   pillGlowMesh.position.z = 0.044;
@@ -2715,21 +2720,74 @@ function placePill(): void {
   const glow = pillGlow.value;
   if (glow !== null && pillGlowMaterial !== null && pill !== null) {
     const rect = pill.getBoundingClientRect();
-    const glowWorld = rectWorld({
-      x: rect.left / Math.max(1, viewportWidthPx.value),
-      y: (rect.top + 10) / Math.max(1, viewportHeightPx.value),
-      w: (rect.width * 1.08) / Math.max(1, viewportWidthPx.value),
-      h: (rect.height * 1.25) / Math.max(1, viewportHeightPx.value),
-    });
-    glow.visible = true;
-    glow.scale.set(glowWorld.width, glowWorld.height, 1);
-    glow.position.set(glowWorld.centre[0], glowWorld.centre[1], 0.044);
-    pillGlowMaterial.color.set(
-      getComputedStyle(document.documentElement).getPropertyValue('--ember-orange').trim() ||
-        '#e2604a',
-    );
-    pillGlowMaterial.opacity = held === true ? 0.35 : 0.22;
+    // One home for the button's look: the DOM's own `box-shadow`, which §2 writes as
+    // `0 10px 28px -6px rgba(217,87,25,.42)`. The card, the ring and this halo all read the element,
+    // so the numbers cannot drift into two copies of a button.
+    const shadow = parseDropShadow(getComputedStyle(pill).boxShadow);
+    if (shadow === null || rect.width === 0 || rect.height === 0) {
+      glow.visible = false;
+    } else {
+      // The shadow's own rect is the card moved by the offset and widened by the spread; the blur is
+      // the room its falloff needs outside that.
+      const plateW = rect.width + shadow.spread * 2;
+      const plateH = rect.height + shadow.spread * 2;
+      const boxW = plateW + shadow.blur * 2;
+      const boxH = plateH + shadow.blur * 2;
+      const signature = `${Math.round(boxW)}x${Math.round(boxH)}|${Math.round(shadow.blur)}`;
+      if (signature !== pillGlowSignature) {
+        pillGlowSignature = signature;
+        const previous = pillGlowMaterial.map;
+        // Built at the size it is drawn, so one texel of softness stays one CSS pixel of it.
+        pillGlowMaterial.map = stadiumBar(plateW, plateH, shadow.blur, shadow.blur);
+        pillGlowMaterial.needsUpdate = true;
+        previous?.dispose();
+      }
+      const vw = Math.max(1, viewportWidthPx.value);
+      const vh = Math.max(1, viewportHeightPx.value);
+      const glowWorld = rectWorld({
+        x: (rect.left + shadow.x + shadow.spread - shadow.blur) / vw,
+        y: (rect.top + shadow.y + shadow.spread - shadow.blur) / vh,
+        w: boxW / vw,
+        h: boxH / vh,
+      });
+      glow.visible = true;
+      glow.scale.set(glowWorld.width, glowWorld.height, 1);
+      glow.position.set(glowWorld.centre[0], glowWorld.centre[1], 0.044);
+      const [sr, sg, sb] = shadow.rgb;
+      pillGlowMaterial.color.setRGB(sr / 255, sg / 255, sb / 255, THREE.SRGBColorSpace);
+      pillGlowMaterial.opacity = shadow.alpha;
+    }
   }
+}
+
+/**
+ * The DOM's own `box-shadow`, as numbers — `rgba(217, 87, 25, 0.42) 0px 10px 28px -6px`.
+ *
+ * Only the first layer is read, because that is all §2 writes. A value this cannot parse leaves the
+ * halo unpainted rather than guessed at: the button's look has one home, and a silent default here
+ * is how two copies of one number start disagreeing.
+ */
+function parseDropShadow(raw: string): {
+  rgb: [number, number, number];
+  alpha: number;
+  x: number;
+  y: number;
+  blur: number;
+  spread: number;
+} | null {
+  const match =
+    /^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,\s]+([\d.]+))?\s*\)\s+(-?[\d.]+)px\s+(-?[\d.]+)px\s+([\d.]+)px(?:\s+(-?[\d.]+)px)?/.exec(
+      raw.trim(),
+    );
+  if (match === null) return null;
+  return {
+    rgb: [Number(match[1]), Number(match[2]), Number(match[3])],
+    alpha: match[4] === undefined ? 1 : Number(match[4]),
+    x: Number(match[5]),
+    y: Number(match[6]),
+    blur: Number(match[7]),
+    spread: match[8] === undefined ? 0 : Number(match[8]),
+  };
 }
 
 /**

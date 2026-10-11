@@ -665,18 +665,48 @@ async function wakeChrome(page, target = '.rail') {
   throw new Error(`wakeChrome: ${target} stayed hidden through three presses on the sky`);
 }
 
+/**
+ * A tap or a click that cannot take the whole run with it.
+ *
+ * #114 bounded four of these and the family kept growing: an actionability wait on a control the
+ * chrome has folded away retries for 30 s and then throws, which aborts every check that follows —
+ * one lost red becomes a lost run, and a lost run reads as "the suite is broken". The miss is not
+ * hidden either: the sheet or row the caller is waiting on never arrives, and the check that reads
+ * it says so.
+ */
+const tapAt = (locator, withinMs = 2500) =>
+  locator
+    .tap({ timeout: withinMs })
+    .then(() => true)
+    .catch(() => false);
+const clickAt = (locator, withinMs = 2500) =>
+  locator
+    .click({ timeout: withinMs })
+    .then(() => true)
+    .catch(() => false);
+
 async function openSheet(page, id, mouse = false) {
   const selector = SHEET_HANDLE[id];
-  await wakeChrome(page, selector);
   const handle = page.locator(selector);
-  if (mouse) await handle.click();
-  else await handle.tap();
-  // Wait for the sheet itself, then the settle beat: a fixed 460 ms once raced a slow frame twice
-  // in one day (2026-10-09), and the read that lost left an uncaught TypeError which aborted every
-  // check after it. A miss here does not throw — the check that follows reports it as a red.
-  await page
-    .waitForSelector('.sheet[data-open="true"]', { state: 'attached', timeout: 4000 })
-    .catch(() => {});
+  // Two turns at it, and neither can take the run down. The wake proves the control is on screen,
+  // but the panel folds itself away 2.6 s after the last input, so a handle that was visible a moment
+  // ago can be gone by the time the tap is attempted — which used to spend Playwright's 30 s retry
+  // and then throw, aborting every check after it (#114's remaining half). A miss is still reported:
+  // the sheet never attaches, and the check that reads it goes red.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await wakeChrome(page, selector).catch(() => {});
+    const pressed = mouse ? await clickAt(handle) : await tapAt(handle);
+    const opened = await page
+      .waitForSelector('.sheet[data-open="true"]', {
+        state: 'attached',
+        timeout: pressed ? 4000 : 400,
+      })
+      .then(() => true)
+      .catch(() => false);
+    if (opened) break;
+  }
+  // The settle beat: a fixed 460 ms once raced a slow frame twice in one day (2026-10-09), and the
+  // read that lost left an uncaught TypeError which aborted every check after it.
   await page.waitForTimeout(460);
 }
 
@@ -942,7 +972,7 @@ const hintCentre = async (page) => {
   await openSheet(page, 'shelf');
   // The panel's own header: a tile would answer by taking that rod into the hand, which the reads
   // further down this file depend on not having happened.
-  await page.locator('.sheet[data-open="true"] .head .count').first().tap();
+  await tapAt(page.locator('.sheet[data-open="true"] .head .count').first());
   await page.waitForTimeout(320);
   const drawerInside = await panelState(page);
   check(
@@ -983,8 +1013,8 @@ const hintCentre = async (page) => {
 
   // §64: the word is a setting, not a fixture. Off has to mean off on the stage too, not just
   // in the sheet, and turning it off must not leave any other text behind.
-  await page.locator('.sheet[data-open="true"] [data-setting="hints"]').tap();
-  await page.locator('.sheet[data-open="true"] .close').tap();
+  await tapAt(page.locator('.sheet[data-open="true"] [data-setting="hints"]'));
+  await tapAt(page.locator('.sheet[data-open="true"] .close'));
   await page.waitForTimeout(600);
   const quiet = await stageWords(page);
   check(
@@ -1068,10 +1098,10 @@ const hintCentre = async (page) => {
       };
     });
   const puffOwn = await puffState();
-  await page.locator('.sheet[data-open="true"] [data-setting="puff"]').tap();
+  await tapAt(page.locator('.sheet[data-open="true"] [data-setting="puff"]'));
   await page.waitForTimeout(250);
   const puffChosen = await puffState();
-  await page.locator('.sheet[data-open="true"] [data-setting="puff"]').tap();
+  await tapAt(page.locator('.sheet[data-open="true"] [data-setting="puff"]'));
   await page.waitForTimeout(250);
   const puffBack = await puffState();
   check(
@@ -1108,7 +1138,7 @@ const hintCentre = async (page) => {
         })),
     );
   const beforeAlt = await altRows();
-  await page.locator('.sheet[data-open="true"] .alt[data-alt="breathe"]').tap();
+  await tapAt(page.locator('.sheet[data-open="true"] .alt[data-alt="breathe"]'));
   await page.waitForTimeout(300);
   const afterAlt = await altRows();
   check(
@@ -1606,12 +1636,12 @@ try {
   // fixed number of taps that assumes where the cycle started.
   let muted = await cueChannel(page);
   for (let step = 0; step < 3 && muted !== 'visual'; step += 1) {
-    await sound.tap();
+    await tapAt(sound);
     muted = await waitChannel(page, 'visual', 1200);
   }
-  await sound.tap();
+  await tapAt(sound);
   const unmuted = await waitChannel(page, 'audio');
-  await page.locator('.sheet[data-open="true"] .close').tap();
+  await tapAt(page.locator('.sheet[data-open="true"] .close'));
 
   check(
     'the picture carries the cues until the browser allows sound, and whenever the player mutes',
@@ -1698,7 +1728,7 @@ try {
 
   // The pill is a handle on the real gesture, not a picture of one: pressing it must do exactly
   // what a finger on the rod does (§28, §65).
-  await page.locator('.pill').tap();
+  await tapAt(page.locator('.pill'));
   await page.waitForTimeout(420);
   const picked = await chrome();
   check(
@@ -1712,7 +1742,7 @@ try {
   // a single attempt reads as a broken pill roughly once every three draws.
   let caught = '';
   for (let attempt = 0; attempt < 3 && caught === ''; attempt += 1) {
-    await page.locator('.pill').tap();
+    await tapAt(page.locator('.pill'));
     caught = await waitScene(page, LIT, 2200);
   }
   const lit = await chrome();
@@ -1804,7 +1834,7 @@ try {
   // 1.0 × 1.6 = 1.6 s and the whole press fits inside one idle window. The window is set through the
   // controls the portrait block walks: one tap for the deck's 2.0 s, Home for the track's floor.
   await openSheet(page, 'settings');
-  await page.locator('.sheet[data-open="true"] [data-setting="puff"]').tap();
+  await tapAt(page.locator('.sheet[data-open="true"] [data-setting="puff"]'));
   await page.locator('.sheet[data-open="true"] [data-setting="puff-track"]').focus();
   await page.keyboard.press('Home');
   const ceilingWindow = await page.evaluate(() => {
@@ -1821,7 +1851,7 @@ try {
     ceilingWindow.value === ceilingWindow.min && ceilingWindow.shown.startsWith('1.0'),
     JSON.stringify(ceilingWindow),
   );
-  await page.locator('.sheet[data-open="true"] .close').tap();
+  await tapAt(page.locator('.sheet[data-open="true"] .close'));
   await page.waitForTimeout(520);
 
   const countOf = (text) => Number(/^(\d+)\s*\//.exec(text)?.[1] ?? -1);
@@ -2134,7 +2164,7 @@ try {
     JSON.stringify({ ...skins, presetSkin, afterPreset }),
   );
 
-  await page.locator('.skin[data-locked="true"]').first().click();
+  await clickAt(page.locator('.skin[data-locked="true"]').first());
   await page.waitForTimeout(320);
   const stillWorn = await page.evaluate(() =>
     [...document.querySelectorAll('.skin[data-selected="true"]')].map((el) => el.dataset.skin),
@@ -2185,7 +2215,7 @@ try {
 
   // Tier two, right-to-left. The Arabic table is deliberately partial, so a player sees two
   // tongues at once — and the thing that must not follow the text is the scene.
-  await sheet().locator('[data-language="ar"]').tap();
+  await tapAt(sheet().locator('[data-language="ar"]'));
   await page.waitForTimeout(520);
   const doc = await page.evaluate(() => ({
     lang: document.documentElement.lang,
@@ -2213,7 +2243,7 @@ try {
     `left-to-right x=${Math.round(closeLtr.x)} → right-to-left x=${Math.round(closeRtl.x)}`,
   );
 
-  await sheet().locator('.close').tap();
+  await tapAt(sheet().locator('.close'));
   await page.waitForTimeout(420);
   const arHint = await hintCentre(page);
   const arWord = await stageWords(page);
@@ -2262,7 +2292,7 @@ try {
   // Tier three is a whole interface, not a colour: the same controls, the same positions, no
   // words anywhere — and every one of them still named for a screen reader (§64).
   await openSheet(page, 'settings');
-  await sheet().locator('[data-language="icons"]').tap();
+  await tapAt(sheet().locator('[data-language="icons"]'));
   await page.waitForTimeout(520);
   const icons = await page.evaluate(() => {
     const sheet = document.querySelector('.sheet[data-open="true"]');
@@ -2310,7 +2340,7 @@ try {
     `${icons.lang}/${icons.dir}`,
   );
 
-  await sheet().locator('.close').tap();
+  await tapAt(sheet().locator('.close'));
   await page.waitForTimeout(420);
   const quiet = await stageWords(page);
   check(
@@ -2896,6 +2926,59 @@ try {
       warm.opacity >= 0.09 &&
       warm.opacity <= 0.22,
     JSON.stringify(pools),
+  );
+  // §2's button halo, painted from the DOM's own `box-shadow` instead of this file's opinion. The
+  // first version used a near-square texture at 8 % / 25 % over the card with additive blending,
+  // which is a hard-edged orange plate across the bottom of the screen (seen in a screenshot
+  // 2026-10-11 — the thing no reading of a number had caught). |control|: putting
+  // `map: roundedRect(128, 0.5)` and `AdditiveBlending` back reads a square texture, blending 2 and
+  // an alpha of 0.22 here, and reddens this.
+  const halo = await page.evaluate(() => {
+    const ctx = window.__pufflyScene.context;
+    const scene = 'value' in ctx.scene ? ctx.scene.value : ctx.scene;
+    const stage = document.querySelector('.stage').getBoundingClientRect();
+    const raw = getComputedStyle(document.querySelector('.pill')).boxShadow;
+    const m =
+      /^rgba\(([\d.]+), ([\d.]+), ([\d.]+), ([\d.]+)\) (-?[\d.]+)px (-?[\d.]+)px ([\d.]+)px (-?[\d.]+)px$/.exec(
+        raw,
+      );
+    let glow = null;
+    let ruler = null;
+    scene.traverse((o) => {
+      if (o.name === 'pill-glow') glow = o;
+      if (o.name === 'grain') ruler = o;
+    });
+    if (glow === null || m === null || ruler === null) return { missing: true, raw };
+    // World units are the stage's own: the grain plane spans the whole frame, so it is the ruler
+    // that turns a mesh's scale back into the pixels a player sees.
+    const pxPerWorldX = stage.width / ruler.scale.x;
+    const pxPerWorldY = stage.height / ruler.scale.y;
+    const rect = document.querySelector('.pill').getBoundingClientRect();
+    return {
+      shadow: raw,
+      wantW: rect.width + 2 * Number(m[8]) + 2 * Number(m[7]),
+      wantH: rect.height + 2 * Number(m[8]) + 2 * Number(m[7]),
+      gotW: +(glow.scale.x * pxPerWorldX).toFixed(1),
+      gotH: +(glow.scale.y * pxPerWorldY).toFixed(1),
+      alpha: +glow.material.opacity.toFixed(3),
+      wantAlpha: Number(m[4]),
+      blending: glow.material.blending,
+      texW: glow.material.map?.image?.width ?? -1,
+      texH: glow.material.map?.image?.height ?? -1,
+      visible: glow.visible,
+    };
+  });
+  check(
+    '3D: the button’s halo is the DOM’s own shadow — its box, its alpha, source-over (§2 .btn.start)',
+    halo.missing !== true &&
+      halo.visible === true &&
+      Math.abs(halo.gotW - halo.wantW) < 6 &&
+      Math.abs(halo.gotH - halo.wantH) < 6 &&
+      Math.abs(halo.alpha - halo.wantAlpha) < 0.01 &&
+      halo.blending === 1 &&
+      Math.abs(halo.texW - Math.round(halo.wantW)) <= 1 &&
+      Math.abs(halo.texH - Math.round(halo.wantH)) <= 1,
+    JSON.stringify(halo),
   );
   // S2's ignition: the flame on the lighter, from the same metrics the painted layer draws it
   // with (`flameMetrics`). Read as a state pair rather than pixels — the flame's screen size and

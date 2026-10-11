@@ -222,28 +222,46 @@ function maskTexture(
 }
 
 /**
- * The slider's track: a horizontal stadium whose round caps stay circular on screen.
+ * A horizontal stadium — a rectangle with half-disc caps — as a mask, built in its own pixel space.
  *
- * Unlike the other helpers this one is built in its own pixel space (the size it will be drawn at)
- * on purpose — a stretched texture would oval the two caps, and the DOM's are 1.5 px half-discs.
- * `feather` is in texture pixels, so one texel of softness stays one small step whatever the bar's
- * size. The DOM's own geometry this mirrors: `border-radius: 3px` on a 3 px bar (the browser clamps
- * it to half the height), track spanning the input's full width.
+ * Unlike the other helpers this one is baked at the size it will be drawn at on purpose: a stretched
+ * texture would oval the caps, and the shapes this mirrors are DOM boxes whose `border-radius` is
+ * the browser's own clamp (a 3 px bar with `border-radius: 3px`, the §2 灰堆's `11px` on 22 px, the
+ * 31 px on the 62 px button).
+ *
+ * `feather` is the width of the fade *outside* the shape, in texture pixels, so one texel of
+ * softness stays one CSS pixel of it whatever the box's size — that is how `filter: blur(3px)` and
+ * a `box-shadow` blur radius get painted. `pad` is the room the canvas leaves for that fade: with
+ * `pad` 0 the shape fills its own texture and anything past the boundary is clipped, which is right
+ * for a bar whose softness is inside its box and wrong for a halo.
  */
-export function stadiumBar(width: number, height: number, feather = 1): THREE.DataTexture {
+export function stadiumBar(width: number, height: number, feather = 1, pad = 0): THREE.DataTexture {
   const w = Math.max(2, Math.round(width));
   const h = Math.max(2, Math.round(height));
+  const p = Math.max(0, Math.round(pad));
+  const cw = w + p * 2;
+  const ch = h + p * 2;
   const radius = Math.min(h / 2, w / 2);
-  const coverage = new Float32Array(w * h);
-  for (let y = 0; y < h; y += 1) {
-    for (let x = 0; x < w; x += 1) {
-      const across = Math.max(0, Math.abs(x + 0.5 - w / 2) - (w / 2 - radius));
-      const along = Math.abs(y + 0.5 - h / 2);
+  const coverage = new Float32Array(cw * ch);
+  for (let y = 0; y < ch; y += 1) {
+    for (let x = 0; x < cw; x += 1) {
+      // The stadium itself stays `w × h`; `pad` is the room drawn around it, so a falloff that
+      // leaves the shape can live inside the same texture instead of being clipped by it.
+      const across = Math.max(0, Math.abs(x + 0.5 - cw / 2) - (w / 2 - radius));
+      const along = Math.abs(y + 0.5 - ch / 2);
       const distance = Math.hypot(across, along) - radius;
-      coverage[y * w + x] = distance <= 0 ? 1 : Math.max(0, Math.min(1, -distance / feather));
+      // Outside the shape the coverage follows the blur's own curve. A CSS blur is a Gaussian, and
+      // the two mistakes this replaces were both in this line: negating `distance` (every point
+      // past the boundary came out 0, so the feather painted nothing and §2's `filter: blur(3px)`
+      // landed as a hard edge), then a straight ramp, which keeps a quarter of the light all the way
+      // to the end of the blur and reads as a halo that reaches too far. Normalised so the curve
+      // still ends at exactly zero on the canvas edge.
+      const t = Math.min(1, distance / Math.max(0.5, feather));
+      const curve = Math.exp(-3.2 * t * t) - Math.exp(-3.2);
+      coverage[y * cw + x] = distance <= 0 ? 1 : Math.max(0, curve / (1 - Math.exp(-3.2)));
     }
   }
-  return maskTexture(w, h, coverage);
+  return maskTexture(cw, ch, coverage);
 }
 
 /**

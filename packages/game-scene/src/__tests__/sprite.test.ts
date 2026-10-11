@@ -144,10 +144,42 @@ describe('the slider track is a stadium, built in its own pixels', () => {
 
   it('turns the corners away — the caps are half-discs, not square ends', () => {
     const bar = stadiumBar(20, 6);
-    // The left cap's circle: centre (3, 3), radius 3 (half the height).
-    expect(alphaAt(bar, 20, 0, 0)).toBeLessThan(60); // hypot(2.5, 2.5) ≈ 3.5, outside
-    expect(alphaAt(bar, 20, 2, 1)).toBe(255); // texel centre (2.5, 1.5), hypot ≈ 1.6, inside
-    expect(alphaAt(bar, 20, 19, 5)).toBeLessThan(60);
+    // The left cap's circle: centre (3, 3), radius 3 (half the height). The corner texel sits half a
+    // texel outside that circle, so with the default one-texel feather it is *partly* covered — the
+    // claim is "not a square end", which is what the spine's full value against the corner's says.
+    expect(alphaAt(bar, 20, 2, 1)).toBe(255); // hypot ≈ 1.6 inside the cap
+    expect(alphaAt(bar, 20, 0, 0)).toBeLessThan(140); // ≈ 0.46 covered, against 255 on the spine
+    expect(alphaAt(bar, 20, 19, 5)).toBeLessThan(140);
+    // And one feather beyond the shape is clear, which the padded canvas can show and the tight one
+    // cannot: the corner of a 20 × 6 bar is never a full texel outside its own caps.
+    const feathered = stadiumBar(20, 6, 2, 4);
+    expect(alphaAt(feathered, 28, 0, 0)).toBe(0);
+  });
+
+  it('gives the falloff room outside the shape when the caller asks for it', () => {
+    // The pill's halo: §2's shadow is a 342 × 62 button inset by -6 px spread and blurred 28 px, so
+    // the plateau and the fade have to live in one texture. Without `pad` the fade is clipped by the
+    // shape it is falling out of, which is what turned the halo into a hard-edged slab.
+    const bar = stadiumBar(20, 6, 4, 4);
+    expect(bar.image.width).toBe(28);
+    expect(bar.image.height).toBe(14);
+    expect(alphaAt(bar, 28, 14, 7)).toBe(255); // the plateau's middle
+    expect(alphaAt(bar, 28, 13, 7)).toBe(255); // still inside the plateau's own width
+    const side = alphaAt(bar, 28, 25, 7); // one step past the plateau, mid-fade
+    expect(side).toBeGreaterThan(0);
+    expect(side).toBeLessThan(255);
+    expect(alphaAt(bar, 28, 0, 0)).toBe(0); // past the blur, at the canvas corner
+    // The shape of the fade, not just its extent: seven eighths of the way out a CSS blur has given
+    // up almost all of its light (≈0.05 of the plateau), while a straight ramp still carries 0.125 —
+    // that difference is the halo reaching a third of its own blur further than the browser paints.
+    expect(alphaAt(bar, 28, 14, 0)).toBeLessThan(25);
+    expect(alphaAt(bar, 28, 14, 2)).toBeGreaterThan(120);
+  });
+
+  it('stays the shape it was, when no room is asked for', () => {
+    const bar = stadiumBar(20, 6, 3);
+    expect(bar.image.width).toBe(20);
+    expect(bar.image.height).toBe(6);
   });
 });
 
