@@ -3536,51 +3536,77 @@ try {
   // the aspect is the window's). Measured against the earlier build: mid off by 0.155 and length
   // 0.735 vs 0.689 — the rod hanging past its ember, which is why the ash column read as floating.
   // |control|: centring on the pair's midpoint again moves mid by ~0.15 and reddens this.
-  const rodFit = await page.evaluate(() => {
-    const stageEl = document.querySelector('.stage');
-    const aim = stageEl?.dataset.aim ?? '';
-    const parts = new Map();
-    for (const piece of aim.split(' ')) {
-      const [key, pair] = piece.split(':');
-      const [x, y] = (pair ?? '').split(',').map(Number);
-      if (key !== undefined && Number.isFinite(x) && Number.isFinite(y)) parts.set(key, [x, y]);
-    }
-    const body = parts.get('body');
-    const ember = parts.get('ember');
-    const ctx = window.__pufflyScene.context;
-    const scene = 'value' in ctx.scene ? ctx.scene.value : ctx.scene;
-    let built = -1;
-    let mid = null;
-    let drawn = null;
-    scene.traverse((o) => {
-      if (o.name === 'rod') {
-        built = o.geometry?.parameters?.height ?? -1;
-        mid = [o.position.x, o.position.y];
-        // The tube's own axis is local +y, and the template turns it by `angle - π/2`; adding the
-        // quarter turn back is what makes the two angles comparable.
-        drawn = o.rotation.z + Math.PI / 2;
+  const readRodFit = () =>
+    page.evaluate(() => {
+      const stageEl = document.querySelector('.stage');
+      const aim = stageEl?.dataset.aim ?? '';
+      const parts = new Map();
+      for (const piece of aim.split(' ')) {
+        const [key, pair] = piece.split(':');
+        const [x, y] = (pair ?? '').split(',').map(Number);
+        if (key !== undefined && Number.isFinite(x) && Number.isFinite(y)) parts.set(key, [x, y]);
       }
+      const body = parts.get('body');
+      const ember = parts.get('ember');
+      // "Settled" is the two points having not moved since the last read — within the mirror's own
+      // resolution plus a step, not byte for byte, because a rod at rest still creeps as it burns.
+      // The shell republishes the anchors at 5 Hz while the scene turns the rod every frame, so a
+      // sample taken while the rod is sweeping to the flame and back can disagree with the picture
+      // for a reason that is not the picture's fault.
+      const previous = window.__rodFitAim;
+      const moved = (a, b) =>
+        a === undefined ||
+        b === undefined ||
+        Math.abs(a[0] - b[0]) > 2e-4 ||
+        Math.abs(a[1] - b[1]) > 2e-4;
+      const settled =
+        !moved(body, previous?.body) && !moved(ember, previous?.ember) && body !== undefined;
+      if (body !== undefined && ember !== undefined)
+        window.__rodFitAim = { body: [...body], ember: [...ember] };
+      const ctx = window.__pufflyScene.context;
+      const scene = 'value' in ctx.scene ? ctx.scene.value : ctx.scene;
+      let built = -1;
+      let mid = null;
+      let drawn = null;
+      scene.traverse((o) => {
+        if (o.name === 'rod') {
+          built = o.geometry?.parameters?.height ?? -1;
+          mid = [o.position.x, o.position.y];
+          // The tube's own axis is local +y, and the template turns it by `angle - π/2`; adding the
+          // quarter turn back is what makes the two angles comparable.
+          drawn = o.rotation.z + Math.PI / 2;
+        }
+      });
+      if (body === undefined || ember === undefined || mid === null)
+        return { built, mid, drawn, settled, expected: null };
+      const aspect = window.innerWidth / Math.max(1, window.innerHeight);
+      const world = (x, y) => [(x - 0.5) * 4 * aspect, (0.5 - y) * 4];
+      const pivot = [
+        ember[0] - (ember[0] - body[0]) / 0.55,
+        ember[1] - (ember[1] - body[1]) / 0.55,
+      ];
+      const a = world(pivot[0], pivot[1]);
+      const b = world(ember[0], ember[1]);
+      return {
+        built,
+        mid,
+        drawn,
+        settled,
+        expected: {
+          length: Math.hypot(b[0] - a[0], b[1] - a[1]),
+          mid: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2],
+          // Which end burns is a direction, and the mirror S24 forbids is exactly a flip of this one
+          // number. A tube looks the same from both ends, so the comparison is modulo a half turn.
+          angle: Math.atan2(b[1] - a[1], b[0] - a[0]),
+        },
+      };
     });
-    if (body === undefined || ember === undefined || mid === null)
-      return { built, mid, drawn, expected: null };
-    const aspect = window.innerWidth / Math.max(1, window.innerHeight);
-    const world = (x, y) => [(x - 0.5) * 4 * aspect, (0.5 - y) * 4];
-    const pivot = [ember[0] - (ember[0] - body[0]) / 0.55, ember[1] - (ember[1] - body[1]) / 0.55];
-    const a = world(pivot[0], pivot[1]);
-    const b = world(ember[0], ember[1]);
-    return {
-      built,
-      mid,
-      drawn,
-      expected: {
-        length: Math.hypot(b[0] - a[0], b[1] - a[1]),
-        mid: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2],
-        // Which end burns is a direction, and the mirror S24 forbids is exactly a flip of this one
-        // number. A tube looks the same from both ends, so the comparison is modulo a half turn.
-        angle: Math.atan2(b[1] - a[1], b[0] - a[0]),
-      },
-    };
-  });
+  // Two reads of the mirror that agree, then the picture: the rod is at rest between them.
+  let rodFit = await readRodFit();
+  for (let attempt = 0; attempt < 24 && !rodFit.settled; attempt += 1) {
+    await page.waitForTimeout(220);
+    rodFit = await readRodFit();
+  }
   const angleOff = (() => {
     if (rodFit.expected === null || rodFit.drawn === null) return 99;
     const d = rodFit.drawn - rodFit.expected.angle;
@@ -3602,7 +3628,7 @@ try {
       angleOff < 0.03,
     rodFit.expected === null
       ? 'no aim or rod'
-      : `len ${rodFit.built.toFixed(3)}/${rodFit.expected.length.toFixed(3)} mid off ${Math.hypot(rodFit.mid[0] - rodFit.expected.mid[0], rodFit.mid[1] - rodFit.expected.mid[1]).toFixed(3)} angle off ${angleOff.toFixed(4)}`,
+      : `len ${rodFit.built.toFixed(3)}/${rodFit.expected.length.toFixed(3)} mid off ${Math.hypot(rodFit.mid[0] - rodFit.expected.mid[0], rodFit.mid[1] - rodFit.expected.mid[1]).toFixed(3)} angle off ${angleOff.toFixed(4)} settled=${String(rodFit.settled)}`,
   );
   // The char front (§17, S12): the paper behind the cherry chars and glows, so the band exists and
   // is sized whenever the ember is alive. |control|: gating on `total > 0` keeps it hidden and
