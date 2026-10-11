@@ -6638,7 +6638,7 @@ rim（烟盒与打火机各自已有的做法可抄），判据形状 = 实测�
 | 4 | S/M/L 边界 + 档内不重复 + 雪茄不误触唇线 | `lip-mouth.test.ts`（8 条）、`limit.test.ts`、`long-press.test.ts` | 单测 + 真机（#129 那两节） |
 | 5 | 手机与宽屏分开验、不互相回归 | 真机套件 `tests/smoke/touch-device.mjs` **168 条**（含宽屏档三格；#158 那两条是页头块里的第 65–66 条） | 真机；对着 tip 的构建复跑 **168/168、退码 0**（2026-10-12）。**条数别抄这一格**：现读＝跑完看末行 `N/N checks passed` |
 | 6 | 跑项目既有测试/构建，并新增或改动断言 | 门禁六步（format/lint/typecheck/test/build/served-build）→ **129 档 / 1072 条 ALL_GREEN** | 门禁日志 `/tmp/puffly-gate/<step>.log` |
-| 7 | 含删除的提交要审"有没有顺手删无关的东西" | 待推范围 `git diff --shortstat origin/main..HEAD` = **40 檔 / +3549 / -737**，逐檔看：只有 `docs/images/*.jpg` 与图集烘件 `public/atlas/glyphs.png` 是二进制，**没有 dist / 编辑器目录 / node_modules 混进提交** | 提交范围自查（本轮 tip 附近那笔） |
+| 7 | 含删除的提交要审"有没有顺手删无关的东西" | 审的是那 59 笔（**现已全部推送，`origin/main` 就在 `bd7221b`**）：`git diff --shortstat bd7221b~59..bd7221b` = **40 檔 / +3924 / -737**（2026-10-12 现读）。**这一格先前写的是 +3549 —— 那不是我抄错，是它按"当时待推范围"说的**：写下那行时 tip 比 `bd7221b` 早几笔，差的 375 行全是之后的纯文档提交（檔数 40 与删除 737 至今一字未动）。逐檔看过：只有 `docs/images/*.jpg` 与图集烘件 `public/atlas/glyphs.png` 是二进制，**没有 dist / 编辑器目录 / node_modules 混进提交** | 提交范围自查 —— **别抄这一格的数**，它只能现算：`git diff --shortstat <base>..bd7221b` |
 
 **这一条台账自己也要标未验部分**，否则就是新一轮过度声明：
 ① 第 3 行的"位置"只对到**道具落位**（#124 那晚现量的压暗带与三只落位），**托盘的边不在其中**（#157）；
