@@ -1582,8 +1582,11 @@ S20 折在「这次休息」里面，不是第四个 tab，也不是首页。页
 
 - `apps/web/src/__tests__/reduction.test.ts` 扫全部 `reduction.*` 文案，健康断言（健康/肺/戒/风险
   /health/lung/risk…）与压力动词（should/must）一条都不许命中，并且当场证明这份词表咬得动。
-- `tests/architecture.test.ts` 里"纯层只携带、不阅读上限"：`packages/game-core`、`game-renderer`、
-  `game-statistics`、`shared` 任何一处读 `.dailyLimitSticks` 就红——燃烧不因为一个数字停下来。
+- `tests/architecture.test.ts` 里"纯层只携带、不阅读上限"：守卫按 `LANGUAGE_UNAWARE` 那份清单走
+  `packages/shared`、`packages/game-core`、`packages/game-scene`、`packages/game-statistics` 四个目录，
+  任何一处读 `.dailyLimitSticks` 就红——燃烧不因为一个数字停下来。（这一格原本点的是
+  `game-renderer`；2026-10-10 那层退役、清单换名之后，管的是**现在画画面的那一层**，条数没变。
+  复跑：`npx vitest run tests/architecture.test.ts -t daily ceiling`。）
 - `packages/game-statistics/src/__tests__/reduction.test.ts` 只算日志本身：七个格子、当日、本周与
   上周同期的差（负数=少），空日志给七个 0，绝不出 NaN。
 
@@ -1869,6 +1872,12 @@ packages/
 
 docs/
 tests/
+
+**2026-10-11 注（这一节和上面那张图都要按这条读）**：真实的树今天有两处不同 ——
+`packages/game-renderer/` 已在 2026-10-10 整包删除，接它的名字是 `packages/game-scene/`
+（上面那张图里写着 `Renderer` 的那个框就是它）；`apps/desktop/` 从来没有建过，原生壳那一格
+见本节末「桌面挂件为什么不做」，§78 那条"未来 Tauri"因此仍然只是未来。现读：
+`ls apps packages`，逐包一句话在 README「Architecture in one paragraph」那份清单里。
 
 ---
 
@@ -3724,6 +3733,12 @@ Canvas 2D
 
 如果未来确实证明 Canvas 不够，再独立替换 Renderer。
 
+**2026-10-11 注**：最后那句"再独立替换 Renderer"今天走到了 —— 界面层是 TresJS + `three/webgpu`
+（`packages/game-scene`），Canvas 2D 那层同日退役。**这一条不是被推翻，是被它自己的出口换掉的**，
+所以 §76 那五个名字里今天只有 Three.js 在依赖里；"保持轻量"那半句仍然有效，并且是有数的一条：
+上限 700 KiB，2026-10-11 那次门禁量到首屏 118 744 gzip 字节（现量：
+`bash tests/smoke/served-build.sh`，它自己印这两个数，ARCHITECTURE.md「Deliberately not built」那行记的是同一次转向）。
+
 ---
 
 77. Content Driven
@@ -4191,8 +4206,14 @@ Long-term vision
   真的出现的粒数对上）。灰重、口数、时长、温度一个都没碰 —— 第六条判据钉的是"碎一次就算一次"：
   `dropped` 与落定后粒数都不许翻倍。
 
-**判据 9 条（core 6 + renderer 3），先红的有 3 条，其余靠注入自证**（表由 `/tmp/puffly-gate/ash-mutations.py`
-现跑，每条只改一处、跑完按字节比对还原）：
+**判据当时 9 条（core 6 + renderer 3），先红的有 3 条，其余靠注入自证**（表由一支一次性脚本现跑，
+每条只改一处、跑完按字节比对还原 —— 那支脚本在操作者的暂存目录里，今天不在仓里，留下来的是这张表
+和这 9 条断言的名字）：
+
+**2026-10-11 现读**：这 9 条今天只剩 **6 条活的**，就是 core 那一半，家在
+`packages/game-core/src/__tests__/ash-break.test.ts`（`npx vitest run packages/game-core/src/__tests__/ash-break.test.ts`
+印 `6 passed`）。renderer 那一半随 2D 光栅套件在 2026-10-10 退役，**今天没有继任读者**，
+逐格定性见本节末「退役判据的去向」（#145 第 4 格：散开的形状与出处那一半没人判）。
 
 | 注入的坏法 | 红在哪几条 |
 |---|---|
@@ -5308,7 +5329,9 @@ S15 第一行自己定了顺序 —— **目标语言 → 英文 → 纯图标**
 手势是按住时给图 —— 有词的地方词仍然赢（图是最后一层的载体，不是跟文字抢位置的装饰），别的手势一个图都不
 给（稿子只画了这一张，凭空再编一个记号就是要往记号字母表里塞没被点名的东西）。`dimplePath(长, 厚)` 生成的
 是**渲染器自己那条贝塞尔**：腰在 `WAIST = 0.78`、深度是 `DIP_SHARE = 0.22` 个厚度，控制点取两倍深度（二次
-曲线只走到控制偏移的一半），两个常数直接从 `@puffly/game-renderer` 引进来 —— 一张和被示意的东西长得不一样
+曲线只走到控制偏移的一半），两个常数直接从 `@puffly/game-scene` 引进来（搬家之前那一层是
+`@puffly/game-renderer`；`props.ts` 里那两个 `export const` 是唯一的家，复跑
+`grep -n "WAIST\|DIP_SHARE" packages/game-scene/src/props.ts`）—— 一张和被示意的东西长得不一样
 的示意图，比没有示意图更糟。开关仍然优先：`settings.hints` 关掉时图也不出来。
 
 **判据** `apps/web/src/__tests__/hint-art.test.ts` 4 条：谁能拿到图（按住、无词）谁拿不到（有词、别的
@@ -5775,3 +5798,52 @@ weather/paint/backdrop 成新家，props/room 合并式承接），7 个"混着�
 判据必须读到断言标题/正文；而"半格有着落"要写成两半，不能并成一格打勾。
 
 本轮顺带把三处"今天的总数"改成现跑：`npm test` **125 档 1043 条**、真机 **161/161**（2026-10-11）。
+
+### 文档里最后一批"把退役那层写成现在时"的句子：扫出 9 行、改口 5 处（2026-10-11）
+
+#142 那一轮清了 24 处带「随 2D 光栅套件退役」标记的句子，这一轮扫的是**没带那种标记、直接以现在时
+在判**的其余句子。口径（读者站在仓根原样可跑，两份计数都当场打印）：
+
+```bash
+grep -nE 'Canvas ?2D|painted layer|game-renderer|光栅|画布层|2D 层|2D layer' \
+  docs/SPEC.md docs/ARCHITECTURE.md README.md | grep -vE '退役|retir|overturn|删除'
+```
+
+改前它印 **9 行**（SPEC 5 / ARCHITECTURE 2 / README 2，在 `git show HEAD:` 的三份文件上现算）。
+今天印 **13 行**，其中 **5 行是这一节自己复述旧名字**（上面那条命令那一行 + 下面那张表的四行），
+剩下的 **8 行**逐行都是过去时、或稿子原文的引用（底下有注压着）。
+—— 把这三份数写全而不是只写"8"，是因为**记漂移的那张纸自己也会漂**：这条命令扫的是文本，
+它分不清"一句过时的主张"和"一条记录过时主张已被改掉的注"。所以数必须连"其中几行是报告本身"
+一起给，否则下一轮拿着 13 这个数会以为这轮什么都没修。
+
+**改了哪五处**（每处都写"改之前那句会让读者做什么错事"）：
+
+| 那一行原本说 | 会让读者做错什么 | 今天改成 | 现读 |
+| --- | --- | --- | --- |
+| 减量那三条判据里的第二条：守卫走 `game-core`、`game-renderer`、`game-statistics`、`shared` | 去 grep 一个不存在的包，然后判"这条没人守" | 按守卫自己那份清单写四个目录 | `npx vitest run tests/architecture.test.ts -t "daily ceiling"` 印 **4 passed** |
+| §46 那棵推荐树里有 `packages/game-renderer/` 与 `apps/desktop/` | 照着建树；或以为桌面壳建过了 | 树原样留着（它是稿子的话），底下加一条带日期的注：两处不同各是谁接的、桌面壳那一格见本节末「桌面挂件为什么不做」 | `ls apps packages` |
+| §76 五条引擎名一律"不要引入"、"第一版使用 Canvas 2D" | 以为 Three.js 仍是禁令（而它就在依赖里） | 注一句：这格不是被推翻，是被它自己那句"再独立替换 Renderer"换掉的；"保持轻量"那半句仍然有数 | `bash tests/smoke/served-build.sh` 自己印上限与首屏字节 |
+| 纸面塌陷示意图那节：两个常数从 `@puffly/game-renderer` 引进来 | 找一个不存在的包当常数之家 | 改成 `@puffly/game-scene`，并写明搬家前那一层是谁 | `grep -n "WAIST\|DIP_SHARE" packages/game-scene/src/props.ts` 印 151/154 |
+| 磕灰那节："判据 9 条（core 6 + renderer 3）" | 以为今天还有 9 条活的 | 改成"当时 9 条 / 今天活的 6 条"，renderer 那一半接上本节末「退役判据的去向」那张表的 #145 第 4 格 | `npx vitest run packages/game-core/src/__tests__/ash-break.test.ts` 印 **6 passed** |
+
+README 那一侧另外补了三格（都是"读者照着跑会跑歪"的）：`npm run lint` 那句从"warnings fail"改成
+"警告不失败，门禁另加 `--max-warnings 0`"；真机套件那三个环境变量补全（此前只写两个，漏了
+`PUFFLY_BROWSER`，也没写"没点名二进制时走 Playwright 完整 Chromium channel"）；"104/104 checks
+passed"那一格不再抄数，改指上面那行读数 —— 抄数正是它自己过期成 `104` 的原因（套件今天印 161）。
+还有门禁六步从散文改成逐条命令，因为跑起来的那支脚本在操作者的暂存目录里、不在仓里。
+
+**顺手抓到一种假通过，值得单独留字**：`npm run preview` 若不带 `PUBLIC_BASE=/puffly/`，产物里
+`/puffly/assets/*.js` 这些请求**仍然返回 200**，但 `content-type` 是 `text/html` —— SPA 回退把
+`index.html` 当成模块发了出去，页面白屏而状态码全绿。同一份内容两边各跑一次的实测：
+bare ⇒ `text/html`，带 base ⇒ `text/javascript`。`tests/smoke/readme-shots.mjs` 的头注释里那条配方
+原本就是这么错的（build 带 base、preview 不带），已改。**⇒ 取"有没有服务起来"这件事，状态码不在
+正确的输入面上，要连模态一起看。**
+
+**这一轮眼睛看到的新的一格（不在上面那张表里，登记为 #146）**：看 `docs/images/desktop-settings.jpg`
+（它就是当前构建拍的）发现屏上所有带下伸部的字母都被削掉 —— 图上"Draw length"读成"Draw lenath"、
+"Language"读成"Langaaae"、页头那格灰重读数"0g"读成"0α"。根因量到了：`bake-atlas.mjs:93` 把每个字形
+的**基线放在 64px 格子的下边缘**（`translate(col·CELL,(row+1)·CELL) scale(s,−s)`），而字体
+（这台机器上是 STHeiti Light，upm 1000 / ascent 860 / descent −140）的 `g p y` 的 bbox `minY` 都是
+**−134**，即 13.4% 个 em 落在格子外面；`text.ts:112` 又按"整格 = 一个 em、格的底边就是基线"取样（`y: 0`），
+所以那一条带从来没被采到过。修法要一起动两处（格子里把基线抬到 ascent 那一分、取样按同一个偏移走），
+并把 `ascent/descent` 写进 `glyphs.json` 让两边不能各写各的 —— 细节与影响面在 #146。

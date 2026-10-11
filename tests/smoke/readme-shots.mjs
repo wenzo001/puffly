@@ -7,8 +7,13 @@
  * test — it is a script that regenerates the pictures from the current build in one command:
  *
  *   PUBLIC_BASE=/puffly/ npm run build
- *   npm run preview                       # http://localhost:4173/puffly/
+ *   PUBLIC_BASE=/puffly/ npm run preview           # http://localhost:4173/puffly/
  *   node tests/smoke/readme-shots.mjs http://localhost:4173/puffly/
+ *
+ * `PUBLIC_BASE` belongs on the preview line too, not only on the build: the artefact asks for
+ * `/puffly/assets/…`, and a preview started without it answers those paths with `index.html` — a 200
+ * carrying `text/html` where a module was expected. Measured, not reasoned: the same asset URL comes
+ * back `text/html` bare and `text/javascript` with the base set.
  *
  * It asserts nothing on purpose. What the frames should look like is a human judgement, and the
  * device suite (`touch-device.mjs`) is where the machine-readable claims live; this file only drives

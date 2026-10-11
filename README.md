@@ -33,7 +33,7 @@ npm run dev        # http://localhost:5175
 npm test           # core, scene, audio, storage, statistics, architecture guards
 npm run build      # typecheck every workspace, then build the PWA into apps/web/dist
 npm run preview    # serve the production build
-npm run lint       # eslint, warnings fail
+npm run lint       # eslint . — warnings pass here; the gate adds --max-warnings 0
 npm run format     # prettier
 ```
 
@@ -379,10 +379,35 @@ tapping. Nothing anywhere awards a streak, because a streak is a punishment with
 | `node tests/smoke/touch-device.mjs <url>`               | **161 checks** (measured on the served build 2026-10-11; the suite prints its own total) in a real browser: a whole break performed with taps on an emulated phone and with a mouse in a desktop window, the chrome read against the state it claims, and a breath with light and dark inside it                                                                                                                      |
 | `node tests/smoke/readme-shots.mjs <url>`               | Not a check: it performs a break in the built artefact and rewrites the four pictures at the top of this file, then prints the machine values each frame was read at. What a frame should look like stays a human call                                                                                                                                                                                                |
 
-The six steps above are run as one gate before a commit lands, in this order — format, lint with
-`--max-warnings 0`, typecheck, `npm test`, the subpath build (`PUBLIC_BASE=/puffly/`), the served
-artifact — and the device suite is run against the build that gate produced, not against the dev
-server, so what is measured is what ships.
+Those six steps are one gate, run in this order before a commit lands. The runner itself lives
+outside the repository, so here they are as commands:
+
+```bash
+npm run format:check
+npm run lint -- --max-warnings 0
+npm run typecheck
+npm test
+PUBLIC_BASE=/puffly/ npm run build
+bash tests/smoke/served-build.sh
+```
+
+The device suite then runs against the build that gate produced, not against the dev server, so what
+is measured is what ships:
+
+```bash
+PUBLIC_BASE=/puffly/ npm run preview     # prints its own URL, and binds localhost only
+node tests/smoke/touch-device.mjs http://localhost:4173/puffly/
+```
+
+`tests/smoke/serve.mjs` serves the same tree from its own process (`node
+tests/smoke/serve.mjs apps/web/dist <port> 127.0.0.1 /puffly/`) and is what a device run is usually
+pointed at, because it stays up for a suite that takes minutes; `served-build.sh`, the gate's last
+step, starts a throwaway one and checks the artefact instead.
+
+`PUBLIC_BASE` belongs on the preview line too, not only on the build. The artefact asks for
+`/puffly/assets/…`, and a preview started without the base answers those paths with `index.html`:
+the same asset URL came back `text/html` bare and `text/javascript` with the base set — a 200 that
+is not the file.
 
 The served-build check exists because a wrong base path passes every unit test and shows up in
 production as a blank page. It was verified to fail loudly, not just to pass: _index.html loads
@@ -393,8 +418,12 @@ canvas fills the viewport, a coarse pointer gets 54 px targets, double-tap does 
 carries no prose — at most the one gesture word — and a drawn breath is visible in the air (lit
 pixels before and after). It also checks the two ways the operating system takes a phone away:
 frames that stop, and a page that comes back.
-It resolves Playwright and a browser binary from `PUFFLY_PLAYWRIGHT` and `PUFFLY_CHROME`, and exits
-with a message rather than a false pass when either is missing.
+It resolves Playwright and a browser from three variables — `PUFFLY_PLAYWRIGHT` (an entry point,
+defaulting to the `playwright` package), `PUFFLY_BROWSER` (the engine, defaulting to `chromium`) and
+`PUFFLY_CHROME` (a binary on this machine). With no binary named, chromium launches Playwright's
+_full_ build (`channel: 'chromium'`), because the headless shell drops the GPU paths and WebGPU is
+half of what this suite is here to judge. It exits with a message rather than a false pass when a
+resolution fails.
 
 ## Shipping
 
@@ -492,9 +521,11 @@ Honest gaps, so nobody rediscovers them as bugs:
 - No `LICENSE` file has been chosen for the repository yet.
 - The 12-box collection reserves three boxes for the cinnabar skin's finale (中华硬 / 黄鹤楼1916 /
   和天下). They are real rows that the roll skips; nothing about them is a placeholder in the data.
-- The device suite **does** run on this machine: it resolves Playwright from the npm cache and a
-  browser binary through `PUFFLY_CHROME` (headless Brave here — there is no Chrome.app), and the run
-  that backs today's README reports `104/104 checks passed`. Two of its numbers were stale for a
+- The device suite **does** run on this machine. It resolves Playwright from the npm cache and, with
+  no `PUFFLY_CHROME` named, launches Playwright's own full Chromium channel; the runs earlier in
+  2026 were taken against a headless Brave instead, because there is no Chrome.app here. Its check
+  count is the reading in the table above rather than a number this bullet copies — copying is how it
+  said `104/104` for a suite that prints its own total. Two of its numbers were stale for a
   while and are not any more: the tap anchors are read from `.stage[data-aim]`, which is where the
   engine put them after the table of hand-copied unlifted coordinates was deleted, and the plume
   structure thresholds were re-measured against the picture the shared flow field and the smoke's own
