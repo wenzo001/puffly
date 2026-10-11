@@ -6428,3 +6428,35 @@ S1（`rodRemaining`）与 S5（`ash.ratio`）正是那两个量，**S2 接的是
 这也解释了为什么 #44 当年是"中间那只读不出"而不是三只都读不出。
 
 复跑：`node /tmp/puffly-glyphs/prop-edges2.mjs`（对着 4191 上 serve 的当前构建；`page.evaluate` 只收一个参数）。
+
+### 那 5.5 倍差到哪去了：离线件的 `authored == spawned`，差在**长寿命 drift 的堆积**（2026-10-11，#139 的机制格）
+
+把离线探针改成逐 burst 打三元组（核心授权的 `burst.count` / `intakeBurst` 返回的投料数 / 投料前后池占用），
+前 1.4 秒的读数（`packages/game-scene/src/__tests__/` 下一次性件，跑完即删）：
+
+```
+0s   drift  authored=16 spawned=16  size 0→16    life 6.4s..15.6s
+0s   ember  authored=15 spawned=15  size 22→37   life 0.34s..1.18s
+0.2s ash    authored=26 spawned=26  size 56→82   life 1.3s..3.4s
+0.3s drift  authored=10 spawned=10  size 82→92   life 5.4s..13.1s
+0.9s drift  authored=14 spawned=14  size 109→123 life 4.2s..10.2s
+1.4s puff   authored=10 spawned=10  size 197→207
+…   合计 authored=1156 = spawned=1156，7 秒末池内 495
+```
+
+**三条结论，一条推论**：
+1. **`intakeBurst` 没有放大** —— 全程 `authored == spawned`（1156 = 1156）。所以那 5.5 倍**不是投料端算错**。
+2. **离线件与发货那台在早期是对得上的**：离线 1.4 秒池内 **207**，真实构建 91 秒的峰值 **208**。
+   ⇒ 两边的单口、单发 drift 的量级是同一档，**分歧只出现在"往后继续堆"**：离线到第 3 秒堆到 900，
+   真实构建停在 208 不再涨。
+3. **堆积的载体是 `drift`（静置柱）那一族**：它一次 10–16 颗、**寿命 4.2~15.6 秒**，而离线件里它约每
+   0.3–0.6 秒就来一发 ⇒ 稳态约 2.5 发/秒 × 13 颗 × 10 秒 ≈ 300 颗，加上 puff(2.3–7 s)/ash(1.2–3.4 s)
+   就把 900 顶满了。
+- **推论（未验，写在这里而不是当结论）**：真实构建停在 208，说明**发货那台把 drift 这一流压低了**，
+  候选是 `state.smoke.visibility`（默认 0.5）、场所的 `ventilation`（`ventDraught` 走的是 update 的第 7 个入参），
+  或两者一起。下一格最便宜的判法：离线件里**只改一个入参**复跑 ——
+  把 `pool.update` 的第 3/5/7 个参数换成生产那一组（`FIELD_SCALE`、`table.y`、`ventDraught(ventilation)`），
+  再把 `visibility` 从 1 改到 0.5，看 900 会不会掉到 208 那一档。**掉到哪一步，原因就在哪一步。**
+
+⇒ **#139 的产品结论不变**（发货那台 208/900），但"离线件为什么会多算"从今天的一句怀疑
+变成了一条有数、有边界、有下一步的读法：**不是投料放大，是长寿命流在没有生产那一组缩放参数时自己堆满。**
