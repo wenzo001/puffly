@@ -6862,3 +6862,68 @@ rim（烟盒与打火机各自已有的做法可抄），判据形状 = 实测�
 ⇒ 这版 CI 的正确性只有远端那一次真实执行能判；而 YAML 本机**可校验**（`node_modules/js-yaml` 在，
 `require('js-yaml').load(...)` 通、两步 `run` 的正文再各自过 `bash -n`）—— 这修正了"这台 Mac 无法校验 workflow"
 那条旧记录（它的前提是只有 pyyaml 一条路）。
+
+### 2026-10-12 · #160：那两条时序敏感的真机判据现在会说"是哪一半"
+
+**读数先摆出来**（同一个构建、同一份 dist，四趟可比）：`the breath has light and dark inside it` 那格的
+云像素 footprint 是 **38（0.1%）/ 1450（2.2%）/ 3360（5.1%）/ 4156（6.3%）** —— 红的那一趟同时把
+`hint:"" hints:0` 也印了出来。差的不是产品，是**那一口到底有没有开始**。
+
+**根因在套件自己身上，是读代码读出来的**：`holdDraw()` 本来就带了"按下没起口就再按一次"的内部重试，
+并把 `started` 返回给调用方 —— **而页头那个 round 循环把返回值丢了**（写成 `await holdDraw(page, 2.3)`），
+于是一次被吞掉的口照样往下采样。这不是判据太松，是**驱动与取证之间少了一道握手**。
+
+**改了什么（判据一条没动、条数仍是 168）**：round 里接住 `started`，没起口就最多再按一次（有界）；
+三条与呼吸有关的判据（`carries no prose` / `rewrites the air` / `light and dark inside it`）的读数一律带上
+`drives=[{press,started}…]`，且当**所有**按压都没起口时，明细前面加一行
+`DRIVER — not one press started a draw, so these readings are not the product:`。
+⇒ 红从此有两种形状：**DRIVER 打头＝这一族根本没跑起来（套件/环境）**；没有那行＝动作确实发生了、画面不对（产品）。
+这正是 #147 那条口径（"仿真没生效"与"产品掉了"分成两种红）的延续，也是这一轮明确要的次序：
+**先区分"测试动作没真正开始"与"开始后结果异常"，不许为了过判据去抹平 cloudPx 的波动**。
+
+代价说清：绿灯路径**不多花一秒**（第一次按压就 `started` ⇒ 外层循环只走一次，`holdDraw` 自己没变）；
+只有真被吞口时每 round 最多多一次按压（外层 2 次 × `holdDraw` 内部那一次重试）。
+**没做的另一半也写明**：`cloudPx` 的区间门槛（比如"低于某个 footprint 就判 DRIVER"）没有落 ——
+因为那个下限会跟着"这一口抽了多长"走，钉成常数就是把判据押在运气柱子上（同 #145 那格的理由）。
+
+### 2026-10-12 深夜 · 根因第一次以数字现身（#159 结案的一半，另一half 等远端确认）
+
+上一节写"根因尚未确定"。**报告通道一上线，它就把三件事一起报回来了**（run 的 `Device job report`，匿名可读）：
+
+```
+node v22.23.3 / playwright 1.63.0 · launch ok 153.0.8010.12
+goto load ok in 266ms · networkidle reached 4803ms · requests still in flight: 0 · pageerror x0
+scene {"backend":"webgl2","frames":14,"poolSize":0,"stage":true,"hit":1,
+       "canvas3d":[786,1704],"navigatorGpu":true,"gpuAdapter":null,"webgl2":true}
+suite: 14 条 ok 为止 —— 没有任何 FAIL
+```
+
+**三条能收的结论**
+1. **runner 上没有 WebGPU**：`navigator.gpu` 在，但 `requestAdapter()` 给 `null` ⇒ 产品**按设计**退回软件
+   WebGL2（`renderer.ts` 那条 catch 就是这个回退），代价是整页只有 **~3.5 帧/秒**（4 秒里 `frames: 14`）。
+   本地同一份构建是 `backend:"webgpu"`、`gpuAdapter:["apple","metal-3"]`、`frames: 275`。
+2. **不是网络、不是服务、不是浏览器启动**：`load 266ms`、`networkidle 4.8s`、在飞 0、pageerror 0、launch 绿。
+   上一节的两条候选都被这行读数判死了。
+3. **套件不是"跑到一半红"，是跑到一半**抛**：报告只到第 14 条 ok，一条 FAIL 都没有 ——
+   第 15 条那段取值在没有开着的 sheet 时做 `document.querySelector('.sheet[data-open="true"] .close')`
+   得到 `null`，下一行 `btn.getBoundingClientRect()` ⇒ **evaluate 内未捕获 TypeError**，node 直接退出。
+   在 3.5 帧/秒的页面上 `openSheet` 的 4 秒有界等待更容易空手而归，于是 CI 每次都死在这一格，
+   而本地（帧率高、sheet 打得开）永远绿 —— 这就是"三次 111/109/140 秒、0 条红"的对偶解释。
+
+**修的两处（都不动判据）**
+- `the rail, the head-up row and the sheet stay tappable together` 的取值改成**分两种说法**：
+  `{missing:[…], blocked:[…]}`。控制不存在 ⇒ `missing`；存在但被压住 ⇒ `blocked`；两者都空才算绿。
+  ⇒ 这是把这个文件**自己第 744–752 行写的规矩**（"没打开也不藏：读它的判据自己会说"）在这一格补上，
+  不是放宽 —— 红还是红，只是从"崩掉整趟"变成"这一条红并且说清是哪一个没来"。
+- 报告捕获有个洞：`| tee` 只收 stdout，**栈在 stderr** ⇒ 改成 `2>&1 | tee`，并把
+  `Error:` / `at …tests/smoke/<file>.mjs:NNN` 那几行也塞进匿名 summary（`tail` 从 8 行加到 20 行）。
+
+**待远端确认的那一半**：下一趟 run 的 summary 里应当出现第 15 条的读数（`missing:[...]` 或绿）而不是断在 14 条。
+如果它继续往后跑但在更晚的格上死/红，那属于**同一个 3.5 帧/秒环境**的另一半问题 ——
+届时的选项是"给 runner 打开软件 WebGPU（`--enable-unsafe-swiftshader`，让 `requestAdapter()` 有 adapter、
+让 CI 实际验的是发货那条后端）"还是"把套件驱动改成完全不依赖帧率"，**那一条会改变这一关在验哪个后端**，
+拿到数之后按情形决定是自落还是列给他拍。
+
+**顺带登记**：本轮本地那一趟（167/168）红的是 **RTL 那条画布臂**（`tilt -1127→-1445`、`x 316.5/210→310.3/210`），
+与 #160 无关（`drives` 显示两口都是第一次按压就起、没有额外按压）⇒ 归到 #147/#160 那一族：**读的是一个瞬间，
+瞬间未到就红**。要不要也给它带"动作确实发生了"的前置，等这轮 CI 落地后一并处理。

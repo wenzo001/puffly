@@ -927,8 +927,21 @@ const hintCentre = async (page) => {
   // (2026-10-11).
   let words = null;
   let shape = null;
+  const drives = [];
   for (let round = 0; round < 2; round += 1) {
-    await holdDraw(page, 2.3);
+    // `holdDraw` already re-presses once when a press never started a draw, but its answer went
+    // unread here — so a round that never got a draw off still got sampled, and the two readings below
+    // reported a product problem for a driver problem (measured 2026-10-12: the cloud came back as 38
+    // pixels = 0.1% of the band while three other runs of the same build read 1450 / 3360 / 4156, and
+    // the hint had already folded away with the chrome because 2.6 s had gone by). The criteria do not
+    // move: what changed is that a draw has to have actually started before this line samples, and the
+    // press list travels with the reading so a red says which half it is.
+    let drawn = null;
+    for (let press = 0; press < 2; press += 1) {
+      drawn = await holdDraw(page, 2.3);
+      drives.push({ press: drives.length + 1, started: drawn?.started === true });
+      if (drawn?.started === true) break;
+    }
     if (round === 1) {
       // Both readings are taken while *this* breath is still in the air: the hint word leaves with
       // the chrome 2.6 s after the last input (§10) and the cloud rises out of the sampled band. The
@@ -939,6 +952,9 @@ const hintCentre = async (page) => {
     }
     await page.waitForTimeout(600);
   }
+  const driverNote = drives.some((entry) => entry.started)
+    ? ''
+    : 'DRIVER — not one press started a draw, so these readings are not the product: ';
   // Drawing on the rod left the scene nudging the next gesture, and the hint names it. Both this and
   // the cloud's shape are read inside the loop, while the breath is still in the air: the chrome
   // folds itself 2.6 s after the last input (§10, `controlsIdleMs`) and the word goes away with it —
@@ -950,14 +966,15 @@ const hintCentre = async (page) => {
   check(
     'the screen carries no prose, and the hint still names the gesture being nudged',
     words.offenders.length === 0 && words.hints === 1 && words.affordance === 'puff',
-    JSON.stringify(words),
+    driverNote + JSON.stringify(words) + ' drives=' + JSON.stringify(drives),
   );
   const after = await airSample(page);
   const breath = breathDelta(before, after);
   check(
     'a drawn breath rewrites the air above the table',
     breath.movedRatio > 0.05 && breath.meanRise > 1,
-    `${(breath.movedRatio * 100).toFixed(1)}% of the band changed, mean rise ${breath.meanRise.toFixed(1)}`,
+    driverNote +
+      `${(breath.movedRatio * 100).toFixed(1)}% of the band changed, mean rise ${breath.meanRise.toFixed(1)}`,
   );
   // Brightness alone would pass on a flat sheet of haze, which is exactly what the exhale used to
   // be. Both halves here are needed and neither is decoration: `spread` alone would pass on one
@@ -969,9 +986,11 @@ const hintCentre = async (page) => {
   check(
     'the breath has light and dark inside it, not just brightness',
     shape.spread >= 0.5 && shape.share >= 0.01,
-    `relative spread ${shape.spread.toFixed(3)} over ${String(shape.cloudPx)} cloud pixels (${(
-      shape.share * 100
-    ).toFixed(1)}% of the band, ${String(shape.instances)} discs)`,
+    driverNote +
+      `relative spread ${shape.spread.toFixed(3)} over ${String(shape.cloudPx)} cloud pixels (${(
+        shape.share * 100
+      ).toFixed(1)}% of the band, ${String(shape.instances)} discs) drives=` +
+      JSON.stringify(drives),
   );
   const inHandAgain = await scenePhase(page);
   check('the rod is still in hand, not in the tray', LIT.test(inHandAgain), inHandAgain);
@@ -991,23 +1010,35 @@ const hintCentre = async (page) => {
   // An open sheet must leave the controls that opened it reachable: the bottom-anchored panel
   // used to paint over the rail, so on a phone the way out went dead once a sheet was open.
   await openSheet(page, 'shelf');
-  const covered = await page.evaluate(() =>
-    [
-      '.rail [data-tab="settings"]',
-      '.hud [data-hook="break"]',
-      '.sheet[data-open="true"] .close',
-    ].filter((selector) => {
+  const covered = await page.evaluate(() => {
+    const wanted = {
+      rail: '.rail [data-tab="settings"]',
+      head: '.hud [data-hook="break"]',
+      close: '.sheet[data-open="true"] .close',
+    };
+    const missing = [];
+    const blocked = [];
+    for (const [name, selector] of Object.entries(wanted)) {
       const btn = document.querySelector(selector);
+      // A control that is not there is reported, not dereferenced. `openSheet` answers a miss by
+      // letting the sheet never arrive (that is #114's bound), and reading `.close` off nothing used
+      // to throw here — on CI's runner, where the page gets ~3.5 frames a second, that one throw was
+      // the whole lost run: 14 checks printed, no FAIL, exit 1 (see #159).
+      if (btn === null) {
+        missing.push(name);
+        continue;
+      }
       const r = btn.getBoundingClientRect();
       const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
       // The button's own glyph span is a hit on the button; anything else is something on top.
-      return !btn.contains(hit);
-    }),
-  );
+      if (!btn.contains(hit)) blocked.push(name);
+    }
+    return { missing, blocked };
+  });
   check(
     'the rail, the head-up row and the sheet stay tappable together',
-    covered.length === 0,
-    covered.join(','),
+    covered.missing.length === 0 && covered.blocked.length === 0,
+    JSON.stringify(covered),
   );
 
   await openSheet(page, 'settings');

@@ -105,7 +105,7 @@ jobs:
           fi
           echo "node $(node --version) / playwright $(npx --no-install playwright --version) / browsers: $(ls "$HOME/.cache/ms-playwright" | tr '\n' ' ')"
           node tests/smoke/ci-runtime-probe.mjs http://127.0.0.1:4173/puffly/ /tmp/device-probe.txt
-          node tests/smoke/touch-device.mjs http://127.0.0.1:4173/puffly/ | tee /tmp/device-suite.txt
+          node tests/smoke/touch-device.mjs http://127.0.0.1:4173/puffly/ 2>&1 | tee /tmp/device-suite.txt
           SUITE=${PIPESTATUS[0]}
           echo "device suite exit=$SUITE — a FAIL line above is the product; a 'cannot launch' or 'nothing usable' preamble is this runner"
           exit "$SUITE"
@@ -126,7 +126,9 @@ jobs:
             echo '### suite (how far it got, then every FAIL, then the tail)'
             grep -cE '^(ok|FAIL)' /tmp/device-suite.txt 2>/dev/null || echo 0
             grep -E '^FAIL' /tmp/device-suite.txt 2>/dev/null | head -n 20 || true
-            tail -n 8 /tmp/device-suite.txt 2>/dev/null || true
+            echo '### the crash line, if the run died instead of finishing'
+            grep -nE 'Error:|at .*tests/smoke/[a-z-]+\.mjs:[0-9]+' /tmp/device-suite.txt 2>/dev/null | head -n 12 || true
+            tail -n 20 /tmp/device-suite.txt 2>/dev/null || true
           } > /tmp/device-report.md
           head -c 60000 /tmp/device-report.md | iconv -f UTF-8 -t UTF-8 -c > /tmp/device-report.cut.md ||
             cp /tmp/device-report.md /tmp/device-report.cut.md
