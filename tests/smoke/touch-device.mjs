@@ -63,6 +63,17 @@ const launchOptions =
     : ENGINE === 'chromium'
       ? { channel: 'chromium' }
       : {};
+/**
+ * `PUFFLY_CHROME_ARGS` adds Chromium flags, and it exists so CI's machine can be reproduced here.
+ *
+ * The runner has no GPU: the app falls back to software WebGL2 and the page runs at ~3 frames a
+ * second (its probe reads 14 frames per 4 s). Forcing the same path on this Mac —
+ * `PUFFLY_CHROME_ARGS="--use-angle=swiftshader --enable-unsafe-swiftshader --disable-gpu"` — measures
+ * `webgl2 / 13`, which is close enough to debug against without spending a push per hypothesis.
+ * Nothing about the criteria changes with it; only the machine gets slower on purpose.
+ */
+const EXTRA_ARGS = (process.env['PUFFLY_CHROME_ARGS'] ?? '').split(' ').filter(Boolean);
+if (EXTRA_ARGS.length > 0) Object.assign(launchOptions, { args: EXTRA_ARGS });
 
 /**
  * Ask the app under test whether it answers at all, before driving anything at it.
@@ -1437,6 +1448,13 @@ const hintCentre = async (page) => {
     style.textContent = '.room-name { white-space: nowrap !important; }';
     document.head.append(style);
     const sheet = document.querySelector('.sheet[data-open="true"]');
+    if (sheet === null) {
+      // The scan above already answers this way (REACH prints `no sheet open`); the positive control
+      // is the same shape and must report the same miss instead of dereferencing nothing — this exact
+      // line is what ended CI's run after the rail/head guard landed (#159, `…:1435:30`).
+      style.remove();
+      return { error: 'no sheet open', names: 0, flagged: 0, maxForced: 0, maxRestored: 0 };
+    }
     const names = [...sheet.querySelectorAll('.room-name')];
     const over = names.map((n) => n.scrollWidth - n.clientWidth);
     const flagged = over.filter((d) => d > 1).length;

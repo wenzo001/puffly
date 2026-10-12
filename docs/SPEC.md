@@ -6927,3 +6927,37 @@ suite: 14 条 ok 为止 —— 没有任何 FAIL
 **顺带登记**：本轮本地那一趟（167/168）红的是 **RTL 那条画布臂**（`tilt -1127→-1445`、`x 316.5/210→310.3/210`），
 与 #160 无关（`drives` 显示两口都是第一次按压就起、没有额外按压）⇒ 归到 #147/#160 那一族：**读的是一个瞬间，
 瞬间未到就红**。要不要也给它带"动作确实发生了"的前置，等这轮 CI 落地后一并处理。
+
+### 2026-10-12 深夜 · 第二笔远程读数：崩掉整趟那一族已清，剩下六条是"慢机器"的账
+
+推 `cb220d3` 之后远端报告交出的形状**变了**（同一格 `Device job report`，匿名可读）：套件不再断在第 15 条，
+而是跑到 **37 条读数**后死在 `tests/smoke/touch-device.mjs:1435:30` ——
+`TypeError: Cannot read properties of null (reading 'querySelectorAll')`，
+是 `document.querySelector('.sheet[data-open="true"]')` 的**第二个**未守卫解引用（同族第一处已修）。
+**并且一整串红都指向同一件事：那张 sheet 在 runner 上打不开**
+（`missing:["close"]`、`blocked:["rail","head"]`、往后 `no sheet open` 若干条）。
+
+**这一族量过了，不是孤例**：同一份套件里"取到 DOM 就直接解引用、没有守卫"的站点是 **24 处**
+（扫 `const X = ….querySelector(` 之后 8 行内出现 `X.` 且中间无守卫）。
+⇒ #114 那句"没打开要被下游判红、而不是带走整趟"在很多格上并没有做到。
+
+**把 CI 那台机搬回本机**：套件加了 `PUFFLY_CHROME_ARGS`（只加 Chromium 旗标，判据一条不动），
+`--use-angle=swiftshader --enable-unsafe-swiftshader --disable-gpu` 一开就复现出 runner 的形状
+（探针读数 `backend webgl2 · frames 13 / 4s`，CI 是 14）。
+**这一趟同时把"给 runner 打开软件 WebGPU"这条候选否掉了**：加了 `--enable-unsafe-swiftshader`
+之后 `requestAdapter()` 仍然是 `null`，并没有因此走上 WebGPU ⇒ 那条路不存在，不用再往它花一次推送。
+
+**本机这一趟 168 条全部跑到、不再崩 ＝ 162/168、357 秒、退码 1**，六条红分别是：
+
+| 红的那条 | 读数 | 归到哪一族 |
+| --- | --- | --- |
+| `the breath has light and dark inside it` | spread **0.324**（地板 0.5）、footprint **36.8%** of band | **不是时序**：软件渲染下烟羽塌成一张平雾 ⇒ **产品表现 vs 环境**那一格，归他拍 |
+| `the hint word is a setting that can be turned off` | `hints:0 affordance:"flick"` | chrome 按墙钟 2.6 s 自收，慢页面上"最后一次输入"早已过 ⇒ 时序族（#160/#147） |
+| `a draw held past its ceiling ends itself…` | 按住 14100 ms、**11.6 fps**、行读数没走到自收 | #148 那一族：预算按墙钟给、上限按模拟时间走 |
+| `right-to-left: the burning end stays on the same side` | `tilt -1426→-1572`（全速那趟也红过一次） | "读的是一个瞬间"族 |
+| `3D: the ignition's flame, open cap and sparks…` | `idle=false lit=false lid=-0.01 sparks=false` | 点火采样时刻（时序族） |
+| `3D: the cap turns on a hinge…` | `onHinge=-1.0000`（＝关闭值，盖子没被采到中途） | 同上 |
+
+⇒ **六条里一条是产品/验收口径的问题，其余五条是同一件工程事**：套件把帧率当成了默认前提。
+后者按 #147/#148/#160 已经定下的做法修（**等条件而不是等墙钟；"没跑到"要报成红而不是崩掉整趟**），
+判据与条数都不动。
