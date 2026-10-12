@@ -25,7 +25,7 @@ import {
 } from '@puffly/game-core';
 import type { GameStateView } from '@puffly/game-core';
 import { clamp01, mixRgb } from '@puffly/shared';
-import { BURN_END_SHARE, GRAIN, paperGrainPixels, rodBurnLineAt, tipAshShare } from './rodBurn';
+import { GRAIN, paperGrainPixels, rodBurnLineAt, rodMouthShare, tipAshShare } from './rodBurn';
 import { preferredDpr, type Puffly } from '../composables/usePuffly';
 import {
   backgroundStructure,
@@ -440,6 +440,9 @@ const CAPACITY = 900;
 const pool = new ParticlePool(CAPACITY);
 const dummy = new THREE.Object3D();
 const tint = new THREE.Color();
+// The depth ramp's own converter: a scratch colour reused every frame, so the write costs no
+// allocation and cannot be mistaken for per-frame state.
+const rampTint = new THREE.Color();
 
 /**
  * The two objects built in code, and the one measured rule they obey.
@@ -575,6 +578,9 @@ let scrimMesh: THREE.Mesh | null = null;
 let scrimMaterial: THREE.MeshBasicMaterial | null = null;
 let nosingMesh: THREE.Mesh | null = null;
 let nosingMaterial: THREE.MeshBasicMaterial | null = null;
+let tableRampMesh: THREE.Mesh | null = null;
+let tableRampMaterial: THREE.MeshBasicMaterial | null = null;
+let tableRampColourAttribute: THREE.BufferAttribute | null = null;
 const poolMeshes: THREE.Mesh[] = [];
 const poolMaterials: THREE.MeshBasicMaterial[] = [];
 const boxMeshes: THREE.InstancedMesh[] = [];
@@ -719,6 +725,34 @@ function onSceneReady(context: unknown): void {
   nosingMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), nosingMaterial);
   nosingMesh.position.z = -0.24;
   root.add(nosingMesh);
+
+  // The table's own depth ramp: one quad, two vertex colours, standing on the table face in front of
+  // the slab. The slab stays `tableInk` (the slab and the painted band cannot disagree), and this is
+  // the wall-edge → near-edge gradient the painted band was missing, so the bottom third has a surface
+  // to follow rather than a flat cut-out. Colours are written per frame, geometry is never rebuilt.
+  tableRampMaterial = new THREE.MeshBasicMaterial({
+    vertexColors: true,
+    transparent: true,
+    depthWrite: false,
+  });
+  tableRampMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), tableRampMaterial);
+  tableRampMesh.name = 'table-ramp';
+  tableRampMesh.frustumCulled = false;
+  // z -0.246: in front of the table slab's own front face (-0.4 + 0.15 = -0.25) so it can paint on
+  // the table, and BEHIND the scrim (-0.235), the nosing (-0.24) and the warm pool (-0.245). The
+  // first version put it at -0.235, the scrim's own z, and it painted over the vignette — the band's
+  // darkest-bin share fell 60%→3% and looked like a win, but it was the vignette dying.
+  tableRampMesh.position.z = -0.246;
+  root.add(tableRampMesh);
+  // A `PlaneGeometry` only owns a `color` attribute once `vertexColors` is asked for; it is built by
+  // touching the attribute at setup, which also proves the attribute exists before the frame loop
+  // ever reads it.
+  const colour = new THREE.BufferAttribute(
+    new Float32Array(12).fill(0.5),
+    3,
+  );
+  tableRampMesh.geometry.setAttribute('color', colour);
+  tableRampColourAttribute = colour;
 
   const poolMap = softDisc(64);
   for (let i = 0; i < 2; i += 1) {
@@ -1475,6 +1509,48 @@ function applyBackdrop(state: GameStateView | null): void {
     }
   }
 
+  if (tableRampMesh !== null && tableRampMaterial !== null) {
+    const table = structure.table;
+    tableRampMesh.visible = table !== null;
+    if (table !== null) {
+      // Below the same edge the nosing sits on: fills the band the wall leaves dark. It is inside the
+      // backdrop group, so the `placePunch` lean rides it with everything else.
+      const band = rectWorld({ x: 0, y: table.edgeY, w: 1, h: Math.max(0, 1 - table.edgeY) });
+      tableRampMesh.scale.set(band.width, band.height, 1);
+      tableRampMesh.position.set(band.centre[0], band.centre[1], -0.246);
+      // Two tones, written into the plane's own two triangles: the far edge is the table's own ink
+      // held just off the near-black slab, the near edge catches a little of the wall's warmth.
+      // `vertexColors` interpolates, so the surface reads as one surface, not as a two-tone split.
+      // Three reads vertex colours as LINEAR values, so the palette's sRGB numbers go through the
+      // same conversion the materials' `setRGB(..., SRGBColorSpace)` calls use — writing them raw
+      // made the ramp read as flat grey mush over the warm table. Same reason `keyLightInk` works
+      // in linear light.
+      // PlaneGeometry has no `color` attribute until `vertexColors` is on and the material asks for
+      // it — read it once at build time and keep it, so a missing attribute is a build-time error
+      // rather than a silent per-frame `undefined.setXYZ`.
+      const attribute = tableRampColourAttribute;
+      if (attribute === null) {
+        tableRampMesh.visible = false;
+      } else {
+        const far = table.farRgb;
+        const near = table.nearRgb;
+        // The quad's own order: [0] top-left, [1] top-right, [2] bottom-left, [3] bottom-right], and
+        // the quad is positioned with its top ON the table's edge — so the top pair is the WALL EDGE
+        // and takes the slab's own ink, and the bottom pair is the toward the player and takes the
+        // lighter end. (The first version of this wrote them the other way round, which inverted the
+        // ramp: the band then went the wrong way, brighter at the wall and darker at the player.)
+        rampTint.setRGB(far[0] / 255, far[1] / 255, far[2] / 255, THREE.SRGBColorSpace);
+        attribute.setXYZ(0, rampTint.r, rampTint.g, rampTint.b);
+        attribute.setXYZ(1, rampTint.r, rampTint.g, rampTint.b);
+        rampTint.setRGB(near[0] / 255, near[1] / 255, near[2] / 255, THREE.SRGBColorSpace);
+        attribute.setXYZ(2, rampTint.r, rampTint.g, rampTint.b);
+        attribute.setXYZ(3, rampTint.r, rampTint.g, rampTint.b);
+        attribute.needsUpdate = true;
+        tableRampMaterial.opacity = 1;
+      }
+    }
+  }
+
   structure.glows.forEach((light, index) => {
     const mesh = poolMeshes[index];
     const material = poolMaterials[index];
@@ -2049,9 +2125,10 @@ function placeRod(state: GameStateView | null): void {
     if (rodBase !== null) {
       const array = position.array as Float32Array;
       const halfPx = thickPx / 2;
-      // The mouth end's crimp: the last `BURN_END_SHARE` of the tube closes to 70 %, cosinely so the
-      // silhouette curves rather than steps. `t` runs 0 at the mouth to 1 at the lit end.
-      const crimpSpan = BURN_END_SHARE;
+      // The mouth end's crimp: the first `BURN_END_SHARE` of the tube closes to 70 %, cosinely so
+      // the silhouette curves rather than steps. `t` runs 0 at the mouth to 1 at the lit end — so
+      // this is the *mouth*, and the lit end keeps its full width for the cherry, the burn line and
+      // the collar to stand on. The ease is `rodMouthShare`, in `rodBurn.ts`, so a test can call it.
       for (let i = 0; i < position.count; i += 1) {
         const bx = rodBase[i * 3] ?? 0;
         const by = rodBase[i * 3 + 1] ?? 0;
@@ -2059,8 +2136,7 @@ function placeRod(state: GameStateView | null): void {
         const t = clamp01(by / len + 0.5);
         const give = dip <= 0 ? 0 : paperGive(lenPx, thickPx, dip, t * lenPx);
         const pinch = give <= 0 ? 1 : Math.max(0.2, (halfPx - give) / halfPx);
-        const mouth = t >= 1 - crimpSpan ? 1 - 0.3 * (0.5 - 0.5 * Math.cos((Math.PI * (1 - t)) / crimpSpan)) : 1;
-        const scale = pinch * mouth;
+        const scale = pinch * rodMouthShare(t);
         array[i * 3] = bx * scale;
         array[i * 3 + 1] = by;
         array[i * 3 + 2] = bz * scale;

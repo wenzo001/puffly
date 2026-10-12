@@ -131,6 +131,25 @@ export function interiorNosing(horizon: Rgb): Rgb {
 }
 
 /**
+ * The table's depth ramp: the wall edge is the slab's own ink, and the near edge reaches 42% of the
+ * way to the wall's warmth. A single flat slab made the lower third of the scene read as an empty
+ * cut-out (measured 2026-10-12: 33% of the phone frame at mean luminance 22.2, 87% of the desktop
+ * band in the darkest bin, and lifting the key light moved the means without changing the bin shares
+ * — the band was flat, so light could not give it a surface).
+ *
+ * The first mix was a quarter of the way, measured back on the served build as a 16% lift at the far
+ * column and nothing at all a player could name — present in the numbers, invisible in the picture.
+ * 42% is the span that reads while staying under the wall at every venue: the ink sits at 75% of the
+ * silhouette and the wall at the horizon/silhouette midpoint, so even a full-strength mix leaves the
+ * table the darkest surface in the room. `depth` is 0 at the wall edge and 1 at the near edge;
+ * anything outside it is clamped, the way a fraction is.
+ */
+export function tableSurfaceRgb(ink: Rgb, wall: Rgb, depth: number): Rgb {
+  const d = Math.min(1, Math.max(0, Number.isFinite(depth) ? depth : 0));
+  return mixRgb(ink, wall, d * 0.42);
+}
+
+/**
  * How far a wall mark is held off the wall's own luminance, as a WCAG-style ratio of the lighter to
  * the darker. 1.25 is the floor every tone mixed from a room's own palette is built to clear.
  *
@@ -450,7 +469,15 @@ export interface StageGlowFrac {
 export interface BackgroundStructure {
   sky: readonly { at: number; rgb: Rgb }[];
   wall: { rgb: Rgb; alpha: number } | null;
-  table: { edgeY: number; ink: Rgb; nosingRgb: Rgb; nosingAlpha: number } | null;
+  table: {
+    edgeY: number;
+    ink: Rgb;
+    nosingRgb: Rgb;
+    nosingAlpha: number;
+    /** The table's colour at the wall edge (depth 0) and at the near edge (depth 1). */
+    farRgb: Rgb;
+    nearRgb: Rgb;
+  } | null;
   boxes: StageBoxFrac[];
   glows: StageGlowFrac[];
 }
@@ -671,6 +698,11 @@ export function backgroundStructure(
       ink: interiorEdgeInk(silhouette),
       nosingRgb: interiorNosing(horizon),
       nosingAlpha: 0.5,
+      // The table's own depth ramp, from the wall edge to the near edge — see `tableSurfaceRgb`.
+      // Was one flat ink, which is why the bottom third of every frame read as a cut-out void.
+      // Two plain readings, not a closure: this structure is rebuilt every frame.
+      farRgb: tableSurfaceRgb(interiorEdgeInk(silhouette), wallRgb, 0),
+      nearRgb: tableSurfaceRgb(interiorEdgeInk(silhouette), wallRgb, 1),
     },
     boxes,
     glows,

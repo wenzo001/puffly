@@ -135,6 +135,7 @@ export {
   featureBoxes,
   featureToneColours,
   interiorNosing,
+  tableSurfaceRgb,
   interiorWall,
   keyLightInk,
   luminanceRatio,

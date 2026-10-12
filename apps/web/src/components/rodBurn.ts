@@ -15,6 +15,8 @@
  * ARCHITECTURE.md ("One copy of every fact").
  */
 
+import { clamp01 } from '@puffly/shared';
+
 /** How far along the drawn tube the burn line sits, 0 at the mouth end and 1 at the lit tip. */
 export function rodBurnLineAt(rodRemaining: number): number {
   // `rodRemaining` is the *unburnt* share, so the front is what is left of it subtracted from the
@@ -115,6 +117,30 @@ export function paperGrainPixels(): Uint8Array {
     }
   }
   return out;
+}
+
+/**
+ * How much of the tube's width survives at `t`, the mouth's crimp.
+ *
+ * A real cigarette is rolled shut at the end you put your lips on, so that end is narrower than the
+ * tube and closes cosinely rather than stepping. `t` is the rod's own parametrisation — 0 at the
+ * mouth, 1 at the lit tip (the same one `pointAt` and `rodBurnLineAt` answer in) — so the crimp
+ * belongs at the *low* end. It used to be written `t >= 1 - crimpSpan`, which pinched the **lit**
+ * end instead: the burn line, the cherry cap and the ash collar all land at `pointAt(1)`, so the
+ * crimp was drawn on top of the very features that say which end is burning.
+ *
+ * 1 at `t >= span`, 0.7 at the very mouth, cosine in between. The ease runs on `1 - t/span`, so it is
+ * maximal at the mouth and has gone by `span` — writing it on `t/span` (the obvious guess, and my
+ * first attempt) puts the narrowest point one span-length *past* the mouth and makes the curve rise
+ * before it falls, which is how this was caught rather than shipped.
+ */
+export function rodMouthShare(t: number, span = BURN_END_SHARE): number {
+  const along = clamp01(Number.isFinite(t) ? t : 1);
+  const width = span > 0 ? span : BURN_END_SHARE;
+  if (along >= width) return 1;
+  // 1 at the mouth easing to 0 at `span`: the crimp's own half, cosinely.
+  const ease = Math.PI * (1 - along / width);
+  return 1 - 0.3 * (0.5 - 0.5 * Math.cos(ease));
 }
 
 /**

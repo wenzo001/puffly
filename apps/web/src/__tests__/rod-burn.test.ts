@@ -8,7 +8,14 @@
  * true — a second definition of "burnt", and a constant.
  */
 import { describe, expect, it } from 'vitest';
-import { GRAIN, paperGrainPixels, rodBurnLineAt, tipAshShare } from '../components/rodBurn';
+import {
+  BURN_END_SHARE,
+  GRAIN,
+  paperGrainPixels,
+  rodBurnLineAt,
+  rodMouthShare,
+  tipAshShare,
+} from '../components/rodBurn';
 
 describe('the burn line is the core’s own burn state, read once', () => {
   it('two different burn amounts give two different positions', () => {
@@ -127,5 +134,52 @@ describe('the tip’s collar grows with the ash the core says has accumulated', 
     for (const ratio of [0, 0.25, 0.6, 1]) {
       expect(tipAshShare(ratio, 0.8), String(ratio)).toBe(tipAshShare(ratio, 0.8));
     }
+  });
+});
+
+describe('the crimp is at the mouth, not at the burning end', () => {
+  it('narrows the mouth and leaves the whole lit end alone', () => {
+    // `t` is the rod's own parametrisation: 0 at the mouth, 1 at the lit tip. A cigarette is rolled
+    // shut at the end you put your lips on, so the narrow end is `t` near 0.
+    const mouth = rodMouthShare(0);
+    const inside = rodMouthShare(BURN_END_SHARE * 0.5);
+    const nearTip = rodMouthShare(0.95);
+    const tip = rodMouthShare(1);
+    console.log(
+      `MOUTH share t0=${mouth.toFixed(3)} t${(BURN_END_SHARE * 0.5).toFixed(2)}=${inside.toFixed(3)} t.95=${nearTip.toFixed(3)} t1=${tip.toFixed(3)}`,
+    );
+    // The mouth is measurably narrower than the tube.
+    expect(mouth).toBeLessThan(0.8);
+    // The lit end is untouched — that is the bug this pins: the crimp used to be written
+    // `t >= 1 - crimpSpan`, which pinched the end the cherry, the burn line and the ash collar
+    // all land on (`pointAt(1)`), so the burning end read as the mouth.
+    expect(tip).toBe(1);
+    expect(nearTip).toBe(1);
+    expect(rodMouthShare(0.99)).toBe(1);
+    expect(rodMouthShare(BURN_END_SHARE)).toBe(1);
+    // And it closes cosinely rather than stepping: a point inside the easing span sits between the
+    // mouth and the tube, rather than the whole span being one size.
+    expect(inside).toBeGreaterThan(mouth);
+    expect(inside).toBeLessThan(1);
+  });
+
+  it('the narrowing is monotone outward from the mouth', () => {
+    let widest = 0;
+    for (let t = 0; t <= BURN_END_SHARE; t += BURN_END_SHARE / 12) {
+      const share = rodMouthShare(t);
+      expect(share).toBeGreaterThanOrEqual(widest - 1e-9);
+      widest = Math.max(widest, share);
+    }
+    expect(widest).toBe(1);
+  });
+
+  it('is a pure function of its input (positive control for the same claim)', () => {
+    for (const t of [0, 0.01, 0.08, 0.16, 0.3, 1]) {
+      expect(rodMouthShare(t), String(t)).toBe(rodMouthShare(t));
+    }
+    // A nonsense `t` cannot put the crimp outside the tube: it lands at the lit end.
+    expect(rodMouthShare(Number.NaN)).toBe(1);
+    expect(rodMouthShare(2)).toBe(1);
+    expect(rodMouthShare(-1)).toBe(rodMouthShare(0));
   });
 });
