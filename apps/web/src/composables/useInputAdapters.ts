@@ -35,12 +35,35 @@ export function createSurfaceGuard(target: EventTarget = document): InputAdapter
   const refuse = (event: Event): void => {
     event.preventDefault();
   };
+  /**
+   * A wheel over a range input changes *that input's value* in Chromium, so on a settings sheet that
+   * is mostly slider rows the player's scroll lands on a row and the panel never moves — which reads
+   * as "this menu cannot be scrolled" (#162, measured on the open sheet: the wheel's target was
+   * `input.grow`, nothing was prevented, `scrollTop` stayed 0). The value still answers the wheel
+   * when the player is actually on the control; otherwise the scroll is handed to the nearest box
+   * that can scroll. Not passive: the default is replaced, not merely watched.
+   */
+  const handWheelToPanel = (event: Event): void => {
+    const wheel = event as WheelEvent;
+    const el = wheel.target;
+    if (!(el instanceof HTMLInputElement) || el.type !== 'range' || el === document.activeElement)
+      return;
+    let panel: HTMLElement | null = el.parentElement;
+    while (panel !== null && !/auto|scroll/.test(getComputedStyle(panel).overflowY)) {
+      panel = panel.parentElement;
+    }
+    if (panel === null) return;
+    wheel.preventDefault();
+    panel.scrollTop += wheel.deltaY;
+  };
   return {
     attach() {
       for (const type of REFUSED_EVENTS) target.addEventListener(type, refuse);
+      target.addEventListener('wheel', handWheelToPanel, { passive: false });
     },
     detach() {
       for (const type of REFUSED_EVENTS) target.removeEventListener(type, refuse);
+      target.removeEventListener('wheel', handWheelToPanel);
     },
   };
 }

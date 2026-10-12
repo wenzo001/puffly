@@ -6636,7 +6636,7 @@ rim（烟盒与打火机各自已有的做法可抄），判据形状 = 实测�
 | 2 | 尺寸/色值/渐变/blur/压暗带/按钮两态 | `scrim-band.test.ts`（3 条）、`cta-anatomy.test.ts`（6 条）、`chrome-furniture.test.ts`（4 条） | 源码级 + 活读数（#125/#126/#133 各节；`SCRIM` 与稿子 S1/S2 逐字同值） |
 | 3 | 烟与灰的形状/颜色/位置 | `force-art.test.ts`（11 条）、`hint-art.test.ts`（4 条）、`packages/game-scene/src/__tests__/` 的 plume 四檔 + `ash-pile` | 像素 + 公式；**托盘那 1px 边是这一条的欠账 ⇒ #157** |
 | 4 | S/M/L 边界 + 档内不重复 + 雪茄不误触唇线 | `lip-mouth.test.ts`（8 条）、`limit.test.ts`、`long-press.test.ts` | 单测 + 真机（#129 那两节） |
-| 5 | 手机与宽屏分开验、不互相回归 | 真机套件 `tests/smoke/touch-device.mjs` **168 条**（含宽屏档三格；#158 那两条是页头块里的第 65–66 条） | 真机；对着 tip 的构建复跑 **168/168、退码 0**（2026-10-12）。**条数别抄这一格**：现读＝跑完看末行 `N/N checks passed` |
+| 5 | 手机与宽屏分开验、不互相回归 | 真机套件 `tests/smoke/touch-device.mjs` **170 条**（含宽屏档三格；#158 那两条是页头块里的第 65–66 条；#162 又补两条——竖屏"拇指能划开面板" + 3D 档"滚轮能划开"） | 真机；对着 tip 的构建复跑 **170/170、退码 0**（2026-10-12）。**条数别抄这一格**：现读＝跑完看末行 `N/N checks passed` |
 | 6 | 跑项目既有测试/构建，并新增或改动断言 | 门禁六步（format/lint/typecheck/test/build/served-build）→ **129 档 / 1072 条 ALL_GREEN** | 门禁日志 `/tmp/puffly-gate/<step>.log` |
 | 7 | 含删除的提交要审"有没有顺手删无关的东西" | 审的是那 59 笔（**现已全部推送，`origin/main` 就在 `bd7221b`**）：`git diff --shortstat bd7221b~59..bd7221b` = **40 檔 / +3924 / -737**（2026-10-12 现读）。**这一格先前写的是 +3549 —— 那不是我抄错，是它按"当时待推范围"说的**：写下那行时 tip 比 `bd7221b` 早几笔，差的 375 行全是之后的纯文档提交（檔数 40 与删除 737 至今一字未动）。逐檔看过：只有 `docs/images/*.jpg` 与图集烘件 `public/atlas/glyphs.png` 是二进制，**没有 dist / 编辑器目录 / node_modules 混进提交** | 提交范围自查 —— **别抄这一格的数**，它只能现算：`git diff --shortstat <base>..bd7221b` |
 
@@ -6961,3 +6961,97 @@ suite: 14 条 ok 为止 —— 没有任何 FAIL
 ⇒ **六条里一条是产品/验收口径的问题，其余五条是同一件工程事**：套件把帧率当成了默认前提。
 后者按 #147/#148/#160 已经定下的做法修（**等条件而不是等墙钟；"没跑到"要报成红而不是崩掉整趟**），
 判据与条数都不动。
+
+### 2026-10-12 深夜 · #161 五处的落地读数，以及"滚动"这一格其实是两个因
+
+**#161 五处都修住了（软件路径两趟、全速三趟现读）**：`the hint word is a setting…`（改成"先看词在不在，不在就有界唤醒再读"，
+并断言的是**一次转变**而不是写死 `puff`）、`a draw held past its ceiling…`（按下后先确认这一口真起了、没起再按一次，
+`presses/began` 进明细）、`right-to-left: the burning end…`（`1e-4` 换成**量出来的漂移预算**：同语言再读一次，
+燃烧自己能在一个 520 ms 窗里挪多少，切换语言就只许挪那么多 × 窗数）、`3D: the ignition's flame…` 与
+`3D: the cap turns on a hinge…`（击打由"点了就算"改成"点了并等到火苗出现才算"，最多三次，`strikes` 进明细）。
+⇒ 这五处在 `--use-angle=swiftshader --enable-unsafe-swiftshader --disable-gpu` 那两趟里**都不再红**，
+全速那三趟仍 **168/168**。
+
+**没修住的我说清是什么**：软件路径两趟的红数不一样（**5 条 vs 10 条**，同一构建同一字节）——
+那一串的名字都挂在 `{"missing":["close"]}` 之后（skins/kit/宽屏侧栏面板/点亮那几格）。
+⇒ 饿死的页面上 **sheet 开不稳**这件事我只做到"从崩掉整趟变成下游报红"，**没有做到稳定**；
+两趟红数不同本身就是"非确定性"的证据，我不拿它当"已修"。
+
+**滚动（#162）——"电脑上也滚不动、触屏也滚不动"必然是两个因**：
+穷举全应用的滚动容器只有 3 个 —— `.sheet{overflow-y:auto; touch-action:pan-y}`、`.jumps{overflow-x:auto; pan-x}`、
+**`.data-rail{overflow-y:auto}` 没有 `touch-action`**。当时我给这两半各写了一条因果，**只有一条活着**：
+"什么都没声明的容器，在 `body{touch-action:none}` 下拇指滚不动" ⇒ 已补 `pan-y`，并把这条钉成守卫：
+**凡 `overflow: auto|scroll` 的规则必须自己写 `touch-action: pan-*`**（`gesture-surface.test.ts`，
+扫 `global.css` ＋ 每个组件的 `<style>` 块，违例列表非空即红）—— 反证＝把 `.data-rail` 那行删掉它必须报红。
+另一半当时写成"一次滑动沿祖先链求交 ⇒ `body` 的 `none` 压住了 `.sheet`"，**已被下一节的实验当场否掉**
+（三档 body 取值都 0→283）；"电脑上滚不动"那半猜的"内容溢出而那里没有滚动容器"（#101 的剩余一半）也不是因。
+`.sheet` 两只手都滚不动的真因、修法与三处判据，在下一节。
+
+**#164 第一版对照实验作废（我自己否掉的）**：想验"烟羽在慢机器上塌小是不是 autoTier 降档"，
+钉"浓"那一侧读到 `particles 0` —— 但那不是降档证据：设置面板还开着，后面 5 次 `.pill` 点击被面板吃掉，
+**杆根本没点着**（同步骤的 AUTO 侧读到 87）。⇒ 正确的前置是**两臂都先证明杆已燃**再读；
+在那之前"烟看着不对"的成因**未定**，我不把它写成结论（这一格我已经改口两次，过程都留在账上）。
+
+### 面板滚不动：因不在 `body{touch-action:none}`，在 3D 遮罩把滚动容器摘出了命中测试（2026-10-12，#162）
+
+**先撤回上一段写进账的那句因果**（"§66 在 `body` 上写 `touch-action: none` ⇒ 没自己声明的容器拇指滚不动"）。
+**它在实验上被否**：最小页 `html,body{touch-action:none}` 里放一个 `overflow-y:auto; touch-action:pan-y` 的盒子，
+一次划 **scrollTop 0→283**；body 取 `auto` / `none` / `pan-x pan-y` 三档读数**一模一样是 283**
+⇒ 祖先的 `none` 拦不住"自己就是滚动容器、且自己声明了 pan"的那一层。那条规矩只对**什么都没声明**的容器成立。
+
+**三次"0"全部作废，且都是我的量具不是产品**（逐条记下，因为下一次我还会朝同一个方向错）：
+① 手指落在 `nav.rail` 上 —— 我把 x 取成面板中心、y 取成 `bottom-80`，那里正被底栏压着（`targets=["nav.rail"…]` 抓出来的）；
+② `Input.dispatchTouchEvent` 的 `timestamp` 单位是**秒·自 epoch**，我一路传 `performance.now()`（**毫秒·自进程起**）
+⇒ 连"必须滚得动"的对照页都读 0（换成 `Date.now()/1000` 后对照页 0→486）；
+③ `data-open` 一翻牌就去量 `getBoundingClientRect()`，读到的是**收起态**几何（`top=852`，正好贴视口下沿）
+—— 那 380ms 的滑入我没等（等"几何停住"要读两次相同 top）。
+
+**真正的因，单变量证死**：`html.scene3d-text .sheet{visibility:hidden}`（3D 重写为"面板的底交场景画"而设）。
+`visibility: hidden` 把元素**从命中测试里摘掉**，而 `.sheet` 自己就是那个滚动容器 ⇒ 手指与滚轮都白划；
+行是可见的（`[data-open='true'] *{visibility:visible}` 把孩子放回来），所以**点击一直好使** —— 这就是它能一路绿着的原因。
+
+| 只改这一处 | scrollTop | scroll 事件 |
+| --- | --- | --- |
+| 现状（root hidden） | 0 → 0 | 0 |
+| root `visibility: visible` | **0 → 273** | 12 |
+| root hidden + `pointer-events: all` | 0 → 0 | 0 |
+
+另两条排除项：直接 `scrollTop=200` **留得住**（200/200/200，没人复位）；把同样样式的孪生盒子塞进
+`main.stage`（那个 `overflow: clip` 的祖先）也照样 0→285 ⇒ 祖先裁剪、`#app` 的 fixed 都不是因。
+
+**但"把 root 改回 visible"不能就这么发**：DOM 那张不透明的底会**盖住场景画好的镜像字**
+（截图实测：面板里只剩不在图集里的三枚图块，字全没了，另有一枚橙卡骑在面板上沿外 50 px）。
+所以修法照 `global.css` 自己写下的那条规矩来（"控件**不能**用 visibility —— 它会把元素从命中测试里摘掉"）：
+**只撤画，不撤命中** —— `placeSheet` 逐帧 `clearSurfacePaint(sheet)` → 读值 → 末尾 `maskSurfacePaint(sheet)`
+（撤 `background-color` 与 `border-color`，两样都不挡命中；只在场景真的画了那张卡时才撤），
+样式表里那三条 `visibility` 规则（root 藏 + 孩子放回 + 孩子的过场）整段删掉。
+
+**改完实测**（同一构建、真手指）：设置面板 `0→273`、图鉴 `0→273`（那格溢出 2257 px），
+root 计算值 `visibility: visible` + `backgroundColor: rgba(0, 0, 0, 0)` + 带 `data-scene-surface`；
+截图与"程序滚动 273"的参照帧逐行一致（字在、底不重影）。
+
+**判据三处**：① 真机原来那条断言 `visibility === 'hidden'` 的（**它把机制抄成了规矩**，所以绿了一路）
+改成"撤画 + 仍在命中测试里"（`visible` / `rgba(0, 0, 0, 0)` / root 带标记 / 面板内有一个可落指的点）；
+② 新增一条"两只手都要滚得动"：滚轮与 CDP 手指各划一次，`scrollTop` 都要 >40
+（套件此前**没有任何一条**证明面板能滚 —— 这才是它没被抓住的原因，比那条假断据更根本）；
+③ 静态守卫 `gesture-surface.test.ts`：`scene3d` 那层不得对"自己声明 overflow 的容器"写 `visibility: hidden`
+—— 反证＝把那行加回去，它报 `styles/global.css → html.scene3d-text .sheet`；第一次跑出**两条**，
+查因是 `styleSources()` 把 `global.css` 数了两遍（显式一条 + 目录走一遍），已按路径去重。
+
+**同一格的另一半（电脑端）**：宽屏 `.data-rail` 补 `touch-action: pan-y`（它原来什么都没声明，那才是祖先 `none`
+真能拦住的情形）；滑块行 `none`→`pan-y`（横着归 thumb、竖着归面板）；滚轮落在滑块上时把这一滚**交给最近的可滚祖先**
+（`handWheelToPanel`：Chromium 里滚轮经过 `input[type=range]` 会改值而不是滚容器）。
+
+**没混进这一格、也没了结的**：面板上沿外那 50 px 的橙色卡（镜像 `sheetSurfaces` 的裁剪与 DOM 滚动口的边不一致）、
+"房间/语言"行那几个斜纹方块（headless 字体缺字 与 #138 那格 notdef 被烤进图集是**两件事**，要分开判）→ 记进 #163；
+#161 剩下的那半（饿死页面上 sheet 开不稳，同字节两趟 5 红 vs 10 红）仍未收口。
+
+**这两条判据落地的过程本身又量出一格口径**（记下来，因为它不是"我的判据写错了"，是"设备根本不在"）：
+第一版把"滚轮 + 拇指"合在 3D 那一段里，跑出来 `aim:null`、`overflow:-1` —— 两次都不是产品：
+① 那一段前一步会点 `.close`，我按底栏重开面板，而**那枚是 toggle**，套件状态下重开没成 ⇒ 改成
+**量这一段本来就开着的那张面板**（按 `data-sheet` 身份取，不取"碰巧开着的"）；
+② 更要紧的一条：**3D 那一段的 context 只给了 `viewport`、没有 `hasTouch`**（全仓只有竖屏那个 context 开了 touch）
+⇒ 在没有手指的设备上派 `Input.dispatchTouchEvent`，测的从来不是拇指。
+所以两条拆开：**拇指归竖屏档**（`a thumb pans the open sheet` —— `overflow 465 → scrollTop 245`），
+**滚轮归 3D 档**（`the open sheet answers the wheel` —— `openId:"break"、overflow 417 → 260`）。
+套件条数 168 → **170**，对着 tip 的构建复跑 **170/170、退码 0**；同一批字节在修之前这两处都读 0。

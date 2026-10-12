@@ -323,7 +323,12 @@ input[type='range'] {
   width: 100%;
   height: 26px;
   background: transparent;
-  touch-action: none;
+  /* `none` here meant "dragging the thumb must not drag the page", and it also meant "a vertical
+     swipe that starts on a slider row cannot scroll this panel" — and a settings sheet is nearly all
+     slider rows (#162, measured: a finger pan from a row left scrollTop at 0). These sliders are
+     horizontal, so the two directions can be split honestly: a vertical pan belongs to the panel, a
+     horizontal drag still belongs to the thumb. */
+  touch-action: pan-y;
 }
 
 input[type='range']::-webkit-slider-runnable-track {
@@ -522,21 +527,11 @@ html.scene3d-text .archive {
   animation: none;
   opacity: 0;
 }
-/* 四张面板的底也交场景：只关 root 自己的画（visibility 不动 computed 背景，卡面照读），
-   开着的那张把孩子放回来 —— 控件、图块、以及不在图集里的行（emoji）还是 DOM 的。
-   逐行藏字由场景写 inline，因为"这行字能不能进图集"只有拿着图集的那一层知道。 */
-html.scene3d-text .sheet {
-  visibility: hidden;
-}
-html.scene3d-text .sheet * {
-  /* 收场：data-open 摘掉后孩子要跟着 380ms 的滑动一起退场，而不是瞬隐。
-     这份 transition 只活在 scene3d 层，代价是面板里孩子自己的过场被它盖住。 */
-  transition: visibility 0s linear 380ms;
-}
-html.scene3d-text .sheet[data-open='true'] * {
-  visibility: visible;
-  transition: visibility 0s;
-}
+/* 四张面板的底也交场景：只撤 root 自己的画（background / border-color —— 这两样不挡命中），
+   逐行藏字由场景写 inline，因为"这行字能不能进图集"只有拿着图集的那一层知道。
+   这里**不能**用 `visibility: hidden`：它会把元素从命中测试里摘掉，而面板自己就是那个滚动容器
+   —— 于是手指和滚轮都滚不动它（真机量过：改回 visible 后一次划 0→273，12 个 scroll 事件）。
+   撤画由 SceneStage 的 placeSheet 逐帧 inline 做（读值 → 撤 → 画），所以场景不在时 DOM 自己画。 */
 /* 滑块的两截画（track / thumb）住在伪元素里，逐帧的 inline 遮罩够不着它们 —— 这一步只能写在
    样式表里。几何与颜色全部由 `--slider-*` 变量供出，场景读的就是那些变量，所以遮罩不碰
    "读取面"；只撤 background 与 border-color（都不挡命中），focus 的描边留在 DOM（键盘用户的

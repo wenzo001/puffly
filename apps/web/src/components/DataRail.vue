@@ -60,6 +60,11 @@ const active = computed(() => entryFor(props.sheet, props.section));
   padding: 14px;
   padding-block-start: max(14px, env(safe-area-inset-top));
   overflow-y: auto;
+  /* A mouse wheel reaches this box on its own; a finger does not. §66 puts `touch-action: none` on
+     `body` to hand the gestures to the scene, and a pan is judged along the chain up to the scroll
+     container — so an `overflow: auto` that names nothing is exactly a rail that scrolls under a
+     trackpad and not under a thumb on a touch laptop in wide layout. */
+  touch-action: pan-y;
   background: color-mix(in oklab, var(--deep-charcoal) 92%, black);
   border-inline-start: 1px solid var(--chrome-line);
 }

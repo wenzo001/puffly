@@ -3102,11 +3102,11 @@ function placeArchive(): void {
 /**
  * A sheet, mirrored: the surface, and every line of its text the atlas can carry.
  *
- * The sheet's own box is hidden under `html.scene3d-text .sheet { visibility: hidden }` — that takes
- * only the root's *paint* (its background), and `visibility` leaves the computed background
- * readable, which is where this surface comes from. The children are put back by the
- * `[data-open='true'] *` rule: at this stage the controls, tiles and emoji are still the DOM's to
- * paint. The mirrored lines have their ink taken away one node at a time, inline, because *which*
+ * The sheet's own box hands over only its *paint*: `placeSheet` withholds the root's background and
+ * border inline, exactly as it does for a chip, because the root is also the scroll container and
+ * `visibility: hidden` would take it out of hit testing (measured: with the root hidden, a finger
+ * pan and a wheel both leave `scrollTop` at 0; with the paint withheld instead, 0 → 273). The
+ * mirrored lines have their ink taken away one node at a time, inline, because *which*
  * lines are mirrorable is known only here — a line with characters the atlas does not carry (the
  * header's ☀ 🌙 🔥, the mood faces) stays crisp DOM rather than being punched into a half-drawn
  * copy. Scrolling needs no code: the rows' rects are read every frame, so the DOM's own scroll
@@ -3246,6 +3246,11 @@ function placeSheet(): void {
       sheetClippingOn = true;
     }
   }
+  // The root's own paint is this layer's to withhold, and it is withheld the same way a chip's is —
+  // background and border, never `visibility`. The sheet is also the scroll container, and a
+  // `visibility: hidden` box leaves the browser's hit test, which is how a panel got to answering
+  // taps but no finger and no wheel (#162). Lift last frame's mask so this read is the DOM's value.
+  clearSurfacePaint(sheet);
   fillCard(card, sheet, 1);
   const rootOpacity = Number.parseFloat(getComputedStyle(sheet).opacity);
   const panelAlpha = Number.isFinite(rootOpacity) ? rootOpacity : 1;
@@ -3512,6 +3517,9 @@ function placeSheet(): void {
       if (rig !== undefined) rig.mesh.visible = false;
     }
   }
+  // Only once the scene really drew that card may the DOM stop drawing its own — otherwise the
+  // panel would be left with no backdrop at all, which is the same failure the masked chips avoid.
+  if (card.mesh.visible) wantedSurfaces.add(sheet);
   for (const node of wantedSurfaces) maskSurfacePaint(node);
 }
 

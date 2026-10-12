@@ -775,27 +775,110 @@ const clickAt = (locator, withinMs = 2500) =>
 async function openSheet(page, id, mouse = false) {
   const selector = SHEET_HANDLE[id];
   const handle = page.locator(selector);
-  // Two turns at it, and neither can take the run down. The wake proves the control is on screen,
-  // but the panel folds itself away 2.6 s after the last input, so a handle that was visible a moment
-  // ago can be gone by the time the tap is attempted — which used to spend Playwright's 30 s retry
-  // and then throw, aborting every check after it (#114's remaining half). A miss is still reported:
-  // the sheet never attaches, and the check that reads it goes red.
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    await wakeChrome(page, selector).catch(() => {});
+  /** Is that handle somewhere a finger would actually land — on screen, and nothing else on top? */
+  const awake = (sel) =>
+    page.evaluate((target) => {
+      const el = document.querySelector(target);
+      if (el === null) return false;
+      const r = el.getBoundingClientRect();
+      if (r.width < 1 || r.height < 1) return false;
+      const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      return hit !== null && (el === hit || el.contains(hit) || hit.contains(el));
+    }, sel);
+  // Three turns at it, and none of them can take the run down. The wake proves the control is on
+  // screen, but the panel folds itself away 2.6 s after the last input, so a handle that was visible
+  // a moment ago can be gone by the time the tap is attempted — which used to spend Playwright's 30 s
+  // retry and then throw, aborting every check after it (#114's remaining half). A miss is still
+  // reported: the sheet never attaches, and the check that reads it goes red.
+  //
+  // The attach bound used to be 4 s, which was a second bet about frame rate: on CI's software page
+  // the tap lands and the sheet arrives a beat later, so every open failed and cascaded into ~15
+  // checks that read a sheet (`missing:["close"]` in the #159 report). Bounded, not open-ended.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (!(await awake(selector).catch(() => false))) {
+      await wakeChrome(page, selector).catch(() => {});
+    }
     const pressed = mouse ? await clickAt(handle) : await tapAt(handle);
     const opened = await page
       .waitForSelector('.sheet[data-open="true"]', {
         state: 'attached',
-        timeout: pressed ? 4000 : 400,
+        timeout: pressed ? 6000 : 400,
       })
       .then(() => true)
       .catch(() => false);
     if (opened) break;
   }
-  // The settle beat: a fixed 460 ms once raced a slow frame twice in one day (2026-10-09), and the
-  // read that lost left an uncaught TypeError which aborted every check after it.
-  await page.waitForTimeout(460);
+  // Settle by geometry, not by a fixed beat. The sheet slides in for ~380 ms, and on the software
+  // page 460 ms of wall clock is fewer than three frames — reads taken mid-entrance saw the close
+  // button somewhere other than where its own hit test landed, and aimed the dismissal tap inside the
+  // panel (`blocked:["close"]`, `sheets 1 then 1`, `point 197,180` — #161's second batch). Wait until
+  // the open sheet's box stops moving; bounded, and on a healthy page it stops two reads in.
+  const restOf = () =>
+    page.evaluate(() => {
+      const open = document.querySelector('.sheet[data-open="true"]');
+      if (open === null) return '';
+      const r = open.getBoundingClientRect();
+      return [r.x, r.y, r.width, r.height].map((v) => v.toFixed(1)).join(',');
+    });
+  let atRest = await restOf();
+  for (let tick = 0; tick < 12; tick += 1) {
+    await page.waitForTimeout(120);
+    const now = await restOf();
+    if (now !== '' && now === atRest) break;
+    atRest = now;
+  }
 }
+
+/**
+ * The lowest point inside a box that a finger really lands on.
+ *
+ * Derived by hit-testing, never assumed: aiming at the box's own centre or bottom has put the
+ * sequence on the bottom rail twice and outside the window once, and each time the reading was a
+ * clean "0" that had nothing to do with the product.
+ */
+const fingerAim = (page, selector) =>
+  page.evaluate((sel) => {
+    const el = document.querySelector(sel);
+    if (el === null) return null;
+    const r = el.getBoundingClientRect();
+    const x = Math.round(r.x + r.width / 2);
+    for (let y = Math.round(r.bottom) - 20; y > r.top; y -= 6) {
+      const hit = document.elementFromPoint(x, y);
+      if (hit !== null && (hit === el || el.contains(hit))) {
+        return { x, from: y, to: Math.max(r.top + 40, y - 260) };
+      }
+    }
+    return null;
+  }, selector);
+
+/**
+ * One thumb drag. Playwright's touchscreen only taps, so a pan goes over CDP — and CDP's
+ * `timestamp` is **seconds since epoch**: hand it `performance.now()` (ms since process start) and
+ * the browser treats the whole sequence as stale, so not even a page built to scroll will move.
+ */
+const panWithFinger = async (page, x, from, to) => {
+  const cdp = await page.context().newCDPSession(page);
+  const at = (ms) => Date.now() / 1000 + ms / 1000;
+  await cdp.send('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: [{ x, y: from, id: 1 }],
+    timestamp: at(0),
+  });
+  for (let step = 1; step <= 12; step += 1) {
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [{ x, y: Math.round(from - ((from - to) * step) / 12), id: 1 }],
+      timestamp: at(step * 18),
+    });
+    await page.waitForTimeout(18);
+  }
+  await page.waitForTimeout(150);
+  await cdp.send('Input.dispatchTouchEvent', {
+    type: 'touchEnd',
+    touchPoints: [],
+    timestamp: at(240),
+  });
+};
 
 /**
  * The mark a hint word is anchored to, as a centre. The word itself is a different width in
@@ -938,6 +1021,7 @@ const hintCentre = async (page) => {
   // (2026-10-11).
   let words = null;
   let shape = null;
+  let wordWakes = 0;
   const drives = [];
   for (let round = 0; round < 2; round += 1) {
     // `holdDraw` already re-presses once when a press never started a draw, but its answer went
@@ -959,7 +1043,29 @@ const hintCentre = async (page) => {
       // first version read the shape after the settle wait and got 0.2% of the band (135 cloud
       // pixels) — a footprint too thin for the statistic to carry a claim.
       words = await stageWords(page);
-      shape = await cloudShape(page);
+      // The word rides the chrome, and the chrome folds 2.6 s after the last input — on a page this
+      // slow the press that just happened can already be old by the time this line runs, which is how
+      // `hints:0` showed up as a product red. Wake and re-read, bounded; a healthy page never enters
+      // the loop, so nothing downstream shifts (#161).
+      while (words.hints !== 1 && wordWakes < 3) {
+        wordWakes += 1;
+        await wakeChrome(page, '.pill').catch(() => {});
+        await page.waitForTimeout(250);
+        words = await stageWords(page);
+      }
+      // The same race, from the other side: a screenshot on a page painting ~4 frames a second can
+      // land after most of the cloud has left the band (CI read 247 cloud pixels where this build at
+      // full speed reads 4 191 — #161). So re-sample while the moment has not reached the floors this
+      // check already carries, up to three looks, and keep the fullest. The thresholds are the same
+      // numbers in the same assertion; only the moment stopped being a guess.
+      const samples = [];
+      for (let look = 0; look < 3; look += 1) {
+        const one = await cloudShape(page);
+        samples.push(one);
+        if (one.share >= 0.01 && one.spread >= 0.5) break;
+      }
+      shape = samples.reduce((best, now) => (now.cloudPx > best.cloudPx ? now : best));
+      shape.samples = samples.map((one) => String(one.cloudPx)).join('/');
     }
     await page.waitForTimeout(600);
   }
@@ -977,7 +1083,12 @@ const hintCentre = async (page) => {
   check(
     'the screen carries no prose, and the hint still names the gesture being nudged',
     words.offenders.length === 0 && words.hints === 1 && words.affordance === 'puff',
-    driverNote + JSON.stringify(words) + ' drives=' + JSON.stringify(drives),
+    driverNote +
+      JSON.stringify(words) +
+      ' drives=' +
+      JSON.stringify(drives) +
+      ' wakes=' +
+      String(wordWakes),
   );
   const after = await airSample(page);
   const breath = breathDelta(before, after);
@@ -1000,7 +1111,9 @@ const hintCentre = async (page) => {
     driverNote +
       `relative spread ${shape.spread.toFixed(3)} over ${String(shape.cloudPx)} cloud pixels (${(
         shape.share * 100
-      ).toFixed(1)}% of the band, ${String(shape.instances)} discs) drives=` +
+      ).toFixed(
+        1,
+      )}% of the band, ${String(shape.instances)} discs, looks ${shape.samples}) drives=` +
       JSON.stringify(drives),
   );
   const inHandAgain = await scenePhase(page);
@@ -1139,14 +1252,35 @@ const hintCentre = async (page) => {
 
   // §64: the word is a setting, not a fixture. Off has to mean off on the stage too, not just
   // in the sheet, and turning it off must not leave any other text behind.
+  // Read what the scene is nudging *before* the toggle too: the old form pinned that field to
+  // 「puff」, which was a bet about which gesture the break had reached by the time the taps and the
+  // 600 ms settled — on CI's starved page the ash had grown enough to suggest 磕灰 instead, and a
+  // working product read as a broken one (#161). What the setting owes is that the word goes away
+  // and nothing else moves, so that is what gets asserted now.
+  // The word has to be *on* before this can show it going off, and on a starved page the chrome folds
+  // 2.6 s after the last input — so the first reading of `hints` can legitimately be 0 without the
+  // setting being off (#161 caught that on the software path: before:[0,…] after:[0,…]). Wake and
+  // re-read until the word is there, bounded, and assert the transition itself.
+  let loud = await stageWords(page);
+  let onTries = 0;
+  while (loud.hints !== 1 && onTries < 3) {
+    onTries += 1;
+    await wakeChrome(page, '.hint').catch(() => {});
+    await page.waitForTimeout(320);
+    loud = await stageWords(page);
+  }
   await tapAt(page.locator('.sheet[data-open="true"] [data-setting="hints"]'));
   await tapAt(page.locator('.sheet[data-open="true"] .close'));
   await page.waitForTimeout(600);
   const quiet = await stageWords(page);
   check(
     'the hint word is a setting that can be turned off',
-    quiet.hints === 0 && quiet.affordance === 'puff' && quiet.offenders.length === 0,
-    JSON.stringify(quiet),
+    loud.hints === 1 && quiet.hints === 0 && quiet.offenders.length === 0,
+    JSON.stringify({
+      before: [loud.hints, loud.affordance, `awake after ${String(onTries)}`],
+      after: [quiet.hints, quiet.affordance],
+      offenders: quiet.offenders,
+    }),
   );
 
   // The operating system takes the page away without asking: a reload has to come back to the
@@ -1186,6 +1320,39 @@ const hintCentre = async (page) => {
       .map((r) => `${Math.round(r.width)}x${Math.round(r.height)}`),
   );
   check('every control on the sheet takes a finger', small.length === 0, small.join(', '));
+  /**
+   * A thumb has to be able to read the whole panel, not just the first screen of it.
+   *
+   * This is the judgement that was missing while #162 was invisible: the sheet's own paint was
+   * withheld from the DOM with `visibility: hidden`, which takes a box out of the browser's hit
+   * test — so taps still landed (they hit the visible rows) while a finger slid over the panel for
+   * nothing. Measured on the same bytes: 0 → 0 with the root hidden, 0 → 273 with its paint withheld
+   * instead. It runs in the portrait context because that is the only one with a touch device;
+   * dispatching a touch sequence into a context without one proves nothing about a thumb.
+   */
+  const thumbAim = await fingerAim(page, '.sheet[data-open="true"]');
+  const thumbOverflow = await page.evaluate(() => {
+    const el = document.querySelector('.sheet[data-open="true"]');
+    return el === null ? -1 : el.scrollHeight - el.clientHeight;
+  });
+  await page.evaluate(() => {
+    const el = document.querySelector('.sheet[data-open="true"]');
+    if (el !== null) el.scrollTop = 0;
+  });
+  if (thumbAim !== null) await panWithFinger(page, thumbAim.x, thumbAim.from, thumbAim.to);
+  await page.waitForTimeout(400);
+  const thumbScrolled = await page.evaluate(() =>
+    Math.round(document.querySelector('.sheet[data-open="true"]')?.scrollTop ?? -1),
+  );
+  check(
+    'a thumb pans the open sheet (the panel is in the hit test)',
+    thumbOverflow > 60 && thumbScrolled > 40,
+    JSON.stringify({ thumbOverflow, thumbScrolled, aim: thumbAim }),
+  );
+  await page.evaluate(() => {
+    const el = document.querySelector('.sheet[data-open="true"]');
+    if (el !== null) el.scrollTop = 0;
+  });
   // The 休息 row, in the browser rather than in the source: the track has to be able to land on the
   // length the game ships with, and the digits beside it have to be the same number in the same unit.
   // This used to be impossible on a real page — the track was counted in one unit and the label in
@@ -1973,15 +2140,21 @@ try {
   // pill answers with the very same gesture a finger makes, so lighting from here is "try again":
   // a single attempt reads as a broken pill roughly once every three draws.
   let caught = '';
-  for (let attempt = 0; attempt < 3 && caught === ''; attempt += 1) {
+  let lightTries = 0;
+  // Two things the old shape conflated: the wheel legitimately misses (about one draw in three, §13),
+  // and a page painting ~4 frames a second does not finish a strike inside 2.2 s. The bound is now
+  // scaled for the worst frame rate this suite has measured (#148's rule) and the number of presses that
+  // took travels into the reading, so a red says whether it ran out of attempts or out of luck.
+  while (caught === '' && lightTries < 4) {
+    lightTries += 1;
     await tapAt(page.locator('.pill'));
-    caught = await waitScene(page, LIT, 2200);
+    caught = await waitScene(page, LIT, 3500);
   }
   const lit = await chrome();
   check(
     'lighting it moves the rail off the flame and the row onto the draw',
     lit.phase === 'puff' && lit.lit.join() === 'puff' && /\d+ \/ \d+/.test(lit.primary),
-    JSON.stringify(lit),
+    `${JSON.stringify(lit)} lighting attempts ${String(lightTries)}`,
   );
 
   // Hold the pill: the arc is the draw itself, and the row counts seconds while it runs.
@@ -2093,6 +2266,32 @@ try {
   const ceilingBox = (await page.locator('.pill').boundingBox()) ?? box;
   await page.mouse.move(ceilingBox.x + ceilingBox.width / 2, ceilingBox.y + ceilingBox.height / 2);
   await page.mouse.down();
+  // Confirm this press actually began a draw before waiting on its ceiling. On the starved CI page
+  // (11.6 fps) the press can be swallowed whole — the same shape #122 and #160 caught on the rod —
+  // and then the row never wears a force figure for reasons that have nothing to do with the ceiling.
+  // One bounded re-press, counted into the detail; the assertion below is untouched.
+  let pressTries = 0;
+  let drawBegan = false;
+  while (pressTries < 2 && !drawBegan) {
+    pressTries += 1;
+    if (pressTries > 1) {
+      await page.mouse.up();
+      await wakeChrome(page, '.pill').catch(() => {});
+      const again = (await page.locator('.pill').boundingBox()) ?? ceilingBox;
+      await page.mouse.move(again.x + again.width / 2, again.y + again.height / 2);
+      await page.mouse.down();
+    }
+    const beganBy = Date.now() + 1500;
+    for (;;) {
+      const mid = await sceneProbe(page);
+      if ((mid?.stageRing?.seconds ?? 0) > 0 || mid?.lip?.visible === true) {
+        drawBegan = true;
+        break;
+      }
+      if (Date.now() >= beganBy) break;
+      await page.waitForTimeout(80);
+    }
+  }
   // The finger never leaves the pill, so the row wearing a bare force number *is* the ceiling
   // firing on its own (§14's self-release) — and the count is gone from the row by then, because
   // §2 gives that slot to the force while the smoke is still on screen.
@@ -2131,7 +2330,8 @@ try {
       heldRead.phase === 'puff' &&
       drawCount(afterRelease) === drawCount(beforeCeiling) + 1,
     `held=${JSON.stringify(beforeCeiling.figures)} → ${JSON.stringify(heldRead.figures)} ` +
-      `after ${String(waitedMs)}ms with the finger still down at ${heldFps.toFixed(1)} fps, released=` +
+      `after ${String(waitedMs)}ms with the finger still down at ${heldFps.toFixed(1)} fps ` +
+      `(presses ${String(pressTries)}, draw began ${String(drawBegan)}) released=` +
       `${JSON.stringify(afterRelease.figures)} after ${String(settledMs)}ms more`,
   );
 
@@ -2441,6 +2641,7 @@ try {
   const zhHint = await hintCentre(page);
   const zhScene = await rodBox(page);
   const zhAim = await propsOf(page);
+  const zhAimAt = Date.now();
 
   await openSheet(page, 'settings');
   const sheet = () => page.locator('.sheet[data-open="true"]');
@@ -2503,8 +2704,31 @@ try {
   // the page publishes) and the pixels (which the web layer is free to restyle).
   const arScene = await rodBox(page);
   const arAim = await propsOf(page);
+  const arAimAt = Date.now();
   const zhLean = zhAim.ember.x - zhAim.body.x;
   const arLean = arAim.ember.x - arAim.body.x;
+  // The lean is a reading of a rod that keeps burning between the two reads, so a flat `1e-4` was a
+  // bet that switching the language is instantaneous — it measured 0.0002 apart on the starved CI
+  // page and red once even at full speed (#161). The control is the same rod in the same language:
+  // whatever the burn moves the lean in one 520 ms window is what a language switch gets to look
+  // like, scaled by the span the switch actually took. Nothing about the claim weakens — the two
+  // states still have to agree, just not better than time itself lets them.
+  await page.waitForTimeout(520);
+  const arAimAgain = await propsOf(page);
+  const perWindow = Math.abs(arAimAgain.ember.x - arAimAgain.body.x - arLean);
+  const windows = Math.max(1, Math.ceil((arAimAt - zhAimAt) / 520));
+  // And below that sits the instrument itself: the aim is published as decimal text, so two reads can
+  // differ by one quantum of the mirror's own precision with nothing having moved at all (this is
+  // what the run measured — the burn had drifted 0.0000 while the two reads differed by 0.0001). The
+  // tolerance is therefore the mirror's quantum plus the drift, both read off the page.
+  const aimRaw = await page.evaluate(() => document.querySelector('.stage')?.dataset.aim ?? '');
+  const decimals = aimRaw.split(/[^0-9.]+/).reduce((most, token) => {
+    if (!token.includes('.')) return most;
+    const digits = (token.split('.')[1] ?? '').length;
+    return digits > most ? digits : most;
+  }, 0);
+  const quantum = 10 ** -Math.max(decimals, 1);
+  const leanBudget = 2 * quantum + perWindow * windows;
   console.log(
     `RTL zh n=${String(zhScene.n)} x=${zhScene.meanX.toFixed(1)} tilt=${zhScene.tilt.toFixed(0)} | ` +
       `ar n=${String(arScene.n)} x=${arScene.meanX.toFixed(1)} tilt=${arScene.tilt.toFixed(0)} | ` +
@@ -2512,8 +2736,9 @@ try {
   );
   check(
     'right-to-left: the burning end stays on the same side, in the state and on the canvas',
-    // The state's own numbers, byte for byte.
-    Math.abs(zhLean - arLean) < 1e-4 &&
+    // The state's own numbers — within the drift the burning rod produces on its own over the span
+    // the switch took, which is the tightest statement two reads of a moving thing can support.
+    Math.abs(zhLean - arLean) <= leanBudget &&
       zhLean > 0 &&
       // The drawn rod, read from the tight box around its own anchor: the same centroid, the same
       // lean sign and the same pixels rather than a mirrored picture.
@@ -2526,7 +2751,10 @@ try {
       // The half the buffer cannot see: a stylesheet is allowed to turn the composited picture
       // around, and this is the check that says it may not.
       (await sceneFlip(page)).length === 0,
-    `lean ${zhLean.toFixed(4)}→${arLean.toFixed(4)}, n ${zhScene.n}→${arScene.n}, ` +
+    `lean ${zhLean.toFixed(4)}→${arLean.toFixed(4)} budget ${leanBudget.toFixed(4)} ` +
+      `(the burn moves ${perWindow.toFixed(4)} per 520ms × ${String(windows)} windows, ` +
+      `mirror quantum ${quantum.toExponential(0)}), ` +
+      `n ${zhScene.n}→${arScene.n}, ` +
       `x ${zhScene.meanX.toFixed(1)}/${String(Math.round(zhScene.box[2] / 2))}→${arScene.meanX.toFixed(1)}/${String(Math.round(arScene.box[2] / 2))}, tilt ${zhScene.tilt.toFixed(0)}→${arScene.tilt.toFixed(0)}, ` +
       `flipped=${JSON.stringify(await sceneFlip(page))}`,
   );
@@ -3396,17 +3624,30 @@ try {
     };
     w.__punchRaf = window.requestAnimationFrame(tick);
   });
-  await page
-    .locator('.pill')
-    .click({ timeout: 5000 })
-    .catch(() => {});
   // Wait for the scene to say the flame is on rather than sampling 220 ms later: `advance()` clamps
   // each frame's dt to 64 ms, so a page starved to ~5 fps can spend the whole window before the frame
   // that places the flame runs. The predicate is the same field the assertion reads, so a healthy
   // page returns on its first poll and the timing-sensitive checks after this are untouched.
-  await page
-    .waitForFunction(`${flameSrc}.visible`, null, { timeout: 6000, polling: 60 })
-    .catch(() => null);
+  //
+  // The strike is confirmed rather than assumed: that click is best-effort on purpose, and on the
+  // starved CI page it never landed (`lit=false lid=-0.01 sparks=false`), which reads exactly like a
+  // scene that forgot to draw the flame. Re-click while the rod is still unlit — a second strike on an
+  // already-lighted rod would be a different gesture, which is why the loop only presses after a
+  // flame the page did not show. Bounded, and the count travels into the detail (#161).
+  let strikeTries = 0;
+  let flameAppeared = false;
+  while (strikeTries < 3 && !flameAppeared) {
+    strikeTries += 1;
+    await page
+      .locator('.pill')
+      .click({ timeout: 5000 })
+      .catch(() => {});
+    flameAppeared = await page
+      .waitForFunction(`${flameSrc}.visible`, null, { timeout: 6000, polling: 60 })
+      .then(() => true)
+      .catch(() => false);
+    if (!flameAppeared) await wakeChrome(page, '.pill').catch(() => {});
+  }
   // The cap's throw is an animation, and the lid's angle is the figure this check compares. Reading
   // the frame the flame appears in caught the lid mid-throw (-0.48 of -1.36 rad on 2026-10-11, where
   // the fixed 220 ms wait this replaced always landed after it), so wait for the lid to stop moving
@@ -3453,7 +3694,7 @@ try {
   check(
     "3D: the ignition's flame, open cap and sparks are drawn by the scene (S2)",
     !flameIdle.visible && flameLit.visible && flameLit.lid < -0.5 && sparksSeen,
-    `idle=${String(flameIdle.visible)} lit=${String(flameLit.visible)} lid=${flameLit.lid.toFixed(2)} sparks=${String(sparksSeen)}`,
+    `idle=${String(flameIdle.visible)} lit=${String(flameLit.visible)} lid=${flameLit.lid.toFixed(2)} sparks=${String(sparksSeen)} strikes=${String(strikeTries)}`,
   );
   // The cap swung — and a hinge owes two more things an angle cannot say. (1) The corner that lives
   // on the line stays on it: measured 0.0000 of the shell's own span both shut and open. (2) The
@@ -4269,8 +4510,19 @@ try {
     for (let i = 0; i < d.length; i += 4) max = Math.max(max, d[i], d[i + 1], d[i + 2]);
     const marked = element.querySelector('[data-scene-surface]');
     const close = element.querySelector('.close');
+    // Is the panel somewhere a finger can land on it? The sheet is its own scroll container, so a
+    // mask that takes it out of the hit test costs the gesture, not the paint (#162).
+    const box = element.getBoundingClientRect();
+    let landed = null;
+    for (let y = Math.round(box.bottom) - 20; y > box.top && landed === null; y -= 6) {
+      const hit = document.elementFromPoint(Math.round(box.x + box.width / 2), y);
+      if (hit !== null && (hit === element || element.contains(hit))) landed = `y=${y}`;
+    }
     return {
       visibility: getComputedStyle(element).visibility,
+      rootPaint: getComputedStyle(element).backgroundColor,
+      rootMarked: element.hasAttribute('data-scene-surface'),
+      reachable: landed,
       fill: row.style.getPropertyValue('-webkit-text-fill-color'),
       nameMax: max,
       surfaces: element.querySelectorAll('[data-scene-surface]').length,
@@ -4326,18 +4578,80 @@ try {
     `meshes=${JSON.stringify(sliderStart)} right=${JSON.stringify(sliderRight)} ` +
       `left=${JSON.stringify(sliderLeft)}`,
   );
+  // The panel stays open through the two-hands measurement below; the `.close` press that ends this
+  // section is what puts it away.
+  check(
+    '3D: the open sheet hands its paint over and stays in the hit test',
+    sheet.visibility === 'visible' &&
+      sheet.rootPaint === 'rgba(0, 0, 0, 0)' &&
+      sheet.rootMarked === true &&
+      sheet.reachable !== null &&
+      sheet.fill === 'transparent' &&
+      sheet.closeFill === 'transparent',
+    JSON.stringify(sheet),
+  );
+  /**
+   * The wheel half of #162, judged by the offset it produces.
+   *
+   * Nothing used to prove the panel scrolls at all: its own paint was withheld with
+   * `visibility: hidden`, which leaves the browser's hit test — so taps still landed on the visible
+   * rows while a wheel slid over the panel for nothing. The thumb's own judgement sits in the
+   * portrait block, the only context with a touch device.
+   *
+   * It reads **the panel this section already has open**, addressed by its `data-sheet` identity.
+   * The first cut closed that panel a few checks earlier and pressed the settings rail tab for
+   * another — which never reopened in the suite's state, so the judgement printed `aim: null`
+   * against a product that was fine. Reusing the open panel takes both the toggle and the
+   * chrome-wake out of the picture.
+   */
+  const openId = await page.evaluate(
+    () => document.querySelector('.sheet[data-open="true"]')?.dataset.sheet ?? null,
+  );
+  const SCROLLABLE = openId === null ? null : `.sheet[data-sheet="${openId}"][data-open="true"]`;
+  const scrollOffset = () =>
+    SCROLLABLE === null
+      ? -1
+      : page.evaluate(
+          (sel) => Math.round(document.querySelector(sel)?.scrollTop ?? -1),
+          SCROLLABLE,
+        );
+  const resetScroll = () =>
+    SCROLLABLE === null
+      ? undefined
+      : page.evaluate((sel) => {
+          const el = document.querySelector(sel);
+          if (el !== null) el.scrollTop = 0;
+        }, SCROLLABLE);
+  // Null-safe throughout: an uncaught throw here would take every check after it down with it, which
+  // is the #114 shape. Only the wheel is judged here — this context has no touch device (the portrait
+  // block owns the thumb's judgement), and dispatching a touch sequence without one proves nothing.
+  const aim = SCROLLABLE === null ? null : await fingerAim(page, SCROLLABLE);
+  const overflow =
+    SCROLLABLE === null
+      ? -1
+      : await page.evaluate((sel) => {
+          const el = document.querySelector(sel);
+          return el === null ? -1 : el.scrollHeight - el.clientHeight;
+        }, SCROLLABLE);
+  await resetScroll();
+  if (aim !== null) {
+    await page.mouse.move(aim.x, aim.from);
+    await page.mouse.wheel(0, 260);
+  }
+  await page.waitForTimeout(400);
+  const wheelScrolled = await scrollOffset();
+  await resetScroll();
+  check(
+    'the open sheet answers the wheel (the panel is in the hit test)',
+    overflow > 60 && wheelScrolled > 40,
+    JSON.stringify({ openId, overflow, wheelScrolled, aim }),
+  );
+  // Now put the panel away — the checks after this one read the stage with nothing in front of it.
   await page
     .locator('.sheet[data-open="true"] .close')
     .click({ timeout: 4000 })
     .catch(() => {});
   await page.waitForTimeout(420);
-  check(
-    '3D: the open sheet hands its ink over (root hidden, the row fill taken)',
-    sheet.visibility === 'hidden' &&
-      sheet.fill === 'transparent' &&
-      sheet.closeFill === 'transparent',
-    JSON.stringify(sheet),
-  );
   check(
     "3D: the controls' own paint is handed over too (a marked surface is masked transparent)",
     sheet.surfaces >= 1 &&
