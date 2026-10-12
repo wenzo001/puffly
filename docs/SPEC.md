@@ -6795,11 +6795,12 @@ rim（烟盒与打火机各自已有的做法可抄），判据形状 = 实测�
 | 死 URL（`127.0.0.1:4199`） | `nothing usable is serving … (got no answer)` + **退码 3**，连浏览器都没起（那行印在 `engine:` 之前） |
 | 活 URL（`127.0.0.1:4191`） | 前置探针放行、页面照常开：**45 秒内 52 条 ok**（这趟是我主动掐的，只验"探针没把正常跑拦掉"） |
 
-**这一改不修 CI，它修的是"CI 红了以后读不读得出为什么"。** 真正的病因仍未定，两条候选分不开（作业正文 403）：
-① `ci.yml` 那步是 `… & sleep 1 && node …`，**服务就绪没有有界轮询** ⇒ 冷 runner 上可能真没起来（本地已证这条的形状与 CI 同形）；
-② `channel: 'chromium'` 在 runner 上取不到发行版（`playwright install --with-deps chromium` 装的是它自己的构建，
-而 `channel:` 找的是"发行版"）—— 但这条现在**也会在退码 3 那一档留下自己的名字**（`cannot launch chromium: …`），
-下次一跑就分得开。**动 `.github/workflows/ci.yml` 属于动 CI，不自决**：要么把日志第一行念给我，要么我按现量提一版最小改动（把 `sleep 1` 换成有界就绪轮询）。
+**这一改不修 CI，它修的是"CI 红了以后读不读得出为什么"。** 当时留下的两条候选，**其中一条已被步骤级
+时间戳排掉**（数字与推理在下一小节）：`sleep 1` 的服务就绪竞态**不是**病因（连接被拒是瞬时的，111s 差两个
+数量级，而且同 commit 的 `served-build.sh` 是绿的），剩下的候选是**页级超时**与**跑到中途一个未捕获抛出**。
+②那条（`channel: 'chromium'` 在 runner 上取不到发行版）现在**会在退码 3 那一档留下自己的名字**
+（`cannot launch chromium: …`）。**动 `ci.yml` 的授权已于 2026-10-12 由用户给出**（"不需要再次询问是否允许修改
+`ci.yml`"），所以下一节改的是 CI 本体，不再是"等他一句话"。
 读法记一笔：**匿名 `GET /actions/runs/<id>/jobs` 给得到每个 job 的 `steps[].conclusion`（这次就靠它定位到那一步），
 但 `GET /actions/jobs/<id>/logs` 仍 403**；`GET /commits/<sha>/check-runs` 这次回来的 `output.annotations` 是空的。
 
@@ -6829,3 +6830,35 @@ rim（烟盒与打火机各自已有的做法可抄），判据形状 = 实测�
 落进套件的那版没有。⇒ 我一度把差异归给"ESM 命名导出解构"，那是错的归因。
 通则：**对照脚本证明的是脚本，不是被测代码**；把一段逻辑搬进被测文件后，要跑的是**被测文件自己**的那两条形状
 （这次最终跑的是：死 URL ⇒ 退码 3 + 一行话，且浏览器都没起；活 URL ⇒ `engine: chromium` 之后 **45 秒内 56 条 ok**）。
+
+### 2026-10-12 · 把 CI 那一步逼到能自报家门（#159 的下一半，本轮已动 `ci.yml`）
+
+**先摆能核的数**（匿名 API 拿得到步骤级 `started_at / completed_at`）：三次失败里那一步各用
+**111s / 109s / 140s**，而同 job 其余步骤都绿（`Install` 6–22s、浏览器安装 18–23s、`Build` 30–32s）。
+⇒ **排掉两条候选**：① **不是 `sleep 1` 的就绪竞态** —— 连接被拒是**瞬时**的（本地对着死端口 2–3 秒就抛
+`ERR_CONNECTION_REFUSED`），与 111s 差两个数量级；且同一 commit 的 `served-build.sh` 已证明
+"index / 入口 chunk / manifest / sw.js 都取得到、包体在预算内"。② **不是浏览器装不上** —— 那一步是绿的，
+而 launch 失败会在 2 秒内走退码 3 那一档。
+剩下的形状是**页级超时**（套件开页用 `waitUntil:'networkidle'`，Playwright 导航默认预算 30s，111 ≈ 3–4 个 30s）
+或**跑到约 100 条之后一个未捕获抛出把整趟带走**（本地实测 45 秒能出 56 条 ok）。
+`dist` 里**没有任何外链**（只有 XML 命名空间与 vue 的错误参考串）⇒ networkidle 不是"出网被挡"那种。
+
+**作业正文要 token 才读得到**（本机匿名 403，而我不碰钥匙串里的凭据），于是把观测通道做进 CI 自己：
+新增 `tests/smoke/ci-runtime-probe.mjs` —— 用与套件**同一套 launch 选项**起浏览器，把 `goto(load)` 的毫秒数、
+`networkidle` 到没到、还在飞的请求数、`__pufflyScene` 的 `backend / frames / poolSize`、`canvas.scene3d` 尺寸、
+`navigator.gpu` 与 `requestAdapter()` 的厂商/架构、WebGL2 是否可用、pageerror 与 console error 的前几条写进报告；
+`ci.yml` 那步随后把套件输出 `tee` 进文件、**用 `PIPESTATUS[0]` 取回退码再原样退出**（不然管道会把真实结局换成 `tee` 的 0），
+最后一步 `if: always()` + `continue-on-error: true`（它**不判任何东西**，报告发不出去也绝不把绿跑改红）用这次 run 自带的
+`GITHUB_TOKEN` 发一条 **check-run**，正文放在 `output.summary` —— 那字段**匿名可读**（今天已验）。
+下一次远端跑完，不需要任何人贴日志我就读得到根因。
+
+**本地先证这个量具自己是忠的**（对着 4191 那份构建）：
+`launch ok 153.0.8010.12 · goto load 146ms · networkidle 939ms · in flight 0 ·`
+`{"backend":"webgpu","frames":275,"poolSize":0,"stage":true,"hit":1,"canvas3d":[786,1704],"navigatorGpu":true,"gpuAdapter":["apple","metal-3"],"webgl2":true}`；
+对着死端口也跑完并退 0（它是诊断，不是判据）。
+
+**这一轮的结论形状要写清：根因尚未确定，确定的是"下一次远端跑会自己说出它是哪一条"。**
+另两格事实上的缺口也记下来：**`ci.yml` 不被仓里任何判据读着**（grep `workflows` 在 tests 下 0 命中）
+⇒ 这版 CI 的正确性只有远端那一次真实执行能判；而 YAML 本机**可校验**（`node_modules/js-yaml` 在，
+`require('js-yaml').load(...)` 通、两步 `run` 的正文再各自过 `bash -n`）—— 这修正了"这台 Mac 无法校验 workflow"
+那条旧记录（它的前提是只有 pyyaml 一条路）。

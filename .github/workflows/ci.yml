@@ -57,6 +57,12 @@ jobs:
     runs-on: ubuntu-latest
     # Eight device blocks driving a real Chromium through the whole interface; give it room.
     timeout-minutes: 30
+    permissions:
+      contents: read
+      # This job publishes its own one-screen report as a check-run: an Actions job log needs a token
+      # to read, and #159 spent three red runs without ever learning *where* the run died. The
+      # summary of a check-run is readable anonymously, so the report is the observation channel.
+      checks: write
     steps:
       - uses: actions/checkout@v4
 
@@ -81,9 +87,50 @@ jobs:
       - name: Serve the build, then drive it
         # Server and suite share one step on purpose: a background process does not survive its
         # step, and a suite without a server fails as eight red blocks instead of one message.
+        # The poll is not a fix for anything — `served-build.sh` already proves the artefact serves —
+        # it is here so "the server was not up" stops being a candidate and becomes a number.
         run: |
           node tests/smoke/serve.mjs apps/web/dist 4173 127.0.0.1 /puffly/ &
           SERVER=$!
           trap 'kill $SERVER' EXIT
-          sleep 1
-          node tests/smoke/touch-device.mjs http://127.0.0.1:4173/puffly/
+          READY=no
+          for _ in $(seq 1 40); do
+            if curl -fsS -o /dev/null http://127.0.0.1:4173/puffly/; then READY=yes; break; fi
+            sleep 0.25
+          done
+          echo "server ready=$READY after a bounded poll"
+          if [ "$READY" != yes ]; then
+            echo 'the static server never answered on 4173 — the suite would report "not run", so this says so first'
+            exit 1
+          fi
+          echo "node $(node --version) / playwright $(npx --no-install playwright --version) / browsers: $(ls "$HOME/.cache/ms-playwright" | tr '\n' ' ')"
+          node tests/smoke/ci-runtime-probe.mjs http://127.0.0.1:4173/puffly/ /tmp/device-probe.txt
+          node tests/smoke/touch-device.mjs http://127.0.0.1:4173/puffly/ | tee /tmp/device-suite.txt
+          SUITE=${PIPESTATUS[0]}
+          echo "device suite exit=$SUITE — a FAIL line above is the product; a 'cannot launch' or 'nothing usable' preamble is this runner"
+          exit "$SUITE"
+
+      - name: Publish what this runner saw
+        if: always()
+        # The suite's own verdict is the gate. A report that failed to publish must never turn a
+        # green device run red, and never hide a red one either — so this step cannot decide anything.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo "## device job report"
+            echo "node $(node --version) / playwright $(npx --no-install playwright --version 2>/dev/null)"
+            echo '### runner probe (launch, goto, networkidle, in-flight, scene handles)'
+            cat /tmp/device-probe.txt 2>/dev/null || echo '(the probe never wrote a report)'
+            echo '### suite (how far it got, then every FAIL, then the tail)'
+            grep -cE '^(ok|FAIL)' /tmp/device-suite.txt 2>/dev/null || echo 0
+            grep -E '^FAIL' /tmp/device-suite.txt 2>/dev/null | head -n 20 || true
+            tail -n 8 /tmp/device-suite.txt 2>/dev/null || true
+          } > /tmp/device-report.md
+          head -c 60000 /tmp/device-report.md | iconv -f UTF-8 -t UTF-8 -c > /tmp/device-report.cut.md ||
+            cp /tmp/device-report.md /tmp/device-report.cut.md
+          jq -Rs --arg sha '${{ github.sha }}' '{name: "Device job report", head_sha: $sha, status: "completed", conclusion: "neutral", output: {title: "What the runner saw (#159)", summary: .}}' /tmp/device-report.cut.md > /tmp/device-report.json
+          curl -sS -X POST -H "authorization: Bearer $GH_TOKEN" -H 'accept: application/vnd.github+json' \
+            --data @/tmp/device-report.json \
+            "https://api.github.com/repos/${{ github.repository }}/check-runs" | jq -r '.html_url // .message // "no response"'
