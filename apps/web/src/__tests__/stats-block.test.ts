@@ -67,7 +67,7 @@ describe('the 统计 block is a landing and a ledger (S11, S13)', () => {
     // read-out of `achievementsFor` / `reachedCount`, which are core functions over the ledger. The
     // rule stays what it was: no arithmetic and no literal digits in the template.
     const allowed =
-      /^(stats\.[a-zA-Z0-9]+|summary\.[a-zA-Z0-9.]+|sticksKept|hoursSmoked|nextRod\.at|achieved|rungs\.length|row\.(name|reached|total|goal))$/;
+      /^(stats\.[a-zA-Z0-9]+|summary\.[a-zA-Z0-9.]+|sticksKept|hoursSmoked|nextRod\.at|achieved|rungs\.length|row\.(name|value|reached|total|goal|ratio|fresh|minGust))$/;
     for (const field of fields) expect(field, `${field} is not a ledger field`).toMatch(allowed);
     expect(fields).toContain('stats.totalPuffs');
     expect(fields).toContain('stats.currentStreakDays');
@@ -78,9 +78,13 @@ describe('the 统计 block is a landing and a ledger (S11, S13)', () => {
     expect(fields).toContain('achieved');
     // And a number written as prose is the same failure in the other direction: the pass above only
     // sees what is inside `{{ }}`, so a literal baked into the markup (`/ 23`) needs its own look.
+    // Three kinds of text are not output: the interpolations, the comments that explain a row, and
+    // the attribute bindings (expressions, which the pass above already judges by name).
     const literalDigits = [
       ...statsBlock()
         .replace(/\{\{[^}]*\}\}/g, '')
+        .replace(/<!--[\s\S]*?-->/g, '')
+        .replace(/\s:?[a-zA-Z-]+="[^"]*"/g, '')
         .matchAll(/[0-9]/g),
     ].length;
     expect(literalDigits, 'a digit written into the markup instead of read off the ledger').toBe(0);
@@ -122,6 +126,15 @@ describe('the ladder says its two states, and only its two states (S13)', () => 
       [...block.matchAll(/:data-reached=/g)].length,
       'only the moments have a state the digits do not carry',
     ).toBe(1);
+    // The axis rows' state is carried by the bar, under a name of its own: `ratio` is a fraction and
+    // `data-reached` is a yes/no, so one attribute cannot honestly answer both. This is the same
+    // "one marker, one reader" rule the case above enforces — the axis rows had `data-reached` and
+    // no reader for it, and a bar reading an attribute named for something else would repeat it.
+    expect(
+      [...block.matchAll(/:data-met=/g)].length,
+      'the axis rows carry their own marker, and the moments do not',
+    ).toBe(1);
+    expect(STYLE).toMatch(/\.line\[data-met='true'\]\s+\.count/);
     // One home for the rule that decides when a row counts as just-lit, imported rather than
     // re-implemented in the row.
     expect(SHEET).toContain("import { useJustLit } from '../reveal'");

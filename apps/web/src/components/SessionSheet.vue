@@ -102,6 +102,28 @@ const rungs = computed(() =>
     stats.value.strongestGust,
   ),
 );
+
+/**
+ * The same four figures again, as one lookup, so the row can say how far into its rung the player is.
+ *
+ * Deliberately a second *read* and not a second source: `achievementsFor` is handed this object one
+ * line above, so a figure that disagreed with the ladder would be a figure this function already
+ * gave it. Writing `13` next to `0/5` is what the block used to do, and it left the player unable to
+ * tell a rung they are one puff short of from one they have not begun.
+ */
+function currentFor(axis: 'sticks' | 'puffs' | 'ash' | 'time'): number {
+  switch (axis) {
+    case 'sticks':
+      return sticksKept.value;
+    case 'puffs':
+      return stats.value.totalPuffs;
+    case 'ash':
+      return summary.value.state?.progress.ashGrams ?? 0;
+    case 'time':
+      return hoursSmoked.value;
+  }
+}
+
 // §39 asks the moment to say so by itself — 它自己亮一下, no dialog and no sentence — and the 图鉴
 // already does it with `collection.fresh`. That channel cannot be reused here: it is a field of the
 // persisted state, and giving the ladder its own "previously lit" field would be exactly the second
@@ -119,25 +141,44 @@ const fresh = useJustLit(
 // those keys rather than inventing parallel words, so the two cannot disagree about what 累计支数
 // means on the same screen. The ash axis is the odd one out — the row above counts 磕灰 (flicks),
 // this one counts grams — so it gets its own key, and neither number borrows the other's name.
-const AXES: ReadonlyArray<{ axis: 'sticks' | 'puffs' | 'ash' | 'time'; key: CopyKey }> = [
-  { axis: 'sticks', key: 'stats.sticks' },
-  { axis: 'puffs', key: 'stats.draws' },
-  { axis: 'ash', key: 'ach.axis.ash' },
-  { axis: 'time', key: 'stats.time' },
+//
+// `unit` is the eighth of §H.8's 度量单位预算: four axis words, 风力, 完成度, and the two the moment
+// rows wear. Each is a *unit name*, never a sentence — the template decides the order, so
+// `13 支` follows the numeral that way in every language (copy-tiers.test.ts is what counts them).
+const AXES: ReadonlyArray<{
+  axis: 'sticks' | 'puffs' | 'ash' | 'time';
+  key: CopyKey;
+  unit: CopyKey;
+}> = [
+  { axis: 'sticks', key: 'stats.sticks', unit: 'ach.unit.sticks' },
+  { axis: 'puffs', key: 'stats.draws', unit: 'ach.unit.puffs' },
+  { axis: 'ash', key: 'ach.axis.ash', unit: 'ach.unit.grams' },
+  { axis: 'time', key: 'stats.time', unit: 'ach.unit.minutes' },
 ];
 const ladder = computed(() =>
   AXES.map((row) => {
     const mine = rungs.value.filter((rung) => rung.achievement.axis === row.axis);
     const next = mine.find((rung) => !rung.reached) ?? mine[mine.length - 1];
+    const reached = mine.filter((rung) => rung.reached).length;
+    // The rung the player is standing in: the next one they have not met, against its own goal.
+    // That is the whole figure — 2/13 支 is two of the thirteen this step costs, so a player one
+    // puff short of a rung sees a different row from a player at zero.
+    const at = currentFor(row.axis);
+    const ratio = next?.ratio ?? 1;
     return {
       axis: row.axis,
       key: row.key,
-      reached: mine.filter((rung) => rung.reached).length,
+      unit: row.unit,
+      reached,
       total: mine.length,
+      value: Math.min(at, next?.achievement.goal ?? at),
       goal: next?.achievement.goal ?? 0,
-      // The row is a whole axis, so it lights when any rung on it lights — and the digit it prints
-      // (reached/total) is the thing that just changed, which is why the row has no per-rung id to
-      // hang the flag on.
+      /** 0..1 through the rung in hand. The one channel that survives the icons tier: no words. */
+      ratio,
+      percent: Math.round(ratio * 100),
+      // The row is a whole axis, so it lights when any rung on it lights — and the figures it prints
+      // (met/goal) are the thing that just changed, which is why the row has no per-rung id to hang
+      // the flag on.
       fresh: mine.some((rung) => fresh.value.has(rung.achievement.id)),
     };
   }),
@@ -150,15 +191,22 @@ const MOMENT_KEYS: ReadonlyArray<{ id: string; key: CopyKey }> = [
   { id: 'moment.squall', key: 'ach.moment.squall' },
   { id: 'moment.freak', key: 'ach.moment.freak' },
 ];
-// Filtered here rather than with a `v-if` beside the `v-for`: a moment is a *name*, so in the tier
-// with no words there is nothing left to say and the row is not drawn at all.
+// Two things were wrong with filtering the moments by their own name (`row.name !== null`): a
+// moment is not only a name — it has the gust figure and two states, and those survive the icons
+// tier — and the filter made the row count depend on the language. The moment *names* still drop out
+// in ∅ by themselves, one `t()` at a time.
 const momentRows = computed(() =>
-  MOMENT_KEYS.map((row) => ({
-    ...row,
-    name: copy.value.t(row.key),
-    reached: rungs.value.find((rung) => rung.achievement.id === row.id)?.reached ?? false,
-    fresh: fresh.value.has(row.id),
-  })).filter((row) => row.name !== null),
+  MOMENT_KEYS.map((row) => {
+    const rung = rungs.value.find((entry) => entry.achievement.id === row.id);
+    return {
+      ...row,
+      name: copy.value.t(row.key),
+      minGust: rung?.achievement.minGust ?? 0,
+      reached: rung?.reached ?? false,
+      ratio: rung?.ratio ?? 0,
+      fresh: fresh.value.has(row.id),
+    };
+  }),
 );
 const achieved = computed(() => reachedCount(rungs.value));
 
@@ -313,11 +361,11 @@ watch(
       </p>
     </div>
 
-    <!-- 成就 (拍板 ⑤): the same four local numbers, read as a ladder. One row per axis carries
-         digits only — how many rungs are met, and what the next one costs — so the block stays
-         complete in the icons tier, and the three moment rows below it are words by nature: they are
-         names of things that happened once. No new glyph is worn here; the marks a player reads this
-         screen by are the ones the rail and the HUD already use. -->
+    <!-- 成就 (拍板 ⑤): the same four local numbers, read as a ladder. Every figure is the core's own
+         — `achievementsFor`'s rung ratio and its goal are the whole arithmetic — and each one is
+         followed by its unit word (`ach.unit.*`). The unit vanishes in the icons tier, exactly like
+         every other label, which is why the channel that tells a met rung from a locked one is not a
+         word: see `.track` below. -->
     <div
       class="stats group"
       data-hook="achievements"
@@ -326,22 +374,48 @@ watch(
     >
       <p class="line">
         <span v-if="copy.t('ach.title') !== null" class="name">{{ copy.t('ach.title') }}</span>
-        <span class="count digits">{{ achieved }} / {{ rungs.length }}</span>
-      </p>
-      <!-- An axis row states its own completion in digits — the reached count meets the total and the
-           next goal drops out — so it carries no reached attribute, only the moment it changed. -->
-      <p v-for="row in ladder" :key="row.axis" class="line" :data-fresh="row.fresh">
-        <span v-if="copy.t(row.key) !== null" class="name">{{ copy.t(row.key) }}</span>
         <span class="count digits">
-          {{ row.reached }}/{{ row.total
-          }}<template v-if="row.reached < row.total"> · {{ row.goal }}</template>
+          <span class="cell"
+            ><span class="digits">{{ achieved }}</span> /
+            <span class="digits">{{ rungs.length }}</span></span
+          >
         </span>
       </p>
-      <!-- A moment row has no digit of its own: it is a name and a state. The number that backs all
-           three is printed once, above them, as the reading it is — the hardest gust the log holds. -->
+      <!-- One row per axis: the rung in hand as `at / goal` with its unit, the rungs already met out
+           of five, and the bar that says the same thing without a word. A full axis (5/5) prints no
+           goal — there is nothing left to count towards — and its bar is the met state. -->
+      <p
+        v-for="row in ladder"
+        :key="row.axis"
+        class="line"
+        :data-met="row.ratio >= 1 || row.reached >= row.total"
+        :data-fresh="row.fresh"
+      >
+        <span class="track" aria-hidden="true"
+          ><i :style="{ transform: `scaleX(${row.ratio})` }"></i
+        ></span>
+        <span v-if="copy.t(row.key) !== null" class="name">{{ copy.t(row.key) }}</span>
+        <span class="count digits">
+          <span class="cell"
+            ><span class="digits">{{ row.value }}</span>
+            <span v-if="copy.t(row.unit) !== null" class="unit">{{ copy.t(row.unit) }}</span></span
+          ><span class="cell"
+            ><span class="digits">{{ row.reached }}</span
+            >/{{ row.total }}</span
+          >
+        </span>
+      </p>
+      <!-- A moment is not only a name: it has the reading it is met at and two states, so the row is
+           drawn in every tier and only the name disappears. The goal comes from `minGust` on the rung
+           itself, so the three thresholds cannot drift from core's own. -->
       <p class="line">
         <span v-if="copy.t('ach.gust') !== null" class="name">{{ copy.t('ach.gust') }}</span>
-        <span class="count digits">{{ stats.strongestGust }}</span>
+        <span class="count digits">
+          <span class="digits">{{ stats.strongestGust }}</span>
+          <span v-if="copy.t('ach.unit.strength') !== null" class="unit">{{
+            copy.t('ach.unit.strength')
+          }}</span>
+        </span>
       </p>
       <p
         v-for="row in momentRows"
@@ -350,7 +424,22 @@ watch(
         :data-reached="row.reached"
         :data-fresh="row.fresh"
       >
-        <span class="name">{{ row.name }}</span>
+        <span class="track" aria-hidden="true"
+          ><i :style="{ transform: `scaleX(${row.ratio})` }"></i
+        ></span>
+        <span v-if="row.name !== null" class="name">{{ row.name }}</span>
+        <span class="count digits">
+          <span class="cell"
+            ><span class="digits">{{ row.minGust }}</span>
+            <span v-if="copy.t('ach.unit.strength') !== null" class="unit">{{
+              copy.t('ach.unit.strength')
+            }}</span></span
+          ><span
+            v-if="copy.t(row.reached ? 'ach.unit.caught' : 'ach.unit.locked') !== null"
+            class="unit"
+            >{{ copy.t(row.reached ? 'ach.unit.caught' : 'ach.unit.locked') }}</span
+          >
+        </span>
       </p>
     </div>
 
@@ -476,12 +565,85 @@ watch(
   font-variant-numeric: tabular-nums;
 }
 
-/* The ladder's two states, both read from an attribute rather than invented per row. A moment the
-   player has not drawn goes to the declared 次级色 `--ash-gray` (4.89 on the sheet floor, judged by
+/* The ladder's two states, both read from an attribute rather than invented per row. A rung the
+   player has not met goes to the declared 次级色 `--ash-gray` (4.89 on the sheet floor, judged by
    `text-contrast.test.ts`) — not to an opacity: `--smoke-gray` at 0.3 measures 1.98:1, which is the
    same trick the 图鉴 used to pull on its room names and their 差几支 digits. */
 .line.moment:not([data-reached='true']) .name {
   color: var(--ash-gray);
+}
+
+/* ------------------------------------------------------------------ the rung's progress channel
+
+   The one thing on this block that survives the tier with no words at all. Colour, fill, a mark and
+   motion all end up as something a player has to learn; a bar the length of the player's own
+   progress needs no legend in any language, and it is the same measurement §39's 力度对照图 already
+   puts under the pill. So every rung carries one, and the two states are drawn rather than named:
+
+     · met      — a full bar, filled in --ember-core, the same amber `.count.reached` above uses;
+     · locked   — a bar as long as the player's way into that rung, on a track they can see.
+
+   It is aria-hidden and carries no figure of its own: the width is the core's `ratio` and the digits
+   beside it are the core's own `at / goal`, so a screen reader hears one answer, not two. */
+.track {
+  display: block;
+  height: 3px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: color-mix(in oklab, var(--warm-gray) 32%, transparent);
+}
+
+.track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ember-core);
+  /* `scaleX` and not `width`: a percentage width would be one more number to keep in step with the
+     ratio, and the transform is the ratio itself. `transform-origin` is written out because the
+     sheets mirror under a right-to-left language (logical properties elsewhere in this file) while
+     a transform does not follow the writing direction on its own — the fill grows from the reading
+     edge in every language. */
+  transform-origin: left center;
+  transition: transform 420ms var(--ease-out);
+}
+
+:global(html[dir='rtl']) .track i {
+  transform-origin: right center;
+}
+
+/* The axis rows became two columns of two cells each, so a 393px sheet has room for the bar without
+   pushing the digits onto a second line. `auto auto` and not `repeat(2, auto)`: the first cell is
+   the rung in hand and the second is the rungs met, and the pair sits at the far edge as one unit. */
+.line:has(.track) {
+  grid-template-columns: 1fr auto 1fr;
+}
+
+/* The value that sits under the bar, and the met count, hold one reading each rather than drifting
+   apart at the sheet's own width. This is also what keeps the `.count` contract: the block's
+   scanner reads the digits out of this element. */
+.cell {
+  display: inline-block;
+  min-width: 52px;
+  text-align: end;
+}
+
+/* The unit word after a figure (`ach.unit.*`, §H.8's 度量单位预算). Words, so the icons tier drops
+   them and 13 / 0/5 stand in the same order the four rows always used; a step under the reading
+   floor only while a translation is present, because a unit that is on the glass is text. */
+.unit {
+  color: var(--smoke-gray);
+  font-size: 0.85em;
+}
+
+/* A met rung's digits go amber — the same one-line statement the break's own clock makes — and the
+   bar above them is full. Nothing here praises and nothing here locks: it says what happened.
+   Two selectors and not one: the axis rows have *progress* (`data-met`, and a bar that is full) while
+   a moment row is only ever caught or not (`data-reached`, and a bar that is 0 or 1). Giving a row
+   the attribute its reader actually means is what keeps a marker from being written with no reader
+   — the hole `stats-block.test.ts` was written after. */
+.line[data-met='true'] .count,
+.line[data-reached='true'] .count {
+  color: var(--ember-core);
 }
 
 /* And the row that just lit plays once, by itself (§39: no dialog, no sentence). The flag only ever
@@ -503,9 +665,32 @@ watch(
   }
 }
 
+/* §39's 「它自己亮一下」 is not only a fade: the rung's own bar sweeps out from the reading edge
+   when it is crossed, once, by itself. The transition above covers the ordinary case (the ledger
+   moved 40% while nobody was looking at the ladder); this is the crossing itself. Gated with the
+   fade, because §39 is a flourish and not information — everything the bar says is still on the
+   screen in the digits beside it and in the width it settles at. */
+.line[data-fresh='true'] .track i {
+  animation: rung-fill 1400ms var(--ease-out);
+}
+
+@keyframes rung-fill {
+  0% {
+    transform: scaleX(0);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .line[data-fresh='true'] {
     animation: none;
+  }
+
+  .line[data-fresh='true'] .track i {
+    animation: none;
+  }
+
+  .track i {
+    transition: none;
   }
 }
 </style>

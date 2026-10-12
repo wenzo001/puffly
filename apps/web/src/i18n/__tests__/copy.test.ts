@@ -70,9 +70,19 @@ describe('three tiers: target language → English → icons (§9)', () => {
       }
     }
     // Where a quantifier may live: the sheets a player reads a count in (the 图鉴, the 档案, the
-    // day's own numbers, 统计), a sheet that is allowed to speak in full sentences (settings), and the
-    // spoken names no eye ever reads (a11y). §9.2 binds the stage and its three chrome pieces.
-    const outside = /^(a11y|archive|shelf|reduction|settings|stats)\./;
+    // day's own numbers, 统计, and the 成就 ladder's own unit words — `metric.*` is the same kind of
+    // surface as `stats.*`: a figure inside a sheet, never a word on the stage), a sheet that is
+    // allowed to speak in full sentences (settings), and the spoken names no eye ever reads (a11y).
+    // §9.2 binds the stage and its three chrome pieces.
+    // `ach.unit.*` was added deliberately rather than by blessing a free-standing `metric.`
+    // namespace. §9.2's redline is that 中文量词 stay off the core loop (SPEC.md:174), and
+    // SPEC.md:1603 already names the exception: 量词在这页是允许的 (设计稿自己写的就是 `12 / 20 支`).
+    // The ladder is that kind of page. Scoping the words to `ach.` keeps the allowance attached to
+    // the surface it was granted for, so a future screen cannot park a quantifier in a namespace
+    // that means "anywhere". What this deliberately does NOT do is reword the Chinese to miss the
+    // matcher — SPEC.md:2481 records an author who refused that, and it would make the guard blind
+    // rather than satisfied.
+    const outside = /^(a11y|archive|ach|reduction|settings|shelf|stats)\./;
     const carrying = KEYS.filter((key) => {
       const chinese = COPY['zh-CN']?.[key] ?? '';
       return quantifiers.some((unit) => chinese.includes(unit));

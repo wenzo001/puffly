@@ -25,6 +25,7 @@ import {
 } from '@puffly/game-core';
 import type { GameStateView } from '@puffly/game-core';
 import { clamp01, mixRgb } from '@puffly/shared';
+import { BURN_END_SHARE, GRAIN, paperGrainPixels, rodBurnLineAt, tipAshShare } from './rodBurn';
 import { preferredDpr, type Puffly } from '../composables/usePuffly';
 import {
   backgroundStructure,
@@ -93,6 +94,9 @@ import {
   roundedRect,
   SCRIM,
   scrimRamp,
+  keyLightInk,
+  FILL_SHARE,
+  KEY_INTENSITY,
   softDisc,
   solidDisc,
   stadiumBar,
@@ -370,23 +374,6 @@ const room = computed(() =>
   props.state === null ? null : roomBackdrop(props.state.environment, props.state.style),
 );
 /**
- * The sky, already at the room's own exposure: `roomBackdrop` runs the palette the painted layer
- * paints with, so this file does not scale it a second time — doing that is how a night room came out
- * as bright midday.
- */
-const skyColour = computed(() => {
-  const r = room.value;
-  if (r === null) return new THREE.Color('#101010');
-  // The palette is 0–255 sRGB, and `new Color(r, g, b)` would read those as *linear* floats — a
-  // 46-turned-255 sky, which is exactly the white wash this line used to paint. Say the colour space.
-  return new THREE.Color().setRGB(
-    r.sky[0] / 255,
-    r.sky[1] / 255,
-    r.sky[2] / 255,
-    THREE.SRGBColorSpace,
-  );
-});
-/**
  * The table's own ink: everything below the edge, as the painted layer fills it — silhouette a
  * quarter of the way to black. The slab and the band cannot disagree, because this is that mix.
  */
@@ -402,11 +389,22 @@ const keyLight = computed<{
   colour: string | THREE.Color;
 }>(() => {
   const r = room.value;
-  if (r === null) return { position: [2, 3, 2], intensity: 1.4, colour: '#ffffff' };
+  if (r === null) return { position: [2, 3, 2], intensity: KEY_INTENSITY, colour: '#e8e2d8' };
+  // The room's own cast, brought up to unit luminance: see `keyLightInk`. The old line handed the
+  // sky over as it stood, so a night room's linear-0.026 sky multiplied every prop down to
+  // `rgb(1,1,1)` and the lit props read as black plates punched out of the wall.
+  const ink = keyLightInk(r.sky);
   return {
     position: [r.key.x * 3, Math.max(0.6, r.key.y * 2), 2],
-    intensity: 0.6 + r.ambient * 1.6,
-    colour: skyColour.value,
+    intensity: ink.intensity,
+    // The palette is 0–255 sRGB, and `new Color(r, g, b)` would read those as *linear* floats — a
+    // 46-turned-255 sky, which is exactly the white wash this line used to paint. Say the colour space.
+    colour: new THREE.Color().setRGB(
+      ink.rgb[0] / 255,
+      ink.rgb[1] / 255,
+      ink.rgb[2] / 255,
+      THREE.SRGBColorSpace,
+    ),
   };
 });
 
@@ -529,6 +527,27 @@ const rodMesh = shallowRef<THREE.Mesh | null>(null);
 let rodBase: Float32Array | null = null;
 let rodBuiltLength = -1;
 let rodShapeSignature = '';
+let rodMaterial: THREE.MeshStandardMaterial | null = null;
+/** The paper grain, baked in the ready handler and attached on the first frame the rod exists. */
+let paperTextureRef: THREE.DataTexture | null = null;
+/**
+ * The rod's three burning-end parts, built once in the ready handler and parented to `rigGroup` the
+ * way the ash column and the char band already are (a `THREE.Group` reaches the template as one
+ * `<primitive>`, so a reader that only has to *move* a mesh never needs a template entry).
+ *
+ * They are separate from the tube rather than new geometry inside it for one reason: the tube is
+ * rebuilt from `placeRod`'s own vertex loop whenever the rod's drawn length changes, and anything
+ * welded into it would be thrown away and rebuilt with it. These three are positioned per frame off
+ * the core's published ends, which is also what keeps them attached to the rod's *own* end when the
+ * pose moves — the floating glow this replaces was floating because it answered `points.ember`, the
+ * published anchor, rather than the rod it is supposed to be the end of.
+ */
+const burnLineMesh = shallowRef<THREE.Mesh | null>(null);
+let burnLineMaterial: THREE.MeshBasicMaterial | null = null;
+const cherryMesh = shallowRef<THREE.Mesh | null>(null);
+let cherryMaterial: THREE.MeshBasicMaterial | null = null;
+const tipAshMesh = shallowRef<THREE.Mesh | null>(null);
+let tipAshMaterial: THREE.MeshBasicMaterial | null = null;
 /** The lighter's flame: its teardrop and the blue throat under it, both additive. */
 const flameBody = shallowRef<THREE.Mesh | null>(null);
 const flameThroat = shallowRef<THREE.Mesh | null>(null);
@@ -1139,6 +1158,74 @@ function onSceneReady(context: unknown): void {
   throatMesh.visible = false;
   rigGroup.add(throatMesh);
   flameThroat.value = throatMesh;
+
+  /*
+   The rod's own burning end. Three parts, built here and moved per frame, so the tube keeps exactly
+   one owner (`placeRod`'s vertex loop) and these keep one apiece.
+
+   The `z` values are the ladder this file already uses, read from the neighbours rather than chosen:
+   the ash column stands at 0.005, the charred band at 0.0185 and the cherry's halo at 0.03. So the
+   burn line sits at 0.006 — over the stand it is drawn on, under the char the core gives it — the
+   collar at 0.0065, and the cherry's own cap nearest of the three, still under its halo.
+  */
+  const paperTexture = new THREE.DataTexture(
+    paperGrainPixels(),
+    GRAIN.columns,
+    GRAIN.rows,
+    THREE.RGBAFormat,
+  );
+  // The streaks run down the texture's *u*, which is the tube's own length axis: `CylinderGeometry`
+  // wraps u around the circumference and v along the rod, so the tile is transposed to put the
+  // grain the way the fibres go. Repeat in u only — the grain must not tile down the rod, or the
+  // same streak would appear twice on one cigarette.
+  paperTexture.wrapS = THREE.RepeatWrapping;
+  paperTexture.wrapT = THREE.ClampToEdgeWrapping;
+  paperTexture.colorSpace = THREE.SRGBColorSpace;
+  paperTexture.needsUpdate = true;
+  burnLineMaterial = new THREE.MeshBasicMaterial({
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  const burnLine = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), burnLineMaterial);
+  burnLine.name = 'rod-burn-line';
+  burnLine.frustumCulled = false;
+  burnLine.visible = false;
+  burnLine.position.set(0, 0, 0.006);
+  rigGroup.add(burnLine);
+  burnLineMesh.value = burnLine;
+  // Additive, because a lit end puts light *out*: a cherry drawn with normal blending over pale
+  // paper reads as a red sticker on the tip rather than as the tip being hot.
+  cherryMaterial = new THREE.MeshBasicMaterial({
+    map: solidDisc(64),
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const cherry = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), cherryMaterial);
+  cherry.name = 'rod-cherry';
+  cherry.frustumCulled = false;
+  cherry.visible = false;
+  cherry.position.set(0, 0, 0.007);
+  rigGroup.add(cherry);
+  cherryMesh.value = cherry;
+  tipAshMaterial = new THREE.MeshBasicMaterial({
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  const tipAsh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), tipAshMaterial);
+  tipAsh.name = 'rod-tip-ash';
+  tipAsh.frustumCulled = false;
+  tipAsh.visible = false;
+  tipAsh.position.set(0, 0, 0.0065);
+  rigGroup.add(tipAsh);
+  tipAshMesh.value = tipAsh;
+  // Which rod it is (`rodInkFor`) is decided per frame; the grain is the same sheet on both. Only the
+  // sheet is *baked* here — it is attached in `placeRod`, because the template's own material does not
+  // exist yet at this point in the scene's life. Measured: attaching here left the rod's material at
+  // `map: false` on every frame of a whole break, so the grain was paid for and never drawn.
+  paperTextureRef = paperTexture;
 
   // The sheet's surface, and one rig per line of its text. The rigs carry the four clip planes
   // from the start, so a scrolled row is cut at the panel's edge the moment it is drawn.
@@ -1909,6 +1996,12 @@ const COLUMN_Z = 0.005;
  * bows — so the waist sits where the painter puts it (`WAIST`, just behind the cherry) and the
  * ends never move. `dip` is the painter's own `thickness · DIP_SHARE · intensity`; at zero every
  * ring falls back to the straight tube, so an idle rod is the identical shape it always was.
+ *
+ * The other two ends of the same loop are what make the tube read as *paper* rather than as a
+ * machined cylinder: the mouth end crimps (a cigarette is rolled shut, so its far end is neither
+ * square nor round) and the lit end is cut back a hair so the cherry has a shoulder to sit on. Both
+ * are pure functions of the ring's own position along the rod, so they cost nothing per frame and
+ * fall out of the same rebuild the pinch already triggers.
  */
 function placeRod(state: GameStateView | null): void {
   const mesh = rodMesh.value;
@@ -1917,6 +2010,17 @@ function placeRod(state: GameStateView | null): void {
   // §2's two rods — dark while it lies on the pack, paper once it is held — set here, where this
   // frame's state actually is. A computed over the state object never fires: the core mutates it
   // in place, which is the same reason the cap's hinge is driven from here too.
+  if (rodMaterial === null && mesh.material instanceof THREE.MeshStandardMaterial) {
+    // Attached lazily rather than in the ready handler, because the template's own material does not
+    // exist yet at that point: measured, the texture came back `map: false` on the first frame of
+    // the first probe. Paper is not a mirror either — the default 0.5 metalness darkens the held
+    // paper toward grey, which is most of why the shipped rod read as a machined slab.
+    rodMaterial = mesh.material;
+    rodMaterial.map = paperTextureRef;
+    rodMaterial.metalness = 0;
+    rodMaterial.roughness = 0.92;
+    rodMaterial.needsUpdate = true;
+  }
   (mesh.material as THREE.MeshStandardMaterial).color.set(rodInkFor(state));
   const len = Math.max(1e-4, current.length);
   let geometry = mesh.geometry;
@@ -1940,22 +2044,162 @@ function placeRod(state: GameStateView | null): void {
   const thickPx = (len * ROD_THICKNESS_SHARE) / perPx;
   const dip = puff != null && puff.active ? thickPx * DIP_SHARE * clamp01(puff.intensity) : 0;
   const signature = `${lenPx.toFixed(2)}|${dip.toFixed(3)}`;
-  if (signature === rodShapeSignature) return;
-  rodShapeSignature = signature;
-  if (rodBase === null) return;
-  const array = position.array as Float32Array;
-  const halfPx = thickPx / 2;
-  for (let i = 0; i < position.count; i += 1) {
-    const bx = rodBase[i * 3] ?? 0;
-    const by = rodBase[i * 3 + 1] ?? 0;
-    const bz = rodBase[i * 3 + 2] ?? 0;
-    const give = dip <= 0 ? 0 : paperGive(lenPx, thickPx, dip, clamp01(by / len + 0.5) * lenPx);
-    const scale = give <= 0 ? 1 : Math.max(0.2, (halfPx - give) / halfPx);
-    array[i * 3] = bx * scale;
-    array[i * 3 + 1] = by;
-    array[i * 3 + 2] = bz * scale;
+  if (signature !== rodShapeSignature) {
+    rodShapeSignature = signature;
+    if (rodBase !== null) {
+      const array = position.array as Float32Array;
+      const halfPx = thickPx / 2;
+      // The mouth end's crimp: the last `BURN_END_SHARE` of the tube closes to 70 %, cosinely so the
+      // silhouette curves rather than steps. `t` runs 0 at the mouth to 1 at the lit end.
+      const crimpSpan = BURN_END_SHARE;
+      for (let i = 0; i < position.count; i += 1) {
+        const bx = rodBase[i * 3] ?? 0;
+        const by = rodBase[i * 3 + 1] ?? 0;
+        const bz = rodBase[i * 3 + 2] ?? 0;
+        const t = clamp01(by / len + 0.5);
+        const give = dip <= 0 ? 0 : paperGive(lenPx, thickPx, dip, t * lenPx);
+        const pinch = give <= 0 ? 1 : Math.max(0.2, (halfPx - give) / halfPx);
+        const mouth = t >= 1 - crimpSpan ? 1 - 0.3 * (0.5 - 0.5 * Math.cos((Math.PI * (1 - t)) / crimpSpan)) : 1;
+        const scale = pinch * mouth;
+        array[i * 3] = bx * scale;
+        array[i * 3 + 1] = by;
+        array[i * 3 + 2] = bz * scale;
+      }
+      position.needsUpdate = true;
+    }
   }
-  position.needsUpdate = true;
+  placeRodEnd(state, len);
+}
+
+/**
+ * The rod's three burning-end parts — the charred line, the lit cap and the collar of ash — placed
+ * off the *core's* own reading of the rod, never off the anchor the glow used to answer.
+ *
+ * `pose.pivot` → `pose.tip` is the rod the simulation publishes (the same pair `rodBetweenInBox`
+ * drew the tube between), and `rodRemaining` says how much of it is still paper. So the burn line is
+ * `rodBurnLineAt(rodRemaining)` of the way along that segment — one definition of burnt, the
+ * simulation's — and the cherry and the collar hang off the far end of it. `ash.ratio` is the core's
+ * own standing-column reading, which is what makes the collar grow rather than sit at a constant.
+ *
+ * Everything is measured in WORLD units, and the rod's own width is taken by mapping two points a
+ * canvas-pixel thickness apart through `toWorld` — the same conversion the positions use. Not by
+ * scaling a canvas-pixel number with `pxToWorld`: `frame.unit`/`pxOf` are canvas pixels while
+ * `pxToWorld` converts a CSS *viewport* pixel, and the two differ by the device ratio and the
+ * letterbox. Measured the hard way: the first version drew a cherry 72 world units across on a stage
+ * 4 units tall, i.e. the whole screen.
+ */
+function placeRodEnd(state: GameStateView | null, len: number): void {
+  const line = burnLineMesh.value;
+  const cherry = cherryMesh.value;
+  const collar = tipAshMesh.value;
+  if (line === null || cherry === null || collar === null) return;
+  const pose = state?.cigarette.pose;
+  const ember = state?.cigarette.ember;
+  if (state == null || pose == null || ember == null || !pose.visible || len <= 0) {
+    line.visible = false;
+    cherry.visible = false;
+    collar.visible = false;
+    return;
+  }
+  const total = emberPresence(ember);
+  const frame = canvasPx();
+  const pivot = frame.pxOf(pose.pivot);
+  const tip = frame.pxOf(pose.tip);
+  const spanPx = Math.hypot(tip.x - pivot.x, tip.y - pivot.y);
+  if (spanPx <= 1) {
+    line.visible = false;
+    cherry.visible = false;
+    collar.visible = false;
+    return;
+  }
+  const perp = { x: -(tip.y - pivot.y) / spanPx, y: (tip.x - pivot.x) / spanPx };
+  const toWorld = frame.toWorld;
+  const axisA = toWorld(pivot);
+  const axisB = toWorld(tip);
+  const spanWorld = Math.hypot(axisB[0] - axisA[0], axisB[1] - axisA[1]) || 1e-6;
+  const axis = {
+    x: (axisB[0] - axisA[0]) / spanWorld,
+    y: (axisB[1] - axisA[1]) / spanWorld,
+  };
+  // Across vs along: a canvas-pixel step perpendicular to the rod, mapped, is the rod's drawn width
+  // in world units. It is taken rather than derived, because the stage stretches x and y by different
+  // scales and the rod is a diagonal — the same reason `placeColumn` lays its band out in pixels.
+  const halfPx = pose.thickness * frame.unit * 0.5;
+  const midPx = { x: (pivot.x + tip.x) / 2, y: (pivot.y + tip.y) / 2 };
+  const edgeA = toWorld({ x: midPx.x + perp.x * halfPx, y: midPx.y + perp.y * halfPx });
+  const edgeB = toWorld({ x: midPx.x - perp.x * halfPx, y: midPx.y - perp.y * halfPx });
+  const acrossWorld = Math.hypot(edgeA[0] - edgeB[0], edgeA[1] - edgeB[1]) || 1e-6;
+  /**
+   * A point on the rod, in world units: `t` is 0 at the mouth and 1 at the lit tip, which is the
+   * same parametrisation `rodBurnLineAt` answers in — so "the burn line is at t" and "the mouth is at
+   * 0" are one statement rather than two.
+   */
+  const pointAt = (t: number): readonly [number, number, number] => [
+    axisA[0] + axis.x * spanWorld * t,
+    axisA[1] + axis.y * spanWorld * t,
+    0,
+  ];
+  const lit = total > 0.02;
+  const hot = cherryHot(ember.temperature);
+
+  // The charred line: a band across the rod at the front the burn has reached. Its colour is the
+  // charcoal the painter's own ramp starts on, mixed toward the cherry's band by the ember's heat —
+  // so the line and the light it answers come from one palette rather than two. Drawn only while
+  // there is a cherry: a line where nothing is burning is the same lie as a glow with no rod.
+  line.visible = lit;
+  if (lit) {
+    const front = rodBurnLineAt(state.cigarette.rodRemaining);
+    const charred = mixRgb([24, 18, 16], hot, 0.12 * total);
+    burnLineMaterial?.color.setRGB(
+      charred[0] / 255,
+      charred[1] / 255,
+      charred[2] / 255,
+      THREE.SRGBColorSpace,
+    );
+    if (burnLineMaterial !== null) burnLineMaterial.opacity = clamp01(0.9 * total);
+    // A quad lying across the rod: its own x is the rod's width, its y is the band's thickness along
+    // the rod, taken as a share of the rod's own so it never becomes a second segment.
+    line.position.set(pointAt(front)[0], pointAt(front)[1], 0.006);
+    line.rotation.set(0, 0, Math.atan2(axis.y, axis.x));
+    line.scale.set(acrossWorld, Math.max(1e-4, acrossWorld * 0.22), 1);
+  }
+
+  // The lit cap: it sits *on* the rod's own end, pulled a little inside the tip so the tube's own
+  // silhouette still shows past it — a cap, not a bubble floating off the end. Sized from the core's
+  // `glowRadius`, which is a stage-unit fraction and already carries the flare a fresh draw puts on
+  // it, and floored at the rod's own width so a cold ember still has a body.
+  cherry.visible = lit;
+  if (lit) {
+    const inset = acrossWorld * 0.55;
+    const cap = pointAt(1);
+    cherry.position.set(cap[0] - axis.x * inset, cap[1] - axis.y * inset, 0.007);
+    const radius = Math.max(acrossWorld * 0.5, ember.glowRadius * spanWorld * 0.34 * (1 + ember.flare * 0.5));
+    cherry.scale.set(radius * 2, radius * 2, 1);
+    cherryMaterial?.color.setRGB(hot[0] / 255, hot[1] / 255, hot[2] / 255, THREE.SRGBColorSpace);
+    if (cherryMaterial !== null) cherryMaterial.opacity = clamp01(0.8 * total);
+  }
+
+  // The collar: the ash the core says has accumulated at the tip, standing at the rod's very end so
+  // the rod is visibly holding it. `ash.ratio` is the core's own reading of the standing column, laid
+  // along the rod so it reads as that column's base rather than as a disc stuck on the side.
+  const collarShare = tipAshShare(state.cigarette.ash.ratio, total);
+  collar.visible = collarShare > 0.01;
+  if (collar.visible) {
+    const end = pointAt(1);
+    const long = acrossWorld * collarShare;
+    const wide = acrossWorld * (0.7 + collarShare * 0.5);
+    collar.position.set(end[0], end[1], 0.0065);
+    collar.rotation.set(0, 0, Math.atan2(axis.y, axis.x));
+    collar.scale.set(long, wide, 1);
+    const ashInk = mixRgb(state.style.cigarette.ash, [255, 255, 255], 0.15 * total);
+    tipAshMaterial?.color.setRGB(
+      ashInk[0] / 255,
+      ashInk[1] / 255,
+      ashInk[2] / 255,
+      THREE.SRGBColorSpace,
+    );
+    if (tipAshMaterial !== null) tipAshMaterial.opacity = clamp01(0.95 * Math.max(total, 0.35));
+  }
 }
 
 /**
@@ -4128,7 +4372,7 @@ function placeMouth(state: GameStateView | null): void {
       :intensity="keyLight.intensity"
       :color="keyLight.colour"
     />
-    <TresAmbientLight :intensity="0.35" />
+    <TresAmbientLight :intensity="FILL_SHARE" />
 
     <!-- The vignette: the room's corners, before anything stands in them. Built at `ready` — see
          the note where it is made — so it arrives one tick late, via this v-if. It stays outside the

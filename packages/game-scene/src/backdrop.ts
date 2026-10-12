@@ -120,19 +120,6 @@ export function geometryFor(state: GameStateView): Geometry {
 
 export type FeatureTone = 'ink' | 'soft' | 'edge' | 'glow' | 'warm';
 
-export function featureToneColours(
-  silhouette: Rgb,
-  horizon: Rgb,
-): Record<FeatureTone, { rgb: Rgb; alpha: number }> {
-  return {
-    ink: { rgb: mixRgb(silhouette, [0, 0, 0], 0.45), alpha: 0.86 },
-    soft: { rgb: mixRgb(silhouette, [0, 0, 0], 0.3), alpha: 0.6 },
-    edge: { rgb: mixRgb(silhouette, horizon, 0.55), alpha: 0.45 },
-    glow: { rgb: mixRgb(silhouette, [226, 232, 244], 0.62), alpha: 0.5 },
-    warm: { rgb: mixRgb(silhouette, [255, 186, 104], 0.68), alpha: 0.55 },
-  };
-}
-
 /** The room's wall: horizon and silhouette, half and half. */
 export function interiorWall(horizon: Rgb, silhouette: Rgb): Rgb {
   return mixRgb(horizon, silhouette, 0.5);
@@ -143,10 +130,171 @@ export function interiorNosing(horizon: Rgb): Rgb {
   return mixRgb(horizon, [255, 255, 255], 0.12);
 }
 
+/**
+ * How far a wall mark is held off the wall's own luminance, as a WCAG-style ratio of the lighter to
+ * the darker. 1.25 is the floor every tone mixed from a room's own palette is built to clear.
+ *
+ * Two tones violated it, by the same mistake: a mix *made of* the wall cannot be *distinguishable
+ * from* the wall.
+ *
+ * `detailTone`'s lit window mixed the silhouette half way to the horizon — and the wall is
+ * `mixRgb(horizon, silhouette, 0.5)`, the identical colour. Measured 2026-10-12 across every room in
+ * `ENVIRONMENTS`: 21 of 21 at ratio 1.000, so the one wall mark meant to be the brightest thing on
+ * the wall could never be seen. The furniture's `ink` mixed the silhouette 45 % toward black, which
+ * is a real push but not enough of one in a room whose silhouette is already near-black: `night-city`
+ * 1.223, `neon-street` 1.249, `late-night-desk` 1.193 — all under the floor.
+ *
+ * `horizon` is also the wrong place to push a lit window *to*: the wall is already half the horizon,
+ * so the furthest a horizon mix can ever reach is 1.14 in `quiet-room` — short of the floor in 10 of
+ * the 21 rooms. Light is what a lit window is made of, so that is what it is mixed toward.
+ */
+export const DETAIL_MIN_RATIO = 1.25;
+
+/** The colour a lit window is pushed toward: light, not another wall tone. */
+const WINDOW_LIGHT: Rgb = [226, 232, 244];
+
+/** WCAG's contrast ratio between two colours, on their relative luminances. 1.0 means identical. */
+export function luminanceRatio(a: Rgb, b: Rgb): number {
+  const la = relativeLuminance(a);
+  const lb = relativeLuminance(b);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+
+function relativeLuminance(rgb: Rgb): number {
+  const channel = (v: number): number => {
+    const s = v / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(rgb[0]) + 0.7152 * channel(rgb[1]) + 0.0722 * channel(rgb[2]);
+}
+
+/**
+ * Push `from` toward `toward` until it clears `DETAIL_MIN_RATIO` against `wall`, starting at `t`.
+ *
+ * One rule and two callers (`detailTone` and the furniture's `ink`), because the failure was one
+ * failure: a colour mixed from the room's palette landing on the room's own wall. Written once so a
+ * third caller cannot invent a third behaviour.
+ */
+function pushedToClear(wall: Rgb, from: Rgb, toward: Rgb, start: number): Rgb {
+  let t = start;
+  for (let step = 0; step < 64; step += 1) {
+    const candidate = mixRgb(from, toward, t);
+    if (luminanceRatio(wall, candidate) >= DETAIL_MIN_RATIO) return candidate;
+    if (t >= 1) break;
+    t = Math.min(1, t + 0.02);
+  }
+  // Nothing left to push toward: the room's palette is flat enough that no mix of it clears the
+  // floor. The mark still has to be *something*, so it takes the extreme the push reached.
+  return mixRgb(from, toward, 1);
+}
+
+/**
+ * A tone the room's furniture is drawn in, held off the wall it stands against.
+ *
+ * `ink` mixed the silhouette 45 % toward black, which is a darker mark — but in a room whose
+ * silhouette is nearly black already, 45 % of not much is still the wall. A shape drawn in a colour
+ * the room does not have reads as a hole rather than as an object, and the furniture the design
+ * names is the furniture a player is meant to recognise: cubicle doors, an elevator, a wall of
+ * screens.
+ */
+export function featureToneColours(
+  silhouette: Rgb,
+  horizon: Rgb,
+): Record<FeatureTone, { rgb: Rgb; alpha: number }> {
+  const wall = interiorWall(horizon, silhouette);
+  return {
+    ink: { rgb: pushedToClear(wall, silhouette, [0, 0, 0], 0.45), alpha: 0.86 },
+    soft: { rgb: mixRgb(silhouette, [0, 0, 0], 0.3), alpha: 0.6 },
+    edge: { rgb: mixRgb(silhouette, horizon, 0.55), alpha: 0.45 },
+    glow: { rgb: mixRgb(silhouette, [226, 232, 244], 0.62), alpha: 0.5 },
+    warm: { rgb: mixRgb(silhouette, [255, 186, 104], 0.68), alpha: 0.55 },
+  };
+}
+
 /** The seeded clutter's tone, by its kind (kind 2 is the lit window). */
 export function detailTone(silhouette: Rgb, horizon: Rgb, kind: number): Rgb {
-  return mixRgb(silhouette, horizon, kind === 2 ? 0.5 : 0.22);
+  const wall = interiorWall(horizon, silhouette);
+  // Kind 2 is the lit window: the one mark that gives light back, so it is pushed toward light; the
+  // rest are marks the room's own light made, so they are pushed toward black. A push in the wrong
+  // direction is the same bug wearing the other sign.
+  return kind === 2
+    ? pushedToClear(wall, silhouette, WINDOW_LIGHT, 0.5)
+    : pushedToClear(wall, silhouette, [0, 0, 0], 0.22);
 }
+
+/**
+ * The room's own sky as the scene's key light, normalised to unit luminance.
+ *
+ * The backdrop is an *already-exposed* picture — `skyPalette` multiplied the room's palette by its
+ * exposure before any of it reached a material — which is why every backdrop material is unlit
+ * (`MeshBasicMaterial`). The props cannot be: a lighter and a pack are solids and need a shaded
+ * face, so they are `MeshStandardMaterial` and they answer to the scene's lights. The two halves
+ * have to agree on one exposure or the props fall out of the picture, and they did not.
+ *
+ * The key light was the room's sky *as it stood*, colour and all, and the sky of a night room is
+ * linear ≈0.026. `MeshStandardMaterial` multiplies the light's colour into the result per channel,
+ * so a light that dark delivers almost no energy: the pack's `#191612` ink rendered `rgb(1,1,1)` at
+ * every N·L while the wall behind it stayed `rgb(44,42,42)`. Measured on the shipped build
+ * (2026-10-12) with `tests/smoke/scan-black-boxes.mjs`: the lighter and the pack were the only two
+ * axis-aligned solid rectangles in the frame, both at fill 1.0 and 13–29× darker than the wall
+ * around them. All 21 rooms did it; the least bad was `mountain` at 13.3×.
+ *
+ * Normalising keeps what was right — the light still carries the room's own cast, so a warm room
+ * lights its props warm and a cool one cools them — and drops only the accidental part, which was
+ * that a room's *darkness* also divided its own props down to nothing. A dark room is dark because
+ * of its palette, and its palette is already in the backdrop; it must not also be a power cut.
+ *
+ * WHAT THIS DOES NOT FIX, measured 2026-10-12 so nobody mistakes the repair for the cure. It moves
+ * the pack from `rgb(2,2,1)` to `rgb(3,2,2)` on the served build — real, and nowhere near enough.
+ * The reason is arithmetic, not tuning: the pack's ink `#191612` is linear 0.0097, so reaching the
+ * wall's own `rgb(44,42,42)` needs the key to deliver 14–23× a unit-intensity white light, and
+ * merely reaching the scanner's `rgb(26)` floor needs 4.4–9.2×. Measured across that range:
+ *
+ *   key ×1  pack 15,12,9    rod 174,166,155      key ×5  rod 255,242,225  <- rod starts clipping
+ *   key ×5  pack 28,23,19   rod 255,242,225      key ×9  pack 36,31,26    <- pack clears 26
+ *
+ * There is no intensity that clears the pack without blowing out the rod `#f0e8da` and the chimney
+ * `#6d6259`, which share this light — at ×9 the rod is pure white. So the lever a legible prop needs
+ * is its own albedo (`PROP_INK`), not the light; this function is the prerequisite that makes such a
+ * change behave the same in every room, and it is kept because it is correct on its own terms.
+ */
+export function keyLightInk(sky: Rgb): { rgb: Rgb; intensity: number } {
+  // Normalise in LINEAR space, where luminance is what multiplies: scale so the sky's own linear
+  // triple has luminance exactly 1, then re-encode. Doing this after the sRGB transfer (the `sqrt`
+  // this replaces) only half-corrected — it held the *encoded* value rather than the luminance, so
+  // the delivered energy still spread 2.8× across the deck, bright rooms getting more light.
+  const key = sky.map(srgbToLinearChannel);
+  const luminance = Math.max(1e-4, 0.2126 * key[0]! + 0.7152 * key[1]! + 0.0722 * key[2]!);
+  const scale = 1 / luminance;
+  const lift = (value: number): number => value * scale;
+  return {
+    // No clamp: a sky whose luminance is 1 or more cannot occur (the brightest content palette is
+    // `mountain` at 0.13), and clamping would silently reintroduce the room-dependence this exists
+    // to remove. If one ever did, `scale` would simply under-drive it — which is visible, not silent.
+    rgb: [lift(key[0]!), lift(key[1]!), lift(key[2]!)].map(linearToSrgbChannel) as unknown as Rgb,
+    intensity: KEY_INTENSITY,
+  };
+}
+
+function srgbToLinearChannel(v: number): number {
+  const s = v / 255;
+  return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+}
+
+function linearToSrgbChannel(v: number): number {
+  const c = v <= 0.0031308 ? v * 12.92 : 1.055 * v ** (1 / 2.4) - 0.055;
+  return Math.max(0, Math.min(255, c * 255));
+}
+
+/**
+ * How much of the normalised key reaches a surface facing it. With `FILL_SHARE` the two add to one,
+ * which is what puts a prop at its own ink rather than at some multiple of it: the backdrop is the
+ * exposed picture, so the props must render at the ink the design drew, not brighter or darker.
+ */
+export const KEY_INTENSITY = 0.65;
+
+/** The share of the room's light that arrives from everywhere, so no prop is lit on one face only. */
+export const FILL_SHARE = 0.35;
 
 /** One rectangle of furniture, in canvas fractions, in one of the five named tones. */
 export interface FeatureBox {

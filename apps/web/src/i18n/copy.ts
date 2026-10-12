@@ -270,6 +270,21 @@ export const EN = {
   'archive.disclaimer': 'name and tier only: no mark, no packaging, no comparison, no advice',
   'archive.unitMin': 'min',
   'archive.unitTemp': '°C',
+
+  // The achievement ladder's own unit words. Eight, and no others: the ladder's test counts them, so
+  // a ninth is a red test rather than a new word. They live under `ach.` because the ladder *is* the
+  // counts sheet — SPEC.md:174 keeps 中文量词 off the core loop (首页那一行、pill、rail) and
+  // SPEC.md:1603 allows them where a count is what the player came to read. Naming them under the
+  // ladder rather than under a free-standing `metric.` namespace is what keeps that allowance from
+  // becoming a place any future screen could park a quantifier the rule was written to prevent.
+  'ach.unit.sticks': 'sticks',
+  'ach.unit.puffs': 'draws',
+  'ach.unit.grams': 'g',
+  'ach.unit.minutes': 'min',
+  'ach.unit.strength': 'strength',
+  'ach.unit.ratio': 'complete',
+  'ach.unit.caught': 'drawn',
+  'ach.unit.locked': 'not yet',
 } as const;
 
 export type CopyKey = keyof typeof EN;
@@ -489,6 +504,15 @@ const ZH: Table = {
   'archive.disclaimer': '只写品牌名与品类定位：不画商标、不还原包装、不做价格对比与推荐',
   'archive.unitMin': '分钟',
   'archive.unitTemp': '°C',
+
+  'ach.unit.sticks': '支',
+  'ach.unit.puffs': '口',
+  'ach.unit.grams': '克',
+  'ach.unit.minutes': '分钟',
+  'ach.unit.strength': '风力',
+  'ach.unit.ratio': '完成度',
+  'ach.unit.caught': '抽到过',
+  'ach.unit.locked': '还没有',
 };
 
 /**
