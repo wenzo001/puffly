@@ -14,6 +14,7 @@
  * all three Demo numbers and the tray's own rim consistent — that is what the last check proves.
  */
 
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { ASH_PILE, PROP_INK, TRAY_FLATTEN, ashPileMetrics } from '../props';
 
@@ -60,5 +61,56 @@ describe('the tray’s ash pile (§2 S5)', () => {
     // lighter: a gradient over a flat-shaded band becomes its two ends, never a third colour.
     expect(PROP_INK.ashPile).toBe('#4a453e');
     expect(PROP_INK.ashPileDeep).toBe('#2a2621');
+  });
+});
+
+/**
+ * The half the arithmetic above cannot see: that the scene *applies* it, with the sign that puts the
+ * pile in the tray rather than above it.
+ *
+ * This gap was real and cost a session. Every check above reads `ashPileMetrics`, which is correct —
+ * `dy` is negative (the Demo's 80 px is *down* its tray, and world y grows up) — while the only
+ * production caller is `placePile` in `SceneStage.vue`, a `.vue` file no unit test can call. Live
+ * measurement on 2026-10-13 (`tests/smoke/probe-tray.mjs`, after knocking ash in so the §"grams > 0"
+ * gate is open) read the placed mesh at world `[0.4336, -0.8627, 0.0332]` against the tray's
+ * `[0.4336, -0.78, 0]`: `dx = 0.0000`, `dy = -0.0827` — centred, and *below* the tray's centre,
+ * which is the near lip the Demo draws into. These lines freeze that reading.
+ *
+ * What this can and cannot prove, stated the way `plume-layers.test.ts` states it: it proves the one
+ * production call site adds `metrics.dy` (rather than subtracting it, or dropping it), so the mound
+ * cannot silently flip to float above the bowl. It does not prove the pixels look like ash — that is
+ * what the probe above is for, and its capture is only evidence when the pile's gate is open.
+ */
+describe('the scene puts the pile in the tray, not above it (§2 S5 wiring)', () => {
+  const scene = readFileSync(
+    new URL('../../../../apps/web/src/components/SceneStage.vue', import.meta.url),
+    'utf8',
+  );
+
+  it('places the pile from the tray anchor, adding the metrics’ own drop', () => {
+    const place = /function placePile[\s\S]*?\n}/.exec(scene);
+    expect(place, 'the scene no longer places the tray’s pile').not.toBeNull();
+    const body = place?.[0] ?? '';
+    // The anchor is the tray's, and the drop is added — `metrics.dy` is already negative, so
+    // `+ metrics.dy * cos(rock)` is what puts the mound in the near lip. A `-` here is the bug this
+    // describe exists for.
+    expect(body).toContain("at('ashtray')");
+    expect(body).toMatch(/anchor\[1\] \+ metrics\.dy \* Math\.cos\(rock\)/);
+    // And the gate: an empty tray draws nothing, because the mound is the gram figure's picture.
+    expect(body).toContain('ashtray.grams');
+  });
+
+  it('gives the pile the tray’s own rock, so it moves with the bowl it lies in', () => {
+    const place = /function placePile[\s\S]*?\n}/.exec(scene)?.[0] ?? '';
+    expect(place).toContain('trayRock(trayFeedback');
+    // The offset is turned by the same angle at both ends, or the mound would slide out of the tray
+    // as it rocks rather than ride it.
+    expect(place).toMatch(/anchor\[0\] - metrics\.dy \* Math\.sin\(rock\)/);
+  });
+
+  it('draws the pile in front of the tray’s own face', () => {
+    const place = /function placePile[\s\S]*?\n}/.exec(scene)?.[0] ?? '';
+    // The disc is a cylinder `trayRadius * 0.28` deep, so the camera-side cap is at 0.14.
+    expect(place).toMatch(/anchor\[2\] \+ trayRadius\.value \* 0\.14/);
   });
 });
