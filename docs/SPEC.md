@@ -7300,3 +7300,49 @@ origin"），另外两条保持绿；改回来 4/4 绿。另有一条钉住「�
 所以那三个顶层 chrome 根才是要读的东西。已在探针注释里写明。
 
 npx vitest run 137 files / 1151 tests green（+1）；typecheck clean；eslint clean。
+
+### 同一根烟有两套画法，窗一宽它就变成一块板子：桌面那根离它自己的火头 2.49 个世界单位（2026-10-13）
+
+审计 #1 说过"rod is a flat untextured slab"，说的是**材质**；这一轮量到的是**几何**，是另一件事，
+而且更严重 —— 它只在**非竖屏**上出现，所以审计（只拍了竖屏居中的截图）一次都没碰上。
+
+**量法**：一个新探针读场景图里 `rod` 这张 mesh 的世界矩阵、和 `rod-cherry` 的世界坐标，
+在四个出货形状上各点一根真烟：
+
+| 形状 | 烟管长（世界单位） | 烟管末端 → 它自己的火头 |
+| --- | --- | --- |
+| 手机竖屏 393×852 | 1.077 | 0.850 |
+| 手机横屏 844×390 | 2.122 | 0.641 |
+| **桌面 1280×800** | 1.678 | **2.493** |
+| 宽屏 1680×900 | 2.045 | 0.042 |
+
+⇒ 桌面上火头离它自己那根烟的末端 **2.49** 个世界单位 —— **比这根烟本身还长**；宽屏上两者只差 0.04。
+横屏上烟管 2.12 长、`rotZ ≈ -0.885`（51°），就是眼睛读到的那块"像台面一样宽的板子"。
+
+**机理（离线复算 + 浏览器实测，两条路同一个数）**：`canvasToWorld` 把舞台分数映到世界用
+`stageWidth = WORLD_HEIGHT × (box.w/box.h) × viewportAspect`，但 **y 永远是 `WORLD_HEIGHT`**；
+`rodBetweenInBox` 拿 `hypot(Δx, Δy)` 量这根烟 ⇒ **x 随视口宽高比缩放，y 不缩放**，
+于是烟长跟着窗口变宽。同样两个分数、三个形状：
+
+    portrait   0.891  (aspect 0.461)
+    landscape  3.076  (aspect 2.164)  ← 竖屏的 3.4 倍
+    desktop    2.527  (aspect 1.600)
+
+**而核心是对的**：`refreshPose`（`systems/pose.ts`）算
+`pose.rodLength = CIGARETTE_LENGTH × clamp01(rodRemaining)`，**舞台单位、与视口无关**，
+并且又多发布了两次 —— `readouts.rodMm`（从内容自己的 `lengthMm`，70–100 mm，`readouts.test.ts`
+与 `ash-mass.test.ts` 钉住）。**这两个在壳里都没有读者**，和烟灰堆当年
+（`PROP_INK.ashPile` 没人消费）、`data-reached` 是同一个形状：
+**纯粹层把事实造好了，对面没人读**。
+
+**这一轮没有动产品代码**（修法是让烟管的端点从核心的 `pose.pivot → pose.tip` 起算，
+而不是从两个画幅分数起算 —— 那是一次要连起来看的重排，不是一分钟的活）。
+留下的是判据 `apps/web/src/__tests__/rod-agreement.test.ts`（4 条），钉的是**契约**而不是症状：
+核心是烟长唯一的主人、烧端已经挂在核心的 pose 上、烟管只经过一个转换点。
+
+**判据自己也差点是装饰**（记下来，因为这是本仓反复强调的那类错）：
+第一版写 `/pose\.rodLength\s*=\s*rod/`，变异测试把那一行改成 `rod * (aspect ?? 1)` 之后
+**一条都没红** —— 正则匹配的是"有这行"，不是"右边只有 rod"。改成"取整个右端、必须等于 `rod`"之后
+同一次变异**恰好红那一条**。⇒ **凡是不跑变异测试的判据，都不能假定它拦得住东西。**
+
+npx vitest run 138 files / 1155 tests green（+4）；typecheck clean；eslint clean。
