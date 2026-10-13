@@ -15,10 +15,9 @@
  *   so the ramp reads as depth and never as a second wall.
  */
 import { describe, expect, it } from 'vitest';
-import { ENVIRONMENTS } from '@puffly/game-content';
+import { DEFAULT_CONTENT, ENVIRONMENTS } from '@puffly/game-content';
 import { backgroundStructure, tableSurfaceRgb } from '../backdrop';
 import { harness } from '../../../game-core/src/__tests__/harness';
-import { DEFAULT_CONTENT, ENVIRONMENTS } from '@puffly/game-content';
 import { interiorEdgeInk } from '../room';
 
 /** A phone in portrait, the composition the audit measured. */

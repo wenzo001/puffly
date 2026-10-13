@@ -51,6 +51,8 @@ export {
   SCRIM,
   scrimRamp,
   softDisc,
+  softPlumeDisc,
+  PLUME_DISC_POWER,
   solidDisc,
   stadiumBar,
 } from './sprite';

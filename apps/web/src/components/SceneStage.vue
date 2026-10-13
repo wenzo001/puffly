@@ -98,6 +98,7 @@ import {
   FILL_SHARE,
   KEY_INTENSITY,
   softDisc,
+  softPlumeDisc,
   solidDisc,
   stadiumBar,
   stageUnitToWorld,
@@ -613,7 +614,12 @@ function onSceneReady(context: unknown): void {
   const cloud = new THREE.InstancedMesh(
     new THREE.PlaneGeometry(1, 1),
     new THREE.MeshBasicMaterial({
-      map: softDisc(64),
+      // The plume's own falloff, not the shared 2.2 the sparks and the pools use: a puff's centre
+      // alpha is authored low, so at `softDisc`'s steeper shoulder only ~11% of each drawn radius
+      // clears a normal visibility threshold and neighbouring puffs leave dark air between their
+      // cores. `PLUME_DISC_POWER` widens the shoulder without moving the centre (which is what the
+      // peak-to-room contrast hangs on) or the rim. Measured in `sprite.ts`.
+      map: softPlumeDisc(64),
       transparent: true,
       // The puff's alpha rides its instance colour (an instanced cloud has no per-instance
       // opacity), which is only a fade under additive blending. Under the default source-over a

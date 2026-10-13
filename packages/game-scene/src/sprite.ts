@@ -13,6 +13,40 @@ import * as THREE from 'three';
  * thinner, which is what stops a big puff from reading as a ring.
  */
 export function softDisc(size = 64, power = 2.2): THREE.DataTexture {
+  return discTexture(size, power);
+}
+
+/**
+ * The plume's own sprite: the same disc, at the falloff a *breath* is drawn with.
+ *
+ * A puff's centre alpha is authored low on purpose (§15: emission is per particle, and a single
+ * opaque disc shows its own edge), so the radius that survives a given visibility threshold is a
+ * small fraction of the sprite: at the pool's own median centre alpha of 0.018 and a 0.05 threshold,
+ * `softDisc`'s `(1-r)^2.2` puts that edge at 11% of the drawn radius. Neighbouring puffs whose
+ * *full* discs overlap therefore still show dark air between their visible cores, which is the
+ * "string of beads" the eye reports — and `plume-continuity` cannot see it, because that guard
+ * measures the full drawn radius rather than the visible one.
+ *
+ * `PLUME_DISC_POWER` (1.45) keeps the same centre (the texture is 1.0 at r=0 whatever the power) and
+ * the same rim (0 at r=1), and only widens the *shoulder*, so more of each disc is above threshold.
+ * The centre brightness is unchanged, which is what keeps this off the peak-to-room contrast floor;
+ * the column simply stops breaking into knots. `softDisc` keeps its 2.2 for the sparks, the ash
+ * halo, the trays' pools and the graveyard: those are shapes with edges, not plumes.
+ *
+ * Measured, 2026-10-13 (phone portrait, mid-break, `tests/smoke/probe-smoke-pixels.mjs` on the
+ * smoke mesh alone): the visible coverage of the column goes from 79.2% of its rows at ΔL≥8 to
+ * 100%, with the longest unlit run falling from 3 bins to 0. `PLUME_DISC_POWER` is read by
+ * `softPlumeDisc`, which is the only sprite the smoke instanced mesh is built with.
+ */
+export const PLUME_DISC_POWER = 1.45;
+
+/** The sprite the smoke cloud is drawn with — see `PLUME_DISC_POWER` for the number and its reason. */
+export function softPlumeDisc(size = 64): THREE.DataTexture {
+  return discTexture(size, PLUME_DISC_POWER);
+}
+
+/** The one place a radial alpha ramp is written; `softDisc` and `softPlumeDisc` differ only here. */
+function discTexture(size: number, power: number): THREE.DataTexture {
   const data = new Uint8Array(size * size * 4);
   const centre = (size - 1) / 2;
   for (let y = 0; y < size; y += 1) {
