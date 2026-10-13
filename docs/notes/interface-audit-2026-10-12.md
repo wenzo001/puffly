@@ -54,12 +54,32 @@ containers with no shared label. Recorded here as a polish item, **not** as a de
 round — the two readings being different facts is the design, and changing the ring's meaning would
 be a product decision, not a bug fix.
 
-### 6. The strength bar under the pill is nearly invisible
+### 6. ~~The strength bar under the pill is nearly invisible~~ — RETRACTED, wrong (2026-10-13)
 
-A 3px dark track with an orange fill at the far left. On the phone it is a hairline; on desktop it
-spans the whole 393px pill width as a 3px line. It is the readout for "how hard did you just draw",
-which S7 makes the core feedback, and it is the *least* visible element of the frame — while a
-100%-strength breath at 5/12 should read as a strong signal.
+I described this as "a 3px dark track with an orange fill at the far left ... the *least* visible
+element of the frame". Measured on the shipped build, **none of that is true**:
+
+| reading | value |
+| --- | --- |
+| bar's screen box | `342 × 12` CSS = **`684 × 24` device px** |
+| the three rects | track `342×8` `rgba(255,255,255,0.05)`; fill `290.7×8` `rgba(255,138,61,0.30)`; crest `290.7×3` `rgba(255,217,160,0.55)` |
+| fill length | **290.7 / 342 = 85%** (the draw's own strength, 85) |
+| brightest pixel in the bar's box | `L = 173.7`, `rgb(207,167,121)` — a bright cream crest, not a hairline |
+| orange pixels (`r-b > 15`) | **9312 / 16416 = 56.7% of the box** |
+
+It is a full-width orange bar with a bright crest, and it is one of the brightest things in the lower
+third of the frame. The error's likely source is the note in my own "What is *not* a defect" section:
+the pill is `opacity: 0` in the 3D tier because the scene paints it, and I read that as the bar being
+invisible — but the diagrams are **not children of `.pill`**, they are siblings inside `.cta`, and the
+scene mirrors them through `placePillInk` → `.cta svg.art`. Reading the DOM misled me exactly as that
+section warns.
+
+A real, structural reading was also taken, and it is the durable part: the rect count of `.cta
+svg.art` is **3 for 0–800 ms after release and 1 at 1000 ms** — i.e. the force bar does occupy its
+`RESTING` window (`restSettleMs = 900`) and then gives way. That transition is evidence the bar is
+live, and it needs no colour judgement.
+
+Re-measure with `tests/smoke/scan-force.mjs`.
 
 ### 7. The tray is empty and unreadable
 
@@ -267,19 +287,28 @@ by itself — but the lighting-up is the only feedback, and everything else is s
 
 ## Ordered plan
 
-**Revised after `clutter-fix` corrected the black-plate root cause.**
+**Status as of 2026-10-13.** Every defect below has now been either fixed or formally retracted, so
+this list is kept as a record of what was asked rather than as a queue.
 
-1. **The props are invisible** (task-1, `clutter-fix`) — the room's key light is as dark as the props,
-   so the pack and the lighter render at `rgb(1,1,1)`. This is the defect that reads as "broken
-   mesh", and it is the highest-priority fix. Do NOT lift `PROP_INK`; fix the light.
-   *(also carries the separate `featureToneColours` / `detailTone` palette bug)*
-2. **The rod** (task-2, `rod-craft`) — paper, burn line, lit end, ash. The object the player watches
-   for the whole break is a bare cylinder.
-3. **The achievements block** (task-3, unassigned) — render the `ratio` that is already computed,
-   give the four axis rows their units, and give the three moment rows a visible state. This is the
-   "成就" half of the brief and it is currently static text.
-4. **The table seam** — the bottom ~35% of the stage is a featureless `18,17,19` band under a 4px
-   line. (Not yet tasked.)
-5. ~~HUD `0` while the break reads 100%~~ — **retracted**, they are different facts.
+1. **The props are invisible** — **landed** (`efc4263`): `keyLightInk` normalises the sky luminance
+   in linear space and `KEY_INTENSITY`/`FILL_SHARE` split the key and fill. Also carries the separate
+   `featureToneColours` / `detailTone` palette bug, pinned by `furniture-visibility.test.ts`.
+   `PROP_INK` was **not** lifted, as required.
+2. **The rod** — **landed** (`efc4263`): paper grain, paper-white body, burn line, lit cherry, tip
+   ash, and the mouth crimp (`rodMouthShare`).
+3. **The achievements block** — **landed**: the `ratio` is rendered, the four axis rows carry units
+   and a bar, and the three moment rows have a visible state (`data-met`, plus the `∅` tier's
+   `scaleX`). The quantifier redline (SPEC.md:174) was honoured by namespacing, not dodged.
+4. **The table seam** — **landed** (`028ee0e`): a depth ramp quad
+   (`tableSurfaceRgb`) gives the band a surface, pinned by `table-ramp.test.ts`.
+5. ~~HUD `0` while the break reads 100%~~ — **retracted**: they are different facts.
+6. ~~The strength bar is nearly invisible~~ — **retracted 2026-10-13**: measured `684×24` device px,
+   an 85%-long fill and a crest at `L=173.7`. See §6.
+7. **The plume's beaded rope** — **landed** (`67bf380`): the sprite's shoulder, not the layer alphas.
+   The old guard measured the *drawn* radius; the new one measures the *visible* radius.
+8. **The tray's ash pile** — **checked, no defect found** (2026-10-13): placement, gating and scale
+   all correct; a wiring guard was added where none existed. See the SPEC's own section.
+9. **Still open, both design-orientation calls rather than bugs:** the tray rim is drawn far-side
+   only, and the desktop desk column does not read as the same product as the scene.
 
 
