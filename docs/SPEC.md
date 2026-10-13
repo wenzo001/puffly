@@ -7346,3 +7346,42 @@ npx vitest run 137 files / 1151 tests green（+1）；typecheck clean；eslint c
 同一次变异**恰好红那一条**。⇒ **凡是不跑变异测试的判据，都不能假定它拦得住东西。**
 
 npx vitest run 138 files / 1155 tests green（+4）；typecheck clean；eslint clean。
+
+### 试着修那根烟，修到一半撤销了：根因比"锚点长宽比"深一层（2026-10-13）
+
+上一格把"管长随视口变"定住了。这一格照着它去修，**改了三版、越改越坏，最后整笔撤销**。
+过程比结论值钱，所以三段都记下来。
+
+**第一版：长度取核心的 `pose.rodLength`，换算用 `unitWorld`。**
+实测 `tubeLen 0.843 / 1.360 / 1.360 / 1.360`——比改前的 1.042/2.523/1.534/1.426 收敛了，
+但**没有归一**，spread 还有 39.5%。查下来 `unitWorld`（`stageUnitToWorld`）本身就是视口相关的：
+它的定义是渲染器的像素单位 `min(stageWidthPx/0.75, stageHeightPx)`，
+**舞台一宽它就在 `WORLD_HEIGHT` 上饱和** —— 393×852 上是 3.075，844×390 和 1280×800 上都是 4.000。
+⇒ 拿它换算一个"已经是舞台单位"的量，等于又叠了一层视口相关的缩放。
+（判据性的事实：`stage.ts` 的注释自己写着"Sizes use the renderer's own rule; positions keep using the
+box" —— 烟管的长短是**位置类**量，不是 sprite 尺寸。）
+
+**第二版：把 `pose.pivot → pose.tip` 映射之后**再**按 `0.34 × WORLD_HEIGHT / published` 放大。
+实测更坏：管口到火头 1.75 / 1.92 / 1.77 / 2.44，而管长只有 1.38 —— 火头离两个管口都比管长还远。
+离线复算发现**这一版重复换算**：`pose.tip` 本来就是 `pivot + rodLength`（舞台单位），
+`canvasToWorld` 映过去得到的 span 就是这根烟**正确的世界长度**（竖屏实测 0.784），
+再乘 `WORLD_HEIGHT` 是第二遍。⇒ 核心那一对端点本身就是答案，不要放大。
+
+**第三版：直接用核心那一对，不放大。**
+实测 `tubeLen 0.654 / 2.930 / 1.730` —— 还是散的。读到 mesh 的 `rotZ ≈ -1.8 rad`（≈103°），
+管身躺在近水平位置，而火头在 (0.548, 0.5) **空中**、管身在 (-0.13, -0.89) **台面**，
+相差 1.52。⇒ **`pose.pivot → pose.tip` 与火头不是同一个 frame 的量**：
+火头由 `placeRodEnd`/`placeCherry` 放，管子这一版由 core pose 放，两者各自映射的基准不一样
+（一个走 `frame.pxOf(pose.…)`，一个走 `canvasToWorld(pose.…)`）。
+也就是说：**把管子并到核心那一对是对的，但必须先让"核心 pose → 世界"只有一个换算口**，
+否则只是把两套画法换成另外两套画法。
+
+**决定：整笔撤销**，回到出货行为（137→138 files / 1155 tests green 已复跑）。
+理由：① 这一动会同时牵到 `placeRodEnd` / `placeChar` / `placeColumn` 三处都已锚在核心 pose、
+而管子锚在 `data-aim` 的结构性重排，不是一个回合能安全落下的；
+② 上一格那条 `rod-agreement.test.ts` 钉的正是这个契约，它现在是**绿的**，也就是说
+"现状"是被钉住的已知状态，而它的注释已经写明了缺口在哪 —— 这比一个改坏的绿更有用。
+
+**给下一格的入口，按依赖顺序**：先证明 `frame.pxOf(pose.x)` 与 `canvasToWorld(pose.x)` 在同一
+frame 上给出同一个世界点（这是三处 burn-end 与台面/管子能对齐的前提），再谈合并。
+在证明之前，任何"把管子接到核心 pose"的改动都会重演这一轮的 outcome。
