@@ -4012,7 +4012,21 @@ function placeInk(
 ): void {
   if (group === null || rigs.length === 0) return;
   const ctm = svg?.getScreenCTM() ?? null;
-  if (svg === null || ctm === null) {
+  // `ctm === null` is what a detached element returns — but **not** what a `display: none` one
+  // returns. §10 folds the chrome with `v-show`, so `.hud` / `.cta` / `.rail` become
+  // `display: none`; `getScreenCTM()` on an element inside that subtree still answers, with the
+  // identity-ish `[a=1, d=1, e=0, f=0]`, because it flattens the hidden ancestor instead of
+  // declining. Measured 2026-10-13 on the served build (`tests/smoke/_foldcheck2.mjs`): 2.5 s after
+  // the last input every box is `0,0,0,0` and the matrix reads `[1, 1, 0, 0]` — **not** null.
+  // So the old guard passed, the group was placed at world origin and scaled by `unitX - origin`,
+  // which is 0, and the whole head-up row, pill diagram and rail were left crushed into the top-left
+  // corner of the stage for as long as the chrome stayed folded. That is what the audit's "rested"
+  // frames were showing.
+  //
+  // A zero-scaled matrix is the honest test: a visible element's screen CTM always has a non-zero
+  // determinant, and a hidden one's is exactly the degenerate case that made the cluster.
+  const degenerate = ctm !== null && (ctm.a === 0 || ctm.d === 0 || ctm.e === 0 || ctm.f === 0);
+  if (svg === null || ctm === null || degenerate) {
     for (const rig of rigs) rig.mesh.visible = false;
     return;
   }
