@@ -7270,3 +7270,33 @@ origin"），另外两条保持绿；改回来 4/4 绿。另有一条钉住「�
 它存在的理由写在自己文件头里 —— 一张帧是活的，rod / plume / ash 在两帧之间都会动，
 所以整帧相减永远有几个百分点在动，而这个数必须沿着顶行那一带来比、并且要拿
 "同一构建不同两个状态"当噪声地板，否则 0.00% 和"什么都没测"看起来一模一样。
+
+### 折起的另一半：另外三个"读 DOM"的读者也都查了一遍（2026-10-13）
+
+上一格修掉 `placeInk` 之后，同一类风险还剩三处没有证据：`fillCard`、`placeRingRig`、药丸辉光 —— 它们
+**不是**用 `getScreenCTM()` 量元素，而是直接量 `getBoundingClientRect()`。这一格把三处都查了。
+
+**结论：三处本来就是安全的**，各自都有 `rect.width === 0 || rect.height === 0` 那道门。
+不是在源码里"看出来"的，是实测的：`tests/smoke/probe-folded.mjs` 走完一次真 break、等 chrome 折起来，
+然后遍历场景数 **有没有 mesh 被画在零缩放上** —— 折起 2 s 后 **0 个**。所以这个仓里那次退化矩阵
+**只咬了一个地方**，而那个地方已经修好了。
+
+**这一格真正留下来的两样东西**：
+
+1. **判据从"一个 bug"改成"一族人"**：`folded-chrome.test.ts` 追加一条
+   「every other reader of the chrome's geometry hides on a collapsed rect」，
+   把 `fillCard` / `placeRingRig` / 药丸辉光三处都钉住，理由写在注释里 ——
+   **第三个用 `ctm === null` 写的守卫就是同一个 bug 换个名字**，所以新读者加进来时必须先过它属于哪一种暴露。
+   牙：删掉 `fillCard` 的零宽高门 ⇒ **只红这一条**，其余 4 条绿。
+2. **我的量具先错了一次，也记下来**：第一版把"在世界原点 + 非零缩放"也算退化，
+   于是报出 **18 个孤儿**，全是健康的粒子池（`smoke` / `sparks` / `dust` / `rain` / `ash-flakes`）——
+   它们本来就在原点，内容在 instanceMatrix 里而不在 mesh 的 scale 上。
+   **一把对正确场景也会响的尺子比没有尺子更糟**，同一天在上一节里刚写过这句话（`scan-pile.mjs`）。
+   改成只判"零缩放"之后才读得动。
+
+**顺带记一个读 DOM 的坑**：探针第一版还报「`.pill` 折起后还是 `display: flex`，是不是第二个缺陷」
+—— 不是。`getComputedStyle(el).display` 是**元素自己**的值，`display: none` 的祖先下面的后代
+照样算 `flex`，`.pill` 就在 `.cta` 里。决定"看不看得见"的是**共同祖先**，
+所以那三个顶层 chrome 根才是要读的东西。已在探针注释里写明。
+
+npx vitest run 137 files / 1151 tests green（+1）；typecheck clean；eslint clean。

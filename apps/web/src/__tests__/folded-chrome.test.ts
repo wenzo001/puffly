@@ -72,4 +72,31 @@ describe('the folded chrome leaves no ink behind (§10)', () => {
     const app = readFileSync(new URL('../App.vue', import.meta.url), 'utf8');
     expect(app).toMatch(/v-show="chrome"/);
   });
+
+  it('every other reader of the chrome’s geometry hides on a collapsed rect', () => {
+    // The family, not the one bug. `getScreenCTM()` is not the only way this scene mirrors the DOM:
+    // `fillCard`, `placeRingRig` and the pill's glow each measure the element's bounding rect, so
+    // they were never exposed to the degenerate matrix. This case exists so that the *next* reader
+    // added to this file is checked against whichever of the two exposures applies — a third guard
+    // written on `ctm === null` alone would be the same bug under a new name.
+    //
+    // Verified live, not only in source, on 2026-10-13 with `tests/smoke/probe-folded.mjs`: 2 s after
+    // the chrome folds, no mesh in the scene is drawn at a zero scale. The probe's own first version
+    // is the cautionary tale — it counted "at the world origin with a non-zero scale" as degenerate
+    // and reported 18 orphans that were all healthy instanced pools (`smoke`, `sparks`, `dust`,
+    // `rain`, `ash-flakes`), which live at the origin by construction.
+    for (const reader of ['function fillCard(', 'function placeRingRig(']) {
+      const start = STAGE.indexOf(reader);
+      expect(start, `${reader} is gone — the family it belongs to just changed shape`).toBeGreaterThan(-1);
+      const end = STAGE.indexOf('\n}\n', start);
+      const body = STAGE.slice(start, end === -1 ? undefined : end);
+      expect(body, `${reader} must not draw a collapsed element`).toMatch(
+        /rect\.width === 0 \|\| rect\.height === 0/,
+      );
+    }
+    const glow = /const shadow = parseDropShadow[\s\S]{0,400}/.exec(STAGE)?.[0] ?? '';
+    expect(glow, 'the pill’s glow must not draw a collapsed element').toMatch(
+      /rect\.width === 0 \|\| rect\.height === 0/,
+    );
+  });
 });
