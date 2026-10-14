@@ -8005,3 +8005,32 @@ npx vitest run **140 files / 1166 tests green**（+3）；typecheck 0 error；es
 
 npx vitest run 140 files / 1166 tests green；`npx eslint .` clean；typecheck 0 error；
 prettier clean（`eslint.config.mjs` 本身也过了 formatter）。
+
+### 连上一格那条 lint 规则自己**也没有人看着** —— 第八次同一形状（2026-10-13）
+
+上一格加的 `state/no-state-cast` 是条**规则**，规则也是闸。**而闸自己被删掉时，什么都不会红** ——
+这格一上手就量了：把 `'state/no-state-cast': 'error'` 换成一行注释，**同时**在 `usePuffly.ts`
+里放一处真的 §48 违规（`const w = state as unknown as {…}; w.cigarette.… = 0.5`），
+结果 **`npx eslint` 干净、`state-view-readonly.test.ts` 三条全绿**。
+⇒ 上一格"补上了缺口"这句话，**只对规则在的时候成立**。
+
+**补法**：让那个已有的判据**把 eslint 配置本身读进来**，多钉一条
+`the lint rule that closes the cast route is still wired on, and still applies here`：
+
+1. `'state/no-state-cast': 'error'` 必须在（**关掉它就红**）；
+2. `files` 里必须同时列着 `apps/web/src` / `game-scene` / `game-audio` / `game-storage`
+   四个包（**少一个就红** —— 规则被悄悄缩到只剩 apps/web 也算破）；
+3. `ignores` 里必须留着 `**/*.test.ts` —— 测试文件**故意**要 cast 这个 view 来证明类型管用，
+   一条会打到自己证人的规则，**一天之内就会被人关掉**。
+
+**牙（两次，各恰好一条红）**：
+① 关掉规则 ⇒ 红，消息写明 "'state/no-state-cast' must stay 'error'"；
+② 从 `files` 删掉 `packages/game-scene/src` ⇒ 红，消息写明 "no longer covers packages/game-scene/src"。
+
+**这一格没有改产品**（`git diff` 只有那一个判据文件）。它的价值是：**上一格我以为自己把缺口堵上了，
+其实连堵缺口的那把锁都没人看着** —— 与本会话前七次同形，只是这次那把锁是我自己刚做的。
+⇒ 记一条更普适的：**加闸的时候要问"闸被拆了会红吗"**，而这一次它本来就不会红，
+所以"先量一次"不是好习惯，是**必要的那一步**。
+
+npx vitest run **140 files / 1167 tests green**（+1）；`npx eslint .` clean；
+typecheck 0 error；prettier clean。

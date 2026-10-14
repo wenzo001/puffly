@@ -154,4 +154,32 @@ describe('the state view is read, not written (§48)', () => {
     const shared = readFileSync(join(ROOT, 'packages/shared/src/readonly.ts'), 'utf8');
     expect(shared).toContain('export type DeepReadonly');
   });
+
+  it('the lint rule that closes the cast route is still wired on, and still applies here', () => {
+    // The rule above is itself a guard, and a guard nobody watches is the thing this repo keeps
+    // rediscovering. Measured 2026-10-13: with `'state/no-state-cast': 'error'` replaced by a comment
+    // **and** a real violation in `usePuffly.ts` (`const w = state as unknown as {…}; w.cigarette.… = 0.5`),
+    // `npx eslint` was clean and this file was green. So the config itself has to be read here.
+    const config = readFileSync(join(ROOT, 'eslint.config.mjs'), 'utf8');
+    expect(config, "the §48 lint rule is off — 'state/no-state-cast' must stay 'error'").toMatch(
+      /'state\/no-state-cast':\s*'error'/,
+    );
+    // …and it must be turned on for every package that receives the view, not just one of them.
+    const block =
+      /files: \[([\s\S]*?)\],\s*ignores: \[[\s\S]*?\],\s*plugins: \{/.exec(config)?.[1] ?? '';
+    for (const pkg of [
+      'apps/web/src',
+      'packages/game-scene/src',
+      'packages/game-audio/src',
+      'packages/game-storage/src',
+    ]) {
+      expect(block, `the §48 rule no longer covers ${pkg}`).toContain(pkg);
+    }
+    // The test files are excluded on purpose: they cast the view deliberately to prove the type
+    // works, and a guard that fired on its own proofs would be turned off within a day.
+    expect(
+      /ignores: \[[^\]]*'\*\*\/\*\.test\.ts'/.test(config),
+      'the §48 rule must skip test files, or it fires on the proofs that cast the view deliberately',
+    ).toBe(true);
+  });
 });
