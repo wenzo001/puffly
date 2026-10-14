@@ -1625,7 +1625,7 @@ function applyBackdrop(state: GameStateView | null): void {
     const mesh = poolMeshes[index];
     const material = poolMaterials[index];
     if (mesh === undefined || material === undefined) return;
-    mesh.visible = true;
+  
     const world = canvasToWorld({ x: light.x, y: light.y }, box.value, aspect.value);
     // Two pools, two depths, because the deck draws them as two different facts: the one above the
     // table edge is light on the wall (so it has to clear the wall's near-black plate), the one
@@ -2177,6 +2177,11 @@ function placeRod(state: GameStateView | null): void {
     mesh.visible = false;
     return;
   }
+  // The hide above is for *this* frame only: a pose can degenerate for a frame mid-move and be
+  // publishable again the next, so the visible flag is written every frame rather than assumed.
+  // (The template's own `:position` never touched `visible`, which is why the pre-fix code got away
+  // without this line — measured, a rod hidden once stayed hidden for the rest of the break.)
+  mesh.visible = true;
   const len = Math.max(1e-4, geometryOfRod.span);
   // Centre and angle from the same reading as the span, so the tube cannot point away from its own
   // burning end (measured before this: 0.396 rad ≈ 23° between the tube's rotation and the burn

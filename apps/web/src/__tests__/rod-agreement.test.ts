@@ -119,4 +119,19 @@ describe('the rod is one rod (§1)', () => {
       'the tube’s length must come from the pose’s own span',
     ).not.toBeNull();
   });
+
+  it('writes the rod’s visibility every frame, not only when it hides', () => {
+    // A regression this round introduced and then caught by re-reading: taking over the transform
+    // meant taking over `visible` too, and the first version wrote `mesh.visible = false` in the
+    // degenerate arm with nothing ever setting it back — so a pose that degenerated for one frame
+    // mid-move hid the rod for the rest of the break. The template's own `:position` never touched
+    // `visible`, which is why the pre-fix code got away without it. The hide and the restore have to
+    // be a pair in the same function, both driven by this frame's reading.
+    const place = /function placeRod\(state: GameStateView \| null\)[\s\S]*?\n}\n/.exec(STAGE)?.[0] ?? '';
+    expect(place).toMatch(/mesh\.visible = false/);
+    expect(
+      place,
+      'the rod must be re-shown on the next publishable frame — a one-frame hide must not stick',
+    ).toMatch(/mesh\.visible = true/);
+  });
 });

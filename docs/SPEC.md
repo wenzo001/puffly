@@ -7469,3 +7469,26 @@ frame 上给出同一个世界点（这是三处 burn-end 与台面/管子能对
 ②`function rodGeometry\(state` —— 实际是箭头函数 `const rodGeometry = (state`，第一次就红错了地方。
 
 npx vitest run 138 files / 1155 tests green；typecheck 0 error；eslint clean；build 过。
+
+### 上一格的合并带进来的回归：管子藏起来一次就再也不回来了（2026-10-13）
+
+**自己抓的，写在判据落地之前。** 上一格把 transform 接管进 `placeRod` 的同时，也接管了 `visible`：
+退化那一臂写了 `mesh.visible = false`，**而没有任何地方再写回 true** —— 模板自己的 `:position`
+从来不碰 `visible`，这正是改前代码不用写这行也能活的原因。实测推演：姿态在移动中途退化一帧，
+管子就**整个 break 剩下的时间都不见了**。
+
+**修法**：`mesh.visible = true` 与 hide 同函数成对，每帧都写，而不是"藏了就假设以后都藏"。
+
+**判据的牙差点又是装饰，记下两件事**：
+
+1. 第一版变异（只删 `mesh.visible = true` 那一行）**没红** —— 因为壳里还有 9 处别的
+   `mesh.visible = true`，而判据的正则 `[\s\S]*?\n}\n` 从 `function placeRod` 起配到它找到的
+   第一个 `\n}\n`，配到的窗口里是否含那行取决于它删的是哪一处。改成把注释和那行**一起删**
+   （真实的回归是这个整块）之后**恰好红那一条**。
+   ⇒ **变异要长得像真实的回归，否则判据的绿灯是凑巧**。
+2. 过程里我自己的还原脚本造出**连续两行 `mesh.visible = true`**（替换没把注释算进去），
+   幸好 commit 前 `sed` 复读抓到了 —— 工具写回源码之后必须**读回来核对**，这一条前面
+   （`verify-guards` 那条全局教训）已经吃过一次亏。
+
+npx vitest run 138 files / 1156 tests green（+1）；typecheck 0 error；eslint clean；build 过；
+`scan-rod-agreement.mjs` 复跑：角差仍四形状 0.0000，火头仍全部落在燃端 —— 可见性修复没有动到对齐。
