@@ -7589,3 +7589,32 @@ SPEC 一直记着"真机 170 条这轮没跑"。跑完了（`touch-device.mjs`�
 改写历史资产。`.github/workflows/ci.yml` 的 Format 步骤因此仍可能在 GitHub 上先于 suite 失败 ——
 这不是本次改动引入的红，而是仓库现存的 format baseline 与已提交字节不一致，后续应单独做一次
 **显式、全仓、可审查的 formatter baseline 提交**，不能混进这次 CI 诊断里。
+
+### 成就 ladder 那条尺子错了两轮：块里有**四种** `.line`，只有 `data-met` 是轴行的记号（2026-10-13）
+
+上一轮我把 ladder 尺子从"旧格式 `0/5 · 13`"改成"按 `.track` 认轴行"，完整跑仍是
+**169/170、只剩这一条红**。这一轮把它真正修好了。
+
+**块里 `.line` 有四种，尺子只认得出一种**（在真浏览器里逐行读出来的）：
+
+| 行 | 样子 | 记号 |
+| --- | --- | --- |
+| 表头 `成就` | `0 / 23` | 无 |
+| 四条轴行 | `0支0/5` | **`data-met`** |
+| `最大阵风` | `0风力` | 无 |
+| 三个 moment 行 | `0.98风力还没有` | `class="line moment"` + `data-reached` |
+
+按 `.track` 筛 ⇒ 得到 **7** 条（轴行 4 + moment 3），`axes.length === 4` 当场红；
+而 payload 里明明四行都对。**轴行自己的记号是 `data-met`**（`SessionSheet.vue` 的
+`v-for="row in ladder"` 那一段），不是 `.track` —— §39 给 moment 也发了 track 和单位词。
+
+**修法**：`axes = rows.filter(r => r.met !== null)`、`moments = rows.filter(r => r.isMoment)`，
+并**把 moment 也钉住**（3 条、计数非空、带 `风力`）—— 只钉轴行会让"moment 整块消失"重新变成
+看不见的回归，而它们正是审计 #3 里"moment 行什么都不显示"修好之后的东西。
+真浏览器复验：`axes: 4`，逐行 `name/count/unit/digits` 全真，`VERDICT => true`。
+
+**这条值得记的教训**：同一个尺子连错两轮，两次都是"拿一个**近似的**特征当**唯一的**特征"。
+`.track` 看起来像"进度条 = 轴行"，而 §39 之后 moment 也有进度条了 —— 特征被产品用掉了，
+尺子没跟上。**判据要认"这一行自己声明的记号"，不要认"它和别的行长得像的地方"**。
+
+npx vitest run 138 files / 1157 tests green；typecheck 0 error；eslint/prettier clean。

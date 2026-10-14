@@ -3148,17 +3148,25 @@ try {
       rows: [...(block?.querySelectorAll('.line') ?? [])].map((row) => ({
         name: (row.querySelector('.name')?.textContent ?? '').trim(),
         count: (row.querySelector('.count')?.textContent ?? '').trim(),
-        /** The axis rows carry a bar and a unit cell; the moments do not. */
-        hasBar: row.querySelector('.track') !== null,
         hasUnit: row.querySelector('.unit') !== null,
-        ratio: row.getAttribute('data-met'),
+        /** The axis rows' own mark (`data-met`); the header and the gust row have none. */
+        met: row.getAttribute('data-met'),
+        /** The three moments are `line moment`, and they also carry a track and a unit (§39), so
+         *  `.track` is not a discriminator — filtering by it found 7 rows and went red. */
+        isMoment: row.classList.contains('moment'),
       })),
     };
   });
-  // The axis rows are the ones with the progress bar. Their count reads `value unit reached/total`
-  // (`0支0/5`) since the ladder grew units, a bar and a met state — the ruler used to expect the
-  // older `0/5 · 13` and read red against a correct row for three runs.
-  const axes = ladder.rows.filter((row) => row.hasBar);
+  // Inside the block there are four kinds of `.line`, and the difference is what marks them:
+  //   the header (`0 / 23`) has no data attribute;
+  //   the four axis rows carry `data-met` and read `value unit reached/total` (`0支0/5`);
+  //   the gust row (`0风力`) has neither;
+  //   the three moment rows are `class="line moment"` with `data-reached`.
+  // Two earlier rulers got this wrong: one expected the pre-units `0/5 · 13`, the next filtered by
+  // `.track` — which the moments also have (§39 gives them a bar) — and read 7 axes against a correct
+  // screen. `data-met` is the axis row's own mark, so that is what this reads.
+  const axes = ladder.rows.filter((row) => row.met !== null);
+  const moments = ladder.rows.filter((row) => row.isMoment);
   console.log(`LADDER ${JSON.stringify(ladder.rows.map((row) => `${row.name}=${row.count}`))}`);
   check(
     '成就: the ladder is on the ledger screen, and its four rows are the core table',
@@ -3171,7 +3179,11 @@ try {
       axes.every(
         (row) =>
           row.name !== '' && row.count !== '' && row.hasUnit && /^\d+\D+\d+\/\d+$/.test(row.count),
-      ),
+      ) &&
+      // And the three moments are present as moments: a moment row is the one with `data-reached`
+      // rather than `data-met`, and it reads a gust figure with a state word beside it.
+      moments.length === 3 &&
+      moments.every((row) => row.count !== '' && /风力/.test(row.count)),
     JSON.stringify(ladder.rows.slice(0, 6)),
   );
   check('成就: nothing threw', errors.length === 0, errors.slice(0, 2).join(' | '));
