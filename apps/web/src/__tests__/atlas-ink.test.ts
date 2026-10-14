@@ -198,6 +198,17 @@ describe('the baked atlas keeps the whole em box', () => {
     //    design names, one rectangle on screen. `mark-alphabet.test.ts` can only say the code points
     //    differ, and code points are the half a pixel never disagrees about.
     // Choosing the fix is the A/B call in #138; whoever lands it updates this ledger with it.
+    //
+    // 2026-10-13, the DOM half of #163: the language row's `◌` and `ع` were `.notdef` **on screen**,
+    // so they were replaced there (`copy.ts`: `◌`→`○`, `ع`→`↔`). `◌` was one of the four places the
+    // shell writes that character, and the bake takes its character set from the copy table — so
+    // removing it from `copy.ts` removed it from the atlas, and this ledger followed: 19 → 18, `◌`
+    // gone, `↔` in and not flagged.
+    //
+    // `ع` is the sharper half and it is still here: it remains `.notdef` **in the atlas**, because
+    // the atlas is still baked from a system CJK font that has no Arabic. That half of #138 is
+    // untouched and deliberately so — see `PUFFLY_ATLAS_FONT` in `apps/web/scripts/bake-atlas.mjs`,
+    // whose absence from `deploy.yml` is what lets a system-font bake happen at all.
     const flagged = Object.entries(atlasJson.metrics)
       .filter(([, metric]) => metric.notdef === true)
       .map(([char]) => char);
@@ -205,7 +216,7 @@ describe('the baked atlas keeps the whole em box', () => {
     expect(
       [...flagged].sort().join(''),
       'the set of characters the baked font cannot draw changed — #138',
-    ).toBe([...'إابةتخدرصعغقلنوي∅⌁◌'].sort().join(''));
+    ).toBe([...'إابةتخدرصعغقلنوي∅⌁'].sort().join(''));
     const shapes = new Set(
       flagged.map((char) => {
         const metric = atlasJson.metrics[char];
