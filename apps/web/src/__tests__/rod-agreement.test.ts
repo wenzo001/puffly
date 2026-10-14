@@ -76,23 +76,47 @@ describe('the rod is one rod (§1)', () => {
     expect(runtime).toMatch(/rodMm:/);
   });
 
-  it('places the burning end off the core’s pose, not off the anchor pair', () => {
-    // The half that already agrees with the core: the burn line, the cherry and the ash collar read
-    // `pose.pivot` / `pose.tip`. A future edit that retargets them at `body`/`ember` would make the
-    // cherry follow the stretched tube instead of the simulation.
-    const start = STAGE.indexOf('function placeRodEnd(');
-    expect(start, 'the burning ends are no longer placed off the core’s pose').toBeGreaterThan(-1);
-    const body = STAGE.slice(start, STAGE.indexOf('\n}\n', start));
-    expect(body).toMatch(/pose\.pivot/);
-    expect(body).toMatch(/pose\.tip/);
+  it('draws the tube from the core’s pose, through the burning ends’ own conversion', () => {
+    // The fix of 2026-10-13, after two reverted attempts (the two attempts are recorded in SPEC). The
+    // tube's centre, angle and span come from `rodGeometry(state)`, which reads `pose.pivot` /
+    // `pose.tip` and maps them through `frame.pxOf(...)` → `frame.toWorld(...)` — the same conversion
+    // `placeRodEnd` uses for the burn line, the cherry and the collar.
+    //
+    // Why that route: `toWorld`'s argument is *canvas pixels*, which is exactly what `pxOf` returns,
+    // so the two are one map (verified against `canvasToWorld` for a stage fraction at all three
+    // shipped shapes). Two earlier attempts mapped the pose some other way and measured worse: one
+    // multiplied by `unitWorld` (the renderer's pixel unit, which saturates at `WORLD_HEIGHT` as soon
+    // as the stage is wide — 3.075 / 4.000 / 4.000 per stage unit), the other multiplied the mapped
+    // span by `WORLD_HEIGHT` a second time (1.7× long, pointing away from the cherry).
+    expect(STAGE).toMatch(/const rodGeometry = \(state/);
+    expect(STAGE).toContain('frame.pxOf(pose.pivot)');
+    expect(STAGE).toContain('frame.pxOf(pose.tip)');
+    expect(STAGE).toContain('frame.toWorld(');
   });
 
-  it('draws the tube through one place, so there is only one conversion to reason about', () => {
-    // Both arms go through `canvasToWorld`; the disagreement is which *pair* each maps. The tube's
-    // call is `rodBetweenInBox(body, ember, box, aspect)` (one place, one caller), and nothing in the
-    // shell recomputes the rod's length or angle from `rodRemaining` beside it.
-    expect(STAGE).toContain('rodBetweenInBox(body, ember, box.value, aspect.value)');
-    const rodComputed = /const rod = computed\(\(\) => \{[\s\S]*?\}\);/m.exec(STAGE)?.[0] ?? '';
-    expect(rodComputed).not.toMatch(/rodLength/);
+  it('sets the mesh’s own transform from that one reading, in placeRod', () => {
+    // The template must not bind `position`/`rotation` of its own: if it did, the mesh would be
+    // placed by the anchor pair's span while `placeRod` sized the cylinder from the pose — the exact
+    // two-derivations split this round closed. (Measured live: the tube's axis and the burn line's
+    // were 0.396 rad ≈ 23° apart on the same frame; after the fix, 0.0000 rad at all four shapes.)
+    // (Also: the first version matched `/<TresMesh[\s\S]*?name="rod"[\s\S]*?>/`, whose lazy tail ran
+    // to the file's *last* `>` and swallowed other meshes that do bind `:position` — so the case was
+    // red on a correct file. The block is taken from the tag's own opening to its closing bracket.)
+    const tagStart = STAGE.indexOf('<TresMesh', STAGE.indexOf('name="rod"') - 200);
+    const tagEnd = STAGE.indexOf('>', STAGE.indexOf('name="rod"'));
+    const rodMesh = tagStart === -1 || tagEnd === -1 ? '' : STAGE.slice(tagStart, tagEnd + 1);
+    expect(rodMesh, 'the rod mesh is gone').not.toBe('');
+    expect(rodMesh).toContain('name="rod"');
+    expect(rodMesh).not.toMatch(/:position=/);
+    expect(rodMesh).not.toMatch(/:rotation=/);
+    // And the transform is written in `placeRod`, from the same reading as the span.
+    const place = /function placeRod\(state: GameStateView \| null\)[\s\S]*?\n}\n/.exec(STAGE)?.[0] ?? '';
+    expect(place).toContain('rodGeometry(state)');
+    expect(place).toMatch(/mesh\.position\.set\(geometryOfRod\.mid/);
+    expect(place).toMatch(/mesh\.rotation\.set\(0, 0, geometryOfRod\.angle - Math\.PI \/ 2\)/);
+    expect(
+      /const len = Math\.max\(1e-4, geometryOfRod\.span\);/.exec(place),
+      'the tube’s length must come from the pose’s own span',
+    ).not.toBeNull();
   });
 });

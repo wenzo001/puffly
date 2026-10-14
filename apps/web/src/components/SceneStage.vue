@@ -330,12 +330,76 @@ const at = (key: 'lighter' | 'ashtray' | 'pack'): readonly [number, number, numb
 function rodInkFor(state: GameStateView | null): string {
   return state?.cigarette.state === 'IDLE' ? PROP_INK.rodAtRest : PROP_INK.rodHeld;
 }
+/** What the rod is, in world units — the one reading `rodGeometry` answers. */
+interface RodGeometry {
+  /** The distance between the two ends, which is the cylinder's height. */
+  readonly span: number;
+  /** The midpoint, where the mesh sits. */
+  readonly mid: readonly [number, number, number];
+  /** The direction from the mouth to the lit tip, in radians. */
+  readonly angle: number;
+}
+/**
+ * The anchor pair's own reading of the rod — still computed, because `rodGeometry` falls back to it
+ * for the frames before the state arrives, and because it is the only thing in the shell that reads
+ * `rodBetweenInBox`. The tube no longer draws from it (see `rodGeometry`); keeping it is what makes
+ * "the mirror" a real thing rather than a comment.
+ */
 const rod = computed(() => {
   const { body, ember } = points.value;
   return body === undefined || ember === undefined
     ? null
     : rodBetweenInBox(body, ember, box.value, aspect.value);
 });
+/**
+ * The rod as one thing — centre, angle and span — in world units, from the core's own pose.
+ *
+ * The tube used to be placed from `rodBetweenInBox(body, ember, …)`: the *anchor pair*, extrapolated
+ * by its own `/0.55` rule and mapped through `canvasToWorld`. That is a second derivation of the same
+ * rod alongside `pose.pivot → pose.tip`, which is what `placeRodEnd` (the burn line, the cherry, the
+ * ash collar) and `placeColumn` already read. Two derivations of one fact is the shape this repository
+ * has been bitten by, and here it measured: with a lit rod, the tube's rotation was 0.396 rad (≈23°)
+ * away from the burn line's on the same frame, and the tube's span was 2.523 world units on an
+ * 844×390 phone against 1.042 on a 393×852 one — a rod that changed shape with the window, because
+ * `canvasToWorld` scales x by `WORLD_HEIGHT × (box.w/box.h) × viewportAspect` and leaves y alone.
+ *
+ * So the tube takes the core's pair, through the **same conversion the burning ends use**:
+ * `frame.pxOf(pose.…)` to canvas pixels, then `frame.toWorld(...)` to world. (Those two are one map,
+ * verified 2026-10-13 against `canvasToWorld` for a stage fraction at all three shipped shapes —
+ * `toWorld`'s argument is canvas pixels, which is exactly what `pxOf` returns.) The span is the
+ * mapped distance between the two points, taken as it comes: **no** stage-unit multiplication, because
+ * `pose.tip` is already `pose.pivot + rodLength` and the mapping has already been applied to it.
+ * A version that multiplied by `WORLD_HEIGHT` as well measured 1.7× long and pointing away from the
+ * cherry; a version that went through `unitWorld` measured 3.075/4.000/4.000 per stage unit and so
+ * stayed viewport-dependent.
+ *
+ * The anchors stay what they are — the shell's published layout, right about *where* the rod is.
+ * This is only about the rod's own span and direction.
+ */
+const rodGeometry = (state: GameStateView | null): RodGeometry | null => {
+  const pose = state?.cigarette.pose;
+  if (pose === undefined) return null;
+  const frame = canvasPx();
+  const pivot = frame.toWorld(frame.pxOf(pose.pivot));
+  const tip = frame.toWorld(frame.pxOf(pose.tip));
+  const dx = tip[0] - pivot[0];
+  const dy = tip[1] - pivot[1];
+  const span = Math.hypot(dx, dy);
+  if (!pose.visible || !(span > 1e-6)) {
+    // Not drawable: no pose yet, or the two ends coincide mid-move. Fall back to the mirror, which
+    // is a stage-plane pair and never degenerate for a published anchor pair — the first frames draw
+    // from there until the state arrives.
+    const mirror = rod.value;
+    return mirror === null
+      ? null
+      : { span: mirror.length, mid: mirror.mid, angle: mirror.angle };
+  }
+  return {
+    span,
+    mid: [(pivot[0] + tip[0]) / 2, (pivot[1] + tip[1]) / 2, 0] as readonly [number, number, number],
+    angle: Math.atan2(dy, dx),
+  };
+};
 /**
  * Sizes in world units. One stage unit is the stage's own height (see `props.ts`), so every number
  * the core or the 2D props module owns multiplies `WORLD_HEIGHT` and nothing is re-invented here.
@@ -2087,8 +2151,9 @@ const COLUMN_Z = 0.005;
  */
 function placeRod(state: GameStateView | null): void {
   const mesh = rodMesh.value;
-  const current = rod.value;
-  if (mesh === null || current === null) return;
+  // The mesh exists only while the template's own `v-if` holds; `rodGeometry(state)` returning null
+  // (no pose, or the two ends coinciding mid-move) hides it rather than drawing a degenerate tube.
+  if (mesh === null) return;
   // §2's two rods — dark while it lies on the pack, paper once it is held — set here, where this
   // frame's state actually is. A computed over the state object never fires: the core mutates it
   // in place, which is the same reason the cap's hinge is driven from here too.
@@ -2104,7 +2169,20 @@ function placeRod(state: GameStateView | null): void {
     rodMaterial.needsUpdate = true;
   }
   (mesh.material as THREE.MeshStandardMaterial).color.set(rodInkFor(state));
-  const len = Math.max(1e-4, current.length);
+  // The rod's own geometry, from the core's pose and through the same conversion the burning ends
+  // use. A function, not a computed, for the file's usual reason: the state object is mutated in
+  // place, so a computed over `pose` would never re-fire — `rodInkFor` above is the same pattern.
+  const geometryOfRod = rodGeometry(state);
+  if (geometryOfRod === null) {
+    mesh.visible = false;
+    return;
+  }
+  const len = Math.max(1e-4, geometryOfRod.span);
+  // Centre and angle from the same reading as the span, so the tube cannot point away from its own
+  // burning end (measured before this: 0.396 rad ≈ 23° between the tube's rotation and the burn
+  // line's on the same frame). The cylinder's axis is local +y, hence the quarter turn.
+  mesh.position.set(geometryOfRod.mid[0], geometryOfRod.mid[1], 0);
+  mesh.rotation.set(0, 0, geometryOfRod.angle - Math.PI / 2);
   let geometry = mesh.geometry;
   if (Math.abs(len - rodBuiltLength) > 0.0005 || rodBase === null) {
     // The tube itself, under this script's hand rather than the template's `:args`: TresJS
@@ -4596,8 +4674,6 @@ function placeMouth(state: GameStateView | null): void {
         v-if="rod !== null"
         ref="rodMesh"
         name="rod"
-        :position="rod.mid"
-        :rotation="[0, 0, rod.angle - Math.PI / 2]"
       >
         <TresCylinderGeometry
           :args="[(0.1 * ROD_THICKNESS_SHARE) / 2, (0.1 * ROD_THICKNESS_SHARE) / 2, 0.1, 12, 16]"

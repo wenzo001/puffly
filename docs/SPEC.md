@@ -7423,3 +7423,49 @@ frame 上给出同一个世界点（这是三处 burn-end 与台面/管子能对
 统一改成 `frame.toWorld(frame.pxOf(…))` 这一条路（也就是烧端已经在用的那条）。
 上一格 `rod-agreement.test.ts` 钉的契约仍然绿，且现在它的缺口是**已知的、可一句一句修的**，
 而不是"先查清楚为什么两套单位不一样"。
+
+### 那根烟并成一根了：管子的中心、角度、长短都从核心的 pose 来（2026-10-13）
+
+上一格证明了两套换算是同一条路，这一格把合并真正落下了。**三版试错（上一格）+ 一版正确**，
+都在这里收口。
+
+**改动**（`SceneStage.vue`）：
+- 新增 `rodGeometry(state)`（**函数**，不是 computed —— 状态对象是原地改的，computed 永远不会再触发，
+  与 `rodInkFor` 同一个模式）：读核心的 `pose.pivot` / `pose.tip`，走
+  **`frame.pxOf(...)` → `frame.toWorld(...)`** —— 烧线、火头、灰领已经在用的那条换算。
+  返回 `{span, mid, angle}`。
+- `placeRod` 从这一个读数里同时拿三样：`len = geometryOfRod.span`（圆柱的高）、
+  `mesh.position.set(geometryOfRod.mid…)`、`mesh.rotation.set(0, 0, geometryOfRod.angle - π/2)`
+  （圆柱自己的轴是局部 +y，所以有这四分之一圈）。
+- 模板里 rod mesh 的 `:position` / `:rotation` **删掉**了 —— 模板再绑一次就是第二套画法，
+  正是这次要关掉的那扇门。退化 pose（两端重合/还没发布）退回镜像那对，
+  并把 mesh 藏掉而不是画一根零长的管子。
+- `rod`（`rodBetweenInBox` 那条）**保留**：它是退化时的退路，也是壳里唯一读 `rodBetweenInBox` 的地方。
+
+**实测**（`tests/smoke/scan-rod-agreement.mjs`，四形状、真烟）：
+
+| 形状 | span | 管轴 | 烧线 | **角差** | 火头落在 |
+| --- | --- | --- | --- | --- | --- |
+| 手机竖屏 | 0.792 | 0.759 | 0.759 | **0.0000** | 近端（0.026）|
+| 手机横屏 | 2.523 | 0.133 | 0.133 | **0.0000** | 近端（0.035）|
+| 桌面 | 1.646 | 0.431 | 0.431 | **0.0000** | 近端（0.025）|
+| 宽屏 | 2.103 | 0.161 | 0.161 | **0.0000** | 近端（0.035）|
+
+⇒ **管子与自己的烧端方向完全一致**（改前 0.396 rad ≈ 23°），火头落在管子的**燃端**而不是口端。
+
+**关于 span 仍随视口变（0.79 / 2.52 / 1.65 / 2.10）—— 这不是缺陷，是舞台→世界的投影本身**：
+`stageW = WORLD_HEIGHT × (box.w/box.h) × aspect` 本来就随形状变（1.85 / 7.60 / 5.10 / 6.31），
+而这张图是**各向异性**的（x 缩放、y 不缩放），所以一个固定舞台平面角度的杆映到世界，
+长度必然跟着形状走。核心 `pose.rodLength` 在舞台平面里是常数（`refreshPose` 纯函数）——
+**"舞台里的烟是一根烟"成立，"世界里的像素长"本来就该随窗口变**。
+上一格把"世界 span 必须恒定"当成了前提，那条前提是错的；真正要钉的是**方向一致性**，
+那条现在是 0.0000。
+
+**判据**：`rod-agreement.test.ts` 改成钉住现状 —— `rodGeometry` 读 pose、走 `pxOf→toWorld`、
+`placeRod` 里 `mesh.position/rotation/len` 三处都来自同一个 `geometryOfRod`、模板不再绑 transform。
+牙：删掉 `mesh.position.set(...)` 两行 ⇒ **恰好红那一条**。也记下判据自己的两次返工：
+①`/<TresMesh[\s\S]*?name="rod"[\s\S]*?>/` 的懒惰尾巴一路吞到文件最后一个 `>`，
+把别的绑了 `:position` 的 mesh 吞进反例 ⇒ 改成从 tag 开头取到它自己的 `>`；
+②`function rodGeometry\(state` —— 实际是箭头函数 `const rodGeometry = (state`，第一次就红错了地方。
+
+npx vitest run 138 files / 1155 tests green；typecheck 0 error；eslint clean；build 过。
