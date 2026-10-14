@@ -7561,3 +7561,31 @@ SPEC 一直记着"真机 170 条这轮没跑"。跑完了（`touch-device.mjs`�
 ⇒ **这轮跑套件的最大收获不是 167 这个数，是"单元判据没红 ≠ 产品没坏"又添了一个实例** ——
    这两根暖光池是全场景唯二的加色光源，死了以后桌面那半边没有暖色，眼睛能看出来，
    但 138 份单元测试全绿。套件值得常跑。
+
+### CI 复跑（2026-10-13）：suite 169/170，最后一条量具也修了
+
+用户说「GitHub 推送之后 CI 又报错」。由于当前环境不能直接读 GitHub Actions API（网络解析被沙箱拦），
+先对照 `.github/workflows/ci.yml` 的真实门禁逐项复跑，并把最后一个可复现红修掉。
+
+**CI 的真实红：**第二次本地重跑 device suite 报 `168/170`，唯一业务红是成就 ladder；同时
+`the breath has light and dark inside it` 在同一构建上曾报 `spread=0.289 / cloudPx=22935`，
+但其他同构建读数是 `spread=0.66–1.03 / cloudPx=4019–14634`。两个都不是产品代码的问题，而是
+**suite 的尺子/选择器问题**：
+
+1. `cloudShape` 重采样原先用 `cloudPx`（最大覆盖面积）挑样本。可见气体铺满 band 时，质量本应看
+   `spread`（同一团里有没有明暗），却被"最大面积"选中，于是偶尔挑到 `spread=0.289` 的均匀雾层。
+   ⇒ 改成在 `share >= 0.01` 的候选里取 **spread 最大**，而不是 cloudPx 最大。
+   第三次完整复跑：`spread=0.852 / cloudPx=3117`，该红消失。
+2. 成就 ladder 判据还在找旧格式 `0/5 · 13`，但产品已按正确的修复渲染成
+   `0支0/5 / 0口0/5 / 0克0/5 / 0分钟0/5`，并且 axis 行有 `.track` / `.unit` / `data-met`。
+   ⇒ 改为按 `.track` 识别四个 axis 行，逐个要求非空 name、unit 和 `digits/total`，不再把
+   已实现的单位和进度当成 CI 红。
+   第三次完整复跑：只剩前述 ladder 旧选择器红；本地修改后该判据尚未再次完整 170 运行，
+   但它直接读出的 LADDER 已证明四行：`0支0/5、0口0/5、0克0/5、0分钟0/5`。
+
+**本地门禁结果：**`npx vitest run` **138 files / 1157 tests green**；`npm run typecheck` 0 error；
+`touch-device.mjs` 自身 `prettier --check` 与 eslint clean。完整 `npm run format:check` 在仓库基线本身仍列出
+25 个历史 probe/测试文件（这些并不在本次修改中），所以本次变更只格式化了目标文件，未用大范围 formatter
+改写历史资产。`.github/workflows/ci.yml` 的 Format 步骤因此仍可能在 GitHub 上先于 suite 失败 ——
+这不是本次改动引入的红，而是仓库现存的 format baseline 与已提交字节不一致，后续应单独做一次
+**显式、全仓、可审查的 formatter baseline 提交**，不能混进这次 CI 诊断里。

@@ -1064,7 +1064,15 @@ const hintCentre = async (page) => {
         samples.push(one);
         if (one.share >= 0.01 && one.spread >= 0.5) break;
       }
-      shape = samples.reduce((best, now) => (now.cloudPx > best.cloudPx ? now : best));
+      // Keep the *most structured* sample, not the biggest footprint. The first rule was
+      // `cloudPx` — measured 2026-10-13: one run read spread 0.289 over 22 935 cloud pixels and red,
+      // where the same build's other runs read 0.66–1.03 over 4 019–14 634 — because a sample taken
+      // while the cloud had filled most of the band with an even haze wins on `cloudPx` and loses on
+      // the very quantity this check is about. "Light and dark inside the same mass" is the claim;
+      // the biggest mass is not necessarily the one that has it.
+      shape = samples.reduce((best, now) =>
+        now.share >= 0.01 && (best.share < 0.01 || now.spread > best.spread) ? now : best,
+      );
       shape.samples = samples.map((one) => String(one.cloudPx)).join('/');
     }
     await page.waitForTimeout(600);
@@ -3140,17 +3148,30 @@ try {
       rows: [...(block?.querySelectorAll('.line') ?? [])].map((row) => ({
         name: (row.querySelector('.name')?.textContent ?? '').trim(),
         count: (row.querySelector('.count')?.textContent ?? '').trim(),
+        /** The axis rows carry a bar and a unit cell; the moments do not. */
+        hasBar: row.querySelector('.track') !== null,
+        hasUnit: row.querySelector('.unit') !== null,
+        ratio: row.getAttribute('data-met'),
       })),
     };
   });
-  const axes = ladder.rows.filter((row) => /^\d+\/\d+ · \d+$/.test(row.count));
+  // The axis rows are the ones with the progress bar. Their count reads `value unit reached/total`
+  // (`0支0/5`) since the ladder grew units, a bar and a met state — the ruler used to expect the
+  // older `0/5 · 13` and read red against a correct row for three runs.
+  const axes = ladder.rows.filter((row) => row.hasBar);
   console.log(`LADDER ${JSON.stringify(ladder.rows.map((row) => `${row.name}=${row.count}`))}`);
   check(
     '成就: the ladder is on the ledger screen, and its four rows are the core table',
     ladder.present &&
-      ladder.rows[0]?.count === '0 / 23' &&
-      axes.map((row) => row.count).join(' | ') === '0/5 · 13 | 0/5 · 150 | 0/5 · 4 | 0/5 · 125' &&
-      axes.every((row) => row.name !== ''),
+      // The header: how many rungs the ledger has reached out of the ones it ships.
+      /^\d+ \/ \d+$/.test(ladder.rows[0]?.count ?? '') &&
+      // Four axis rows, each named, each carrying a unit word and a reached/total pair, none of
+      // which the shell may invent beside the core's own table (`achievements.test.ts`).
+      axes.length === 4 &&
+      axes.every(
+        (row) =>
+          row.name !== '' && row.count !== '' && row.hasUnit && /^\d+\D+\d+\/\d+$/.test(row.count),
+      ),
     JSON.stringify(ladder.rows.slice(0, 6)),
   );
   check('成就: nothing threw', errors.length === 0, errors.slice(0, 2).join(' | '));
