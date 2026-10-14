@@ -7824,3 +7824,34 @@ npx vitest run **139 files / 1163 tests green**（+6）；typecheck 0 error；es
 "code points 是像素永远不会分歧的那一半"。本轮只修 DOM 这一半。
 
 npx vitest run **139 files / 1163 tests green**；typecheck 0 error；eslint/prettier clean。
+
+### 图集那一半（#138）查实：是**已知、被守着、有意押后**的设计取舍，不是新缺陷（2026-10-13）
+
+上一格把 DOM 那一半修掉了（语言行两枚 `.notdef` → 全壳 32 枚零 `.notdef`）。这格去看
+另一半：**图集**（`atlas/glyphs.json`，场景用它画词），把该押后的东西查清楚。
+
+**查到的三条**：
+
+1. **图集里 19/406 格是 `.notdef`，其中 18 枚在 `copy.ts` 里真的被用到**：
+   `"إابةتخدرصعغقلنوي∅⌁◌"`。里面包含 `∅`（纯图标档自己的名字）与 `⌁`（磕灰）。
+2. **这一条已经被 `atlas-ink.test.ts` 完整记着并守着**：它点名这 19 格、断言它们**像素完全相同**，
+   并在注释里写死了结论 —— 「the wordless tier cannot tell `◌` (已掐灭, and the auto chip) from
+   `⌁` (磕灰) from `∅` (no words at all): three marks the design names, one rectangle on screen」，
+   然后写明「**Choosing the fix is the A/B call in #138; whoever lands it updates this ledger**」。
+   ⇒ **不是没人知道，是知道、被钉住、并且明确押后**。本轮不重复报成缺陷。
+3. **缺的那道闸是真的缺**：`bake-atlas.mjs` 的注释写着发布必须用 `PUFFLY_ATLAS_FONT`
+   （Noto Sans SC，SIL OFL），脚本里没有 vendored 字体目录（`apps/web/assets/fonts/` 不存在），
+   于是落到系统 CJK 字体并只 `console.warn`；而 **`PUFFLY_ATLAS_FONT` 在整个仓里只出现在脚本自己**，
+   `ci.yml` 与 `deploy.yml` **都不跑 bake**，也就都不设这个变量。
+   ⇒ 仓里那张图集是"某位开发者在自己的机器上从系统字体烤出来的"，这就是 19 格 `.notdef` 的来源。
+
+**这一格没有改产品**，理由两条，都不是"懒得做"：
+① 换字体是一次**重新烘焙 + 全图集像素基线重建**（`atlas-ink.test.ts` 里有一整排按像素记的判据），
+   需要一个可再分发的字体文件进仓 —— 那是**加资产**，不是改一行代码；
+② 用户这一轮的方向是"按审计逐项推进"，而 #138 自己已经把它记成待押后的 A/B。
+
+**留给下一格的入口（写清楚，免得又被当成新缺陷）**：
+若要把图集那 19 格真的画出来，顺序是 ① 往 `apps/web/assets/fonts/` 放一份 Noto Sans SC；
+② 用 `PUFFLY_ATLAS_FONT` 重烤；③ 把 `atlas-ink.test.ts` 里那行 `.toBe([...'إابةتخدرصعغقلنوي∅⌁◌']…)`
+换成新集合；④ 在 `deploy.yml` 里把 bake 加上并**显式传字体变量**，否则下一位开发者又会烤出
+一张从系统字体来的图集。**①和④是让它不再复发的那两步，②③只是这一次。**
