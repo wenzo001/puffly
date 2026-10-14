@@ -7717,3 +7717,25 @@ goal（13），不写死数字。**但第一版有两条是装饰的，变异测
 空输入下错和对一模一样，这不是判据没写好，是**用例没把场景造出来**。
 
 npx vitest run **139 files / 1163 tests green**（+6）；typecheck 0 error；eslint/prettier clean。
+
+### 三条轴（爽感 / 成就 / 玩法）各自的链都过了一遍，结论是都已覆盖（2026-10-13）
+
+上一格补了成就那条链的中间一截。这一格用同一个问题过另外两条轴：
+**"从核心的数字到玩家看见的那一格，中间有没有一段没人驱动的？"**
+
+| 轴 | 链 | 现状 |
+| --- | --- | --- |
+| 成就 | `achievementsFor` → reached ids → `useJustLit` → 行上记号 → 动画 | 上格已补（`reveal-ledger.test.ts`） |
+| 爽感 | `forceReading` → `fillWidth` → 条上 rect 宽度 | **已覆盖**：两个纯函数有单测；绑定有源码级判据（`fillWidth` 在块里、viewBox 精确、无 prose、不是控件） |
+| 玩法 | 按住药丸 → 引擎吃这一口 → 吐烟出现 → 环上力度 + 条的填充 | **已覆盖**：真机套件 `S4: the exhale wears that draw's force…`，读数是 `digits=64 / fillRatio=0.6400 / parts=3 / words=""` |
+
+**顺带记一条这个仓的测试约定**（这次想破例、最后没有）：
+`apps/web` 没有组件 harness，所以 `CtaPill` 这类组件**历来只被当源码读**，不被挂载
+（`puff-row.test.ts` 的文件头把理由写明了）。`achievement-ladder.test.ts` 是唯一用
+`renderToString` 挂载的例子，而它挂的是一个**替身组件**（同样的 props 形状 + 同一张
+`ACHIEVEMENT_BARS` 表），不是真的 `SessionSheet.vue`。
+⇒ 想给力度条补"组件级"判据，要么跟进这个替身做法，要么承认源码级就是本仓对这一层的口径。
+**没有为了多一条绿去挂一个需要整个 `Puffly` 存根的组件。**
+
+三条轴都过完之后，Objective 里点名的三件事（界面的爽感、成就、过程的玩法爽感）
+在"有没有被测的链"这个意义上没有已知缺口。
