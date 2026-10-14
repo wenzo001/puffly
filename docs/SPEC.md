@@ -7689,3 +7689,31 @@ npx vitest run 138 files / 1157 tests green；typecheck 0 error；eslint/prettie
 | 邪风 | 可见 | `0.996风力还没有` | false | scaleX(0) | 同上 |
 
 ⇒ 名字、阵风读数、单位词、状态词（还没有）、进度条、颜色**六样都在**。审计那半确认关闭。
+
+### §39 reveal 的**链上**判据补上了，而且第一版是装饰的（2026-10-13）
+
+上一格查到底说"reveal 已覆盖"，这话只对了一半：`reveal.test.ts` 钉的是 `useJustLit`
+拿**手写 id 列表**时的行为，`achievement-ladder.test.ts` 钉的是 `data-fresh` 到动画那一段，
+**中间那一截没人驱动** —— `achievementsFor(ledger)` → reached ids → `useJustLit` → 行上的记号。
+那一截正是 §39 的「它自己亮一下」本身。
+
+（上一格我以为要补的是真机探针，但那探针驱动不到"跨过一栏"：第一栏在两个月总量的 1/12
+= sticks 13 支，现成存档没那么多口，引擎也没有测试用的 progress 杠杆。
+**不需要那个杠杆** —— `achievementsFor` 是纯函数，喂它不同的 ledger 就能精确造出这一刻。）
+
+新开 `apps/web/src/__tests__/reveal-ledger.test.ts`（6 条），跨过的那一栏用核心表里真的
+goal（13），不写死数字。**但第一版有两条是装饰的，变异测试抓出来的，值得一字一句记**：
+
+1. **「ledger 动了但没跨栏 ⇒ 什么都不标记」那条，第一版从空 ledger 起步**，
+   于是 `litIds` 在跨栏前一直是 `[]`。把 `justLit = [...ids]`（diff 整个删掉）变异上去，
+   **5 条全绿** —— 空列表下"全部"和"差集"一样都是空。⇒ 改成**从已经跨过一栏的 ledger 起步**，
+   屏幕上先有一个亮着的 id，再让 ledger 在下一栏里动。同一次变异**恰好红那一条**。
+2. **「关sheet 就清掉」这条规则，第一版根本没有对应用例**（所有用例都不关 sheet）——
+   把 close 臂里的 `fresh.value = new Set()` 删掉，同样全绿。补上"跨栏 → 关 → 再开"三步，
+   同一次变异**恰好红那一条**。
+
+⇒ **教训（本会话第五次）**：`justLit = [...ids]` 这种"看着更简单"的写法，在**没有已亮 id 的
+场景里**与正确实现完全同构。**一条判据要能红，必须让被测代码处在一个"错法也与对法不同"的状态里** ——
+空输入下错和对一模一样，这不是判据没写好，是**用例没把场景造出来**。
+
+npx vitest run **139 files / 1163 tests green**（+6）；typecheck 0 error；eslint/prettier clean。
