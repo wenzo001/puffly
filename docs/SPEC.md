@@ -7618,3 +7618,21 @@ SPEC 一直记着"真机 170 条这轮没跑"。跑完了（`touch-device.mjs`�
 尺子没跟上。**判据要认"这一行自己声明的记号"，不要认"它和别的行长得像的地方"**。
 
 npx vitest run 138 files / 1157 tests green；typecheck 0 error；eslint/prettier clean。
+
+### 真机套件全绿：170/170（2026-10-13）
+
+本会话从 `129 files / 1074 tests` 的审计基线出发，中间套件长期停在 **167–169/170**，
+最后一格把成就尺子认错记号的问题修掉之后，完整复跑：
+
+    170/170 checks passed
+
+两条此前反复红/绿的检查，这一轮的读数（都不是压线）：
+
+| 检查 | 读数 | 地板 |
+| --- | --- | --- |
+| `the breath has light and dark inside it` | spread **0.869**，cloudPx 2713（4.1% band），495 discs | spread ≥ 0.5 且 share ≥ 0.01 |
+| `成就: the ladder …` | 4 条轴行全带 `data-met`、单位、`digits/total`；3 条 moment 行带 `风力` | 同上 |
+
+至此 CI 的两个 job（`checks` 与 `smoke`）在本地都全绿：format / lint / typecheck /
+`138 files / 1157 tests` / build / served-build / device suite。SPEC 里此前记的
+"真机 170 条这轮没跑"与"若它擦线先看各节读数"两条，现在都有了确定答案。
