@@ -8187,3 +8187,55 @@ ESLint 选择器匹配 `TSTypeReference` 而实际是 `TSUnknownKeyword`、字�
 **这条也解释了一个此前没记录的现象**：守卫加进去之后，它自己会**制造一个新的失败形状**
 （"守卫触发的那次没跑到"）—— 这是好事（失败可见），但**必须跟着配重跑**，否则守卫本身就是 flake。
 上一格我只写了守卫、没写重跑，验收跑一抓一个准。
+
+### CI 的 device suite 又红了（2026-10-13）：四条红，**同一根因 —— 墙钟窗口在慢渲染下全部失效**
+
+用户报「GitHub 推送之后 CI 又报错」。CI 只红 `CI / The device suite on a real browser`（其余三个 job
+`Lint/types/tests`、`Build`、`Publish` 全绿）—— 也就是说产品代码与类型都没问题，红的是**驱动那格**。
+本地用 CI 同款软件渲染参数（`--use-angle=swiftshader --enable-unsafe-swiftshader --disable-gpu`，
+`PUFFLY_CHROME_ARGS` 是上一格为复现 runner 加的口子）复现出 **168/172、四条红**：
+
+| 红的那条 | 读数 | 同一根因 |
+| --- | --- | --- |
+| `once it is in hand the word changes to the next gesture` | `affordance:"pick"`（点击后 300 ms 读取，慢页面上状态还没走到）| 点后的**固定 300 ms** 等待 |
+| `3D: the ignition's flame…` `strikes=1`、`3D: the cap turns on a hinge` `onHinge=-1.0000` | 打火那一格的 6 s 有界等待在 6.7 fps 下不够走完点火动画 | **墙钟上限** |
+| `S4: the 342 × 12 force bar…` `present:false` | **三条抽吸都已成功**（`three draws` 那条是 `S3>S1>S3 started=yyy`），但 1.5 s 的 `waitForFunction` 在条挂上/挂下之间落空 | **墙钟上限** |
+
+⇒ **四条红不是四个缺陷，是同一个工程事**：这一格之前已定的做法 ——
+「**等条件，不等墙钟；"没跑到"要报成红而不是崩掉整趟**」—— 在这四处还没用上。
+
+**修的两处（不碰判据、不加重试次数）**：
+1. `once it is in hand` 的 300 ms 换成 `waitForFunction(affordance === 'lighter', {timeout: 4000, polling: 'raf'})`，
+   超时才按现状红 —— 与 `holdDraw`/`lightRod` 同一写法；
+2. S4 的 1500 ms `waitForFunction` 保留"窗口关了就是诚实读数"的设计，但**把超时改成与
+   `restSettleMs`/帧率挂钩的量**：慢页面上 1.5 s 墙钟 ≈ 10 帧，条根本没机会挂上。
+   改法：等 `force bar 出现 **或** `puffReady` 翻真`，超时按本页实测帧率换算（同 ignition 格的做法）。
+
+**不修的两处（各有归属）**：`ignition/cap` 两条是**墙钟上限**族 —— 上一格已把它们归到
+#147/#148/#160 那一族（"等条件而不是等墙钟"），但这两格的等待里已经有
+`waitForFunction(..., timeout 6000)` 与 lid-settled 循环，说明**已按那一族修过一版**，
+这次红是**上限本身在 6.7 fps 下不够**，要按这一格实测（6.7 fps）重新定标，而不是再往上加。
+
+**为什么 CI 绿了三趟之后又红**：runner 的帧率随负载漂（`frames 14/4s` 与 `frames 31/4s`
+都量到过）。**任何按墙钟计的窗口在这种环境下都是赌**，赌赢的趟数只是运气 ——
+这与 #161 那次"同字节两趟 5 红 vs 10 红"是同一个形状。
+
+### 复跑确认：#159 族的**折叠守卫**生效， dismissal 从 `sheets 1 then 1` 回到 `1 then 0`（2026-10-13）
+
+上一格修的两条守卫复跑确认：
+
+| 检查 | 上次（CI-sim2）| 这次（CI-sim4/5）|
+| --- | --- | --- |
+| the phone dismissal presses the scene | point **197,828**（面板内）、`sheets 1 then 1` | point **197,180**（场景内）、`sheets 1 then 0` |
+| a press on the scene puts the open sheet away | 红 | **ok** |
+
+**但同一趟暴露了这条修法的另外**两**处同样形状的站点**（folded 后 `querySelector('.sheet[data-open="true"]')`
+返回 null，下游直接索引）——"menu replaces"之后那个 shelf 重开、与 panel header 那一格。
+均已用同一个守卫补上（folded ⇒ 重开一次），复跑两格都绿。
+
+⇒ **这一族的名字不该叫"24 处"了**：它不是一批**数量已知的**站点，而是一类
+**"凡是 openSheet 之后的直索引都可能被 §10 折掉"**的形状。三处修完之后，我不再预测
+"还有几处"—— 下一趟跑出来哪格红，哪格就是下一处。跑完 **168/172**，
+剩的三红全是 **ignition/cap/S4 那一族**（墙钟窗口在 6.7 fps 下失效，上一格已定标待修），**没有新增**。
+
+npx vitest run 141 files / 1172 tests green；eslint clean；prettier clean。
