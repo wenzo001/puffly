@@ -1653,7 +1653,7 @@ const hintCentre = async (page) => {
   await openSheet(page, 'break');
   // §11: the interface follows the hand. A swipe down over nothing puts it away — the sheets,
   // the mark and the word — while the rod goes on burning behind them.
-  await page.evaluate(() => {
+  const swipe = await page.evaluate(() => {
     const canvas = document.querySelector('canvas');
     const box = canvas.getBoundingClientRect();
     const at = (y) => ({
@@ -1669,11 +1669,20 @@ const hintCentre = async (page) => {
     // The scene canvas is deaf to pointers (the mask); the surface under it is what a scene press
     // actually lands on, so that is where the finger is simulated.
     const surface = document.querySelector('.hit');
+    // §159's family: a missing surface is a *red with a reason*, not a crash that takes the run.
+    if (surface === null)
+      return { landed: false, note: 'no .hit — the swipe never landed anywhere' };
     surface.dispatchEvent(new PointerEvent('pointerdown', at(0.05)));
     surface.dispatchEvent(new PointerEvent('pointermove', at(0.14)));
     surface.dispatchEvent(new PointerEvent('pointermove', at(0.22)));
     surface.dispatchEvent(new PointerEvent('pointerup', at(0.24)));
+    return { landed: true };
   });
+  check(
+    'a swipe down over nothing: the swipe itself landed',
+    swipe.landed === true,
+    swipe.note ?? 'landed',
+  );
   await page.waitForTimeout(700);
   const folded = await page.evaluate(() => ({
     chrome: ['hud', 'cta', 'rail'].map((cls) => {
@@ -3013,12 +3022,15 @@ try {
   // scroll, or this check would be satisfied by a page that cannot scroll anything.
   const scrollProof = await page.evaluate(async () => {
     const stage = document.querySelector('main.stage');
+    // §159's family: each of these is a red with a reason, not a crash that takes the run.
+    if (stage === null) return { landed: false, note: 'no main.stage' };
     stage.scrollTop = 500;
     const forced = stage.scrollTop;
     stage.scrollTop = 0;
     // The positive control: the sheet that is open right now must still scroll, or `forced === 0`
     // would only prove that nothing on the page can move.
     const sheet = document.querySelector('.sheet[data-open="true"]');
+    if (sheet === null) return { landed: false, note: 'no open sheet for the positive control' };
     sheet.scrollTop = 0;
     sheet.scrollTop = 200;
     const sheetMoved = sheet.scrollTop;
@@ -3031,6 +3043,11 @@ try {
       clientHeight: stage.clientHeight,
     };
   });
+  check(
+    'S10: the scroll proof itself ran on both surfaces',
+    scrollProof.landed === true,
+    scrollProof.note ?? 'both stage and sheet were present',
+  );
 
   // The same rule on the desk, where the panel is a column rather than a drawer. The point is found
   // rather than assumed: on a wide window the column covers one side of the scene, and a check that
