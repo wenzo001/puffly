@@ -7777,3 +7777,50 @@ npx vitest run **139 files / 1163 tests green**（+6）；typecheck 0 error；es
 而不是替用户挑一个字形。
 
 新量具 `tests/smoke/scan-glyphs.mjs`（形状判据，不是覆盖率），对着出货构建可复跑。
+
+### #163 的缺口补上：两枚字形换成"一定有"的，并把量具扩到**全壳 32 枚**（2026-10-13）
+
+上一格定位了缺口但没动（"该换成什么是设计取向"）。这格按用户定的方案改：
+**换成一定有字形的字符**。
+
+| 位置 | 改前 | 改后 | 为什么 |
+| --- | --- | --- | --- |
+| `settings.language/auto` | `◌` U+25CC（.notdef，edge 97.8%）| **`○` U+25CB** | 空心圆，仍读作"由设备决定" |
+| `settings.language/ar` | `ع` U+0639（.notdef，edge 102.2%）| **`↔` U+2194** | 双向箭头读作"从右往左"；用 `A` 会与 English 那行**长得一样** |
+
+两枚都是**在真实元素里量过才写的**：同样的字体栈、同样的 15px、同样的 `line-height: 1`。
+
+**这一格差点被自己的量具骗过去，记下来**：
+我另写了一个"候选字形探针"，它把候选渲染到一个**新建的 span** 里量，结果**十个候选全判成 drawn** ——
+连那两个 .notdef 也判成 drawn。两个原因叠在一起：
+① 新 span 在 `.cta` 之外，漏掉了组件作用域的样式；
+② 更要紧：**我给探针写的 `line-height` 是 1.2，而 `.choice .glyph` 是 `line-height: 1`** ——
+那一行把字形盒**纵向裁掉**了，于是"裁短的方框"在探针里长成了"一个正常高的字形"。
+⇒ **同一枚字形，换一个 line-height 量出来是两个答案。**
+真正的尺子 `scan-glyphs.mjs` 量的是**真实行**，所以它对；错的是我临时写的那个。探针已删。
+
+**顺带把量具从"语言行"扩到"全壳"**：写完回头 grep，发现 `◌` 在壳里**还出现四次**
+（画质 auto 芯 `AUTO.glyph`、减弱动效开关、旁边的对比度、结束这一根的 `endBreak`），
+而那张 sheet 一直开着 —— 也就是说**我按行改是漏的，grep 找到它们是运气**。
+所以 `scan-glyphs.mjs` 现在**遍历 DOM 里每一个裸标记**（1–2 个非文字字符的元素），不只指语言行。
+
+出货构建复跑，**全壳 32 枚**：
+
+    settings.scene           ▨   drawn
+    settings.language/auto   ○   drawn   ← 改后
+    settings.language/en     A   drawn
+    settings.language/zh-CN  中   drawn
+    settings.language/ar     ↔   drawn   ← 改后
+    settings.language/icons  ∅   drawn
+    + 壳里另外 26 枚（✦ ⚙ 🔊 ◷ ▭ ↻ ✎ ◑ ⤓ ⤒ ⌫ …）
+
+    every glyph in this block is drawn by the browser
+
+⇒ **.notdef 从 2 枚降到 0 枚**，而且是把范围从 6 枚扩到 32 枚之后量的。
+
+**没动的**：另外四处 `◌`（画质 auto / 减弱动效 / 对比度 / 结束）**这次量下来全是 drawn**
+（edge 1.5–38.7%），而 `atlas-ink.test.ts` 说它们在**图集那一层**是 .notdef（#138，另一件事）。
+⇒ 同一枚字形，**DOM 里画得出来、图集里画不出来**，这正是 #138 记的那句
+"code points 是像素永远不会分歧的那一半"。本轮只修 DOM 这一半。
+
+npx vitest run **139 files / 1163 tests green**；typecheck 0 error；eslint/prettier clean。

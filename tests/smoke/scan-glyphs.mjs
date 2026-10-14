@@ -46,11 +46,19 @@ await page.waitForTimeout(900);
  * Reads one element's pixels and answers "is this a drawn glyph or a `.notdef` box?"
  *
  * A `.notdef` box is a rectangle outline: its ink lies on the border, and the middle is empty. So
- * the discriminator is the ink in the *middle* of the inked box, not how much ink there is.
+ * the discriminator is where the ink sits, not how much of it there is.
+ *
+ * `box` rather than a selector, so the same analysis answers for a row found by a selector and for a
+ * mark found by walking the DOM.
  */
-const measureInk = async (selector) => {
-  const box = await page.locator(selector).boundingBox();
+const measureBox = async (box) => {
   if (box === null) return null;
+  // A clip must sit inside the viewport: Playwright throws rather than returning a blank frame, and
+  // a mark the sheet has scrolled past is not a reading this file can give.
+  const size = page.viewportSize();
+  if (box.x < 0 || box.y < 0 || box.x + box.width > size.width || box.y + box.height > size.height) {
+    return null;
+  }
   const shot = (await page.screenshot({ clip: box })).toString('base64');
   return page.evaluate(
     async ([b64]) => {
@@ -140,6 +148,40 @@ const measureInk = async (selector) => {
 const isNotdef = (m) =>
   m !== null && m.lit > 0 && m.coreShare < 0.12 && m.edgeFill > 0.55;
 
+/** The same reading, for an element named by a selector. */
+const measureInk = async (selector) => measureBox(await page.locator(selector).boundingBox());
+
+/**
+ * The same reading, for a mark found by walking the DOM — the shell writes its marks as bare text,
+ * so there is no stable selector to point a ruler at, only the element that holds the character.
+ */
+const measureMarkByText = async (glyph) => {
+  const box = await page.evaluate(
+    ([g]) => {
+      const nodes = [...document.querySelectorAll('button, span, p, div')].filter((el) => {
+        const text = (el.textContent ?? '').trim();
+        if (text !== g) return false;
+        const r = el.getBoundingClientRect();
+        // Only the element that actually *is* the mark, not an ancestor that contains it.
+        return (
+          r.width < 200 &&
+          r.height < 80 &&
+          ![...el.children].some((c) => (c.textContent ?? '').trim() === g)
+        );
+      });
+      const el = nodes[0];
+      if (el === undefined) return null;
+      // The sheet scrolls, so a mark can sit outside the viewport; a screenshot clip that does is a
+      // hard error in Playwright rather than a blank reading.
+      el.scrollIntoView({ block: 'center' });
+      const r = el.getBoundingClientRect();
+      return { x: Math.max(0, r.x - 2), y: Math.max(0, r.y - 4), width: r.width + 4, height: r.height + 8 };
+    },
+    [glyph],
+  );
+  return measureBox(box);
+};
+
 const findings = [];
 
 const scene = await measureInk('[data-setting="scene"]');
@@ -159,6 +201,50 @@ for (const lang of langs) {
     ink,
     notdef: isNotdef(ink),
   });
+}
+
+/**
+ * Every other literal mark the shell writes, found by walking the open sheet rather than by grep.
+ * §2/§H.8 give the interface a set of marks, and they are all DOM text rather than the atlas — so
+ * the language row is not the only place a font can be missing one. `◌` alone was written four more
+ * times (the smoke-quality "auto" chip, the reduced-motion toggle, contrast beside it, and end-break),
+ * which is why this walks the DOM: grep found them by luck, and a ruler that only knows the row I
+ * happened to look at would have missed the other four.
+ */
+const shellMarks = await page.evaluate(() => {
+  const out = [];
+  const seen = new Set();
+  const walk = document.createTreeWalker(document.body, 4 /* SHOW_TEXT */);
+  for (let n = walk.nextNode(); n !== null; n = walk.nextNode()) {
+    const text = (n.textContent ?? '').trim();
+    if (text === '') continue;
+    // A button or a mark whose whole text is one or two non-word characters is a mark, not a word.
+    if (text.length > 2) continue;
+    if (!/[^\p{L}\p{N}\s.,!?'"()·:/-]/u.test(text)) continue;
+    const el = n.parentElement;
+    if (el === null) continue;
+    if (seen.has(el)) continue;
+    seen.add(el);
+    const box = el.getBoundingClientRect();
+    if (box.width < 4 || box.height < 4) continue;
+    out.push({
+      where:
+        el.getAttribute('data-hook') ??
+        el.getAttribute('data-setting') ??
+        el.getAttribute('aria-label') ??
+        el.className ??
+        el.tagName.toLowerCase(),
+      glyph: text,
+      selector: null,
+      index: out.length,
+    });
+  }
+  return out;
+});
+for (const mark of shellMarks) {
+  const ink = await measureMarkByText(mark.glyph);
+  if (ink === null) continue;
+  findings.push({ where: `shell mark — ${mark.where}`, glyph: mark.glyph, ink, notdef: isNotdef(ink) });
 }
 
 await context.close();

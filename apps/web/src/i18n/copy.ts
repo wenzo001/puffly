@@ -614,11 +614,29 @@ export interface LanguageChoice {
   readonly copyKey?: CopyKey;
 }
 
-/** The row's order is the fallback order: undecided, then the two complete tables, then none. */
+/**
+ * The row's order is the fallback order: undecided, then the two complete tables, then none.
+ *
+ * The `glyph` is a mark, not a word: it sits above the language's own name, which is spelled out
+ * underneath it, so it has to be something every system font can draw. Two of these were not (#163) —
+ * `◌` (U+25CC) and `ع` (U+0639), both of which the browser fell back to `.notdef` on, the Arabic
+ * one eight boxes for eight letters because the *script* is missing, not the character. Measured in
+ * `tests/smoke/scan-glyphs.mjs` against the built app:
+ *
+ *   auto  ◌ U+25CC  core 3.0%  edge 97.8%   .notdef   → ○  U+25CB (renders; a hollow circle still
+ *                                                            says "whatever the device offers")
+ *   ar    ع  U+0639  core 3.1%  edge 102.2%  .notdef   → ↔  U+2194 (renders; a bidirectional arrow
+ *                                                            says right-to-left, and `A` would
+ *                                                            have been indistinguishable from English)
+ *
+ * Both replacements were measured **in the real element** — same font stack, same 15px, same
+ * `line-height: 1` clip — before being written here, because a stand-in with a different line-height
+ * reads as drawn for a character that is `.notdef` in the row.
+ */
 export const LANGUAGES: readonly LanguageChoice[] = [
-  { code: 'auto', endonym: 'auto', glyph: '◌', copyKey: 'settings.language.auto' },
+  { code: 'auto', endonym: 'auto', glyph: '○', copyKey: 'settings.language.auto' },
   { code: 'en', endonym: 'English', glyph: 'A' },
   { code: 'zh-CN', endonym: '中文', glyph: '中' },
-  { code: 'ar', endonym: 'العربية', glyph: 'ع' },
+  { code: 'ar', endonym: 'العربية', glyph: '↔' },
   { code: 'icons', endonym: 'icons', glyph: '∅', copyKey: 'settings.language.icons' },
 ];
