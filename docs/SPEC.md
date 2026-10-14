@@ -7969,3 +7969,39 @@ build 过；出厂 `apps/web/dist/atlas/glyphs.json` 读出 406 格 / 18 `.notde
 在**空/平凡输入下两者同构**的版本 —— 那样的判据必然是绿的，也必然是装饰的。
 
 npx vitest run **140 files / 1166 tests green**（+3）；typecheck 0 error；eslint/prettier clean。
+
+### 补上 §48 那条已知缺口：把"cast 别名再写"这条路**在 cast 处**堵掉（2026-10-13）
+
+上一格给 §48 写的判据（`state-view-readonly.test.ts`）在文件头里**自曝了一个抓不到的东西**：
+`const w = state as unknown as {…}; w.cigarette.… = 0.5`（**先取别名再普通写**）它是绿的。
+因为写落在**另一个名字**上，source read 看不见。
+
+**这格把那条路堵掉，堵的是 cast 本身，不是那次写。**
+新加 lint 规则 **`state/no-state-cast`**（`eslint.config.mjs`，自定义规则不是查询）：
+
+- **拦**：`as unknown` / `as any`，且**目标类型点名了核心状态的字段**
+  （`cigarette` / `anchors` / `environment` / `ashtray` / `lighter` / `collection` /
+  `progress` / `style` / `ui` / `stage` / `nowMs` / `nowWallClockMs`）——
+  别名逃逸**必须**先有一次这样的 cast，所以 CI 红在**那一步**，而不是等写下去。
+- **不拦**：仓里两处诚实的 cast —— `(window as unknown as { __pufflyScene?: SceneProbe })`
+  与 `backdrop.ts` 里把颜色数组 cast 成 `Rgb` —— 它们**一个状态字段都没点**，量出来仍是 0 误报。
+
+**为什么用自定义规则而不是 `no-restricted-syntax` 查询**：这一格在查询语法上卡了两轮 ——
+① `x as unknown` 在 AST 里是 `TSUnknownKeyword` 不是 `TSTypeReference`，
+第一版选择器**一条都匹配不到**（一条能悄悄永远不响的 lint 规则不该被放过，写完立刻用变异验了）；
+② 改对之后又**误报了那两处诚实的 cast**。ESLint 的选择器语言说不出"一个 cast 的目标类型里
+**有**某个字段"，于是改成一小段规则函数读 `typeAnnotation`。
+**与上一格那条教训是同一条**：按"看起来像的名字"匹配（无论是正则还是选择器）都会同时漏和误，
+真正的判据得看**它到底声明了什么**。
+
+**牙**：把 `usePuffly.ts` 改成
+`const writable = state as unknown as { cigarette: { puff: { lastDraw: number } } }; writable.cigarette.puff.lastDraw = 0.5;`
+⇒ `state/no-state-cast` **恰好报那一条**（`no-state-cast`），还原后全绿。
+
+**三层的分工，现在写清楚了**（也写进了判据的文件头）：
+**类型**让"不 cast 的写"在每层嵌套都成编译错误；**lint 规则**让"使坏的那个 cast"成错误；
+**那个 source read**是第三张网 —— 它便宜，且在前两层万一失效时还能指出东西。
+读数照旧打出（`CASTS 2 files, 0 reach state` / `WRITES 0`）。
+
+npx vitest run 140 files / 1166 tests green；`npx eslint .` clean；typecheck 0 error；
+prettier clean（`eslint.config.mjs` 本身也过了 formatter）。

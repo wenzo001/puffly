@@ -26,10 +26,15 @@
  *     passed this file green. The write is on a different name, so a source read cannot see it.
  *   - any write that does not resemble the shapes above.
  *
- * That limit is the honest one for a source read, and it is why the type is the real guard: the
- * `DeepReadonly` check below is what makes every *uncast* write a compile error everywhere, and the
- * cast route stays open by construction. The counts are printed so a reader who sees them move knows
- * the guard has been widened, rather than having to notice.
+ * That limit is why the alias route is closed one layer up rather than here: **`state/no-state-cast`**
+ * in `eslint.config.mjs` forbids the cast itself — any `as unknown` / `as any` whose target names one
+ * of the core's state fields — so the alias needs a cast, and the cast is what CI rejects. The write
+ * stays invisible to this file; the thing that enables it does not.
+ *
+ * So the honest division, as of 2026-10-13: the **type** makes an uncast write a compile error at
+ * every depth, the **lint rule** makes the enabling cast an error, and this file is the third net — a
+ * cheap read naming what the other two would miss if they ever stopped applying. The counts are
+ * printed so a reader who sees them move knows the guard has been widened, rather than having to notice.
  */
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';

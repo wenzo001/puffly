@@ -99,6 +99,87 @@ export default tseslint.config(
     },
   },
   {
+    // SPEC.md §48: the renderer/audio/storage side only ever *reads* the simulation, and the type that
+    // says so (`DeepReadonly`) is erased at runtime. Measured 2026-10-13: one cast through the view
+    // changed the live simulation, and a source-read guard could not see the write when it sat behind
+    // an alias. This rule forbids the cast itself rather than the write it leads to, so an alias cannot
+    // be used to slip past — a write on any name is still caught by the type; a write reached by
+    // casting the view is caught here.
+    files: [
+      'apps/web/src/**/*.{ts,vue}',
+      'packages/game-scene/src/**/*.ts',
+      'packages/game-audio/src/**/*.ts',
+      'packages/game-storage/src/**/*.ts',
+    ],
+    ignores: ['**/__tests__/**', '**/*.test.ts'],
+    plugins: {
+      // §48's guard, written as a rule rather than a query: ESLint's selector language cannot say
+      // "a cast whose target names one of the core's state fields", and a rule that matches by an
+      // approximation is the same trap as a source read that matches a plausible variable name.
+      state: {
+        rules: {
+          'no-state-cast': {
+            create(context) {
+              // The core's own top-level state vocabulary. A cast *away* from readonly has to name one
+              // of these to be an escape; the two honest casts in the repo name `__pufflyScene` and
+              // `Rgb`, so they are left alone.
+              const FIELDS = new Set([
+                'cigarette',
+                'anchors',
+                'environment',
+                'ashtray',
+                'lighter',
+                'collection',
+                'progress',
+                'style',
+                'ui',
+                'stage',
+                'nowMs',
+                'nowWallClockMs',
+              ]);
+              const isEscape = (annotation) => {
+                if (annotation === null || annotation === undefined) return false;
+                if (annotation.type === 'TSTypeLiteral') {
+                  return annotation.members.some(
+                    (m) => m.key !== undefined && FIELDS.has(m.key.name),
+                  );
+                }
+                if (annotation.type === 'TSTypeReference') {
+                  const name = annotation.typeName?.name;
+                  return typeof name === 'string' && FIELDS.has(name);
+                }
+                return false;
+              };
+              return {
+                TSAsExpression(node) {
+                  if (!isEscape(node.typeAnnotation)) return;
+                  context.report({
+                    node,
+                    message:
+                      'SPEC.md §48: the state view is read-only. Casting it away is how a write ' +
+                      'reaches the simulation, and DeepReadonly erases at runtime.',
+                  });
+                },
+                TSTypeAssertion(node) {
+                  if (!isEscape(node.typeAnnotation)) return;
+                  context.report({
+                    node,
+                    message:
+                      'SPEC.md §48: the state view is read-only. Casting it away is how a write ' +
+                      'reaches the simulation, and DeepReadonly erases at runtime.',
+                  });
+                },
+              };
+            },
+          },
+        },
+      },
+    },
+    rules: {
+      'state/no-state-cast': 'error',
+    },
+  },
+  {
     files: [
       'packages/game-core/**/*.ts',
       'packages/game-content/**/*.ts',
