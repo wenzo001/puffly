@@ -8034,3 +8034,38 @@ prettier clean（`eslint.config.mjs` 本身也过了 formatter）。
 
 npx vitest run **140 files / 1167 tests green**（+1）；`npx eslint .` clean；
 typecheck 0 error；prettier clean。
+
+### #163 的那一修**没有任何东西守着**：把"能不能画出来"拆成"仓里能说的"与"只有浏览器能说的"（2026-10-13）
+
+上一格的教训是"加闸要问闸被拆了会红吗"。这一格拿它去查**上一格自己修的那件事** ——
+两枚 `.notdef` 字形换掉之后，**全仓没有任何判据提到它们**：grep 不到 `◌`/`ع` 的测试，
+只有 `scan-glyphs.mjs` 那个**探针**（探针不是闸，CI 不跑它）。
+⇒ 那次修正在**可以静静退回去**的状态。
+
+**先把"能不能画出来"这件事拆开，这是这一格最要紧的一半**：
+"这个字符在**用户的系统字体**里画不画得出来"是**用户机器的属性，不是仓的属性** ——
+单测没有浏览器也没有字体，source read 更没有。所以**单测答不了这个问题**，
+`scan-glyphs.mjs` 是唯一答得上它的仪器，而仪器不是闸。
+（`◌` 在图集那份字体里**不是** `.notdef`、在 DOM 那份字体里**是** —— 同一个字符两个答案，
+正好说明"从图集推 DOM"是推不出来的。）
+
+**于是新判据只钉仓里真的为真的两条**（`apps/web/src/__tests__/language-marks.test.ts`，5 条）：
+
+1. **没有两行戴同一枚字形** —— 这一行的用处就是让不读字的人也能一眼分出档位，
+   两行字形相同是评审看不见、界面上致命的（选替代字形时 `A` 与 English 那行一模一样，
+   当时没人在量这个）；2. **每一枚字形是单个字符**（名字拼在下面，字形长成词就是布局 bug）；
+外加两条把 #163 那次修**钉成名字**：两枚被换掉的字形不得回表、替代的两枚就是量过的那两枚。
+
+**牙（三次，各恰好红）**：
+① `ar` 改回 `A`（与 English 同形）⇒ 「no two rows wear the same mark」+「measured to render」红；
+② `auto` 改回 `◌` ⇒ 「the two marks #163 replaced are not in the table any more」红；
+③ `icons` 改成 `∅x`（两个字符）⇒ 「every mark is a single character」红。
+还原后 `copy.ts` 与 HEAD 逐字节相同。
+
+**这一格的记法**：不是"给上一格加个测试"，而是**先量清楚哪一半是能判的**。
+把"浏览器里画得出来"写成一条单测断言，那条断言要么是假的（换个字体就红），要么是没量的（装饰）。
+**能量的那一半交给 `scan-glyphs.mjs`（可复跑、对着出货构建），能量的那一半写成名字钉住。**
+⇒ 与本会话那条共用的纪律同源：**判据要钉在"它到底声明了什么"，不是"它看起来像"**。
+
+npx vitest run **141 files / 1172 tests green**（+5）；`npx eslint .` clean；typecheck 0 error；
+prettier clean。
