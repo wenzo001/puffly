@@ -27,7 +27,6 @@ const SHAPES = [
   { name: 'wide', width: 1680, height: 900, touch: false },
 ];
 
-const phaseOf = (page) => page.evaluate(() => document.querySelector('.stage')?.dataset.phase ?? 'missing');
 const affordanceOf = (page) =>
   page.evaluate(() => document.querySelector('.stage')?.dataset.affordance ?? '');
 const waitLit = async (page, withinMs = 6000) => {

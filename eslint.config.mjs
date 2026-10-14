@@ -168,6 +168,10 @@ export default tseslint.config(
         Event: 'readonly',
         getComputedStyle: 'readonly',
         performance: 'readonly',
+        // The PNG decoders read the captured frames in *this* process: a PNG's IDAT chunks are
+        // concatenated and inflated here, which is Node's own `Buffer` rather than a browser's.
+        Buffer: 'readonly',
+        Uint8Array: 'readonly',
       },
     },
   },

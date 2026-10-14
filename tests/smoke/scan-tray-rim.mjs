@@ -27,7 +27,6 @@ await page.waitForTimeout(1400);
 const anchor = await page.evaluate(() => {
   const aim = document.querySelector('.stage')?.getAttribute('data-aim') ?? '';
   const m = /(?:^| )ashtray:([0-9.]+),([0-9.]+)/.exec(aim);
-  const s = document.querySelector('.stage')?.getAttribute('data-prop-scale') ?? '';
   const boxAttr = document.querySelector('.stage')?.getAttribute('data-stage-box') ?? '';
   const bb = boxAttr.split(',').map(Number);
   const canvas = document.querySelector('canvas').getBoundingClientRect();
@@ -35,11 +34,10 @@ const anchor = await page.evaluate(() => {
   return {
     x: canvas.left + canvas.width * Number(m[1]),
     y: canvas.top + canvas.height * Number(m[2]),
-    scale: Number(s) || 0,
-    boxW: 1,
-    boxH: 1,
     cssW: canvas.width,
     cssH: canvas.height,
+    // The stage box as canvas fractions, so the rim's world radius can be converted the way
+    // `canvasToWorld` converts a position.
     boxW: bb[2] || 1,
     boxH: bb[3] || 1,
   };
@@ -58,9 +56,8 @@ const read = await page.evaluate(
     const ctx = c.getContext('2d', { willReadFrequently: true });
     ctx.drawImage(img, 0, 0);
     const sc = img.width / a.cssW;
-    const scale = a.scale || 0.075;
-    // The rim's own world scale (0.2337 on this build) is the honest radius; convert world to
-    // device px through the stage width, which is what canvasToWorld's x span does.
+    // The rim's own world scale (0.2337 on this build, read from the mesh) is the honest radius;
+    // convert it to device px through the stage width, which is what canvasToWorld's x span does.
     const stageW = 4 * (a.boxW / a.boxH) * (a.cssW / a.cssH);
     const R = Math.round(0.2337 / stageW * a.cssW * sc);
     const cx = Math.round(a.x * sc);
