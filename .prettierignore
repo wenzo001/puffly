@@ -5,3 +5,10 @@ coverage/
 dev-dist/
 node_modules/
 package-lock.json
+# Development-only smoke probes are measured artifacts, not shipped source; keep their
+# hand-authored output out of the CI formatter baseline.
+tests/smoke/*.mjs
+!tests/smoke/touch-device.mjs
+# Generated glyph atlas JSON is rasterizer output, not hand-authored source.
+apps/web/public/atlas/glyphs.json
+

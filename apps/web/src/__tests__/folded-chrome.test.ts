@@ -87,7 +87,10 @@ describe('the folded chrome leaves no ink behind (§10)', () => {
     // `rain`, `ash-flakes`), which live at the origin by construction.
     for (const reader of ['function fillCard(', 'function placeRingRig(']) {
       const start = STAGE.indexOf(reader);
-      expect(start, `${reader} is gone — the family it belongs to just changed shape`).toBeGreaterThan(-1);
+      expect(
+        start,
+        `${reader} is gone — the family it belongs to just changed shape`,
+      ).toBeGreaterThan(-1);
       const end = STAGE.indexOf('\n}\n', start);
       const body = STAGE.slice(start, end === -1 ? undefined : end);
       expect(body, `${reader} must not draw a collapsed element`).toMatch(
@@ -121,7 +124,10 @@ describe('the warm pools are shown by the one place that owns them (§2 S1)', ()
     );
     // And the meshes really are born hidden, or this guard guards nothing.
     const born = /mesh\.visible = false;/.test(
-      STAGE.slice(STAGE.indexOf("mesh.name = i === 0 ? 'pool-bloom'"), STAGE.indexOf('root.add(mesh);', STAGE.indexOf("mesh.name = i === 0 ? 'pool-bloom'"))),
+      STAGE.slice(
+        STAGE.indexOf("mesh.name = i === 0 ? 'pool-bloom'"),
+        STAGE.indexOf('root.add(mesh);', STAGE.indexOf("mesh.name = i === 0 ? 'pool-bloom'")),
+      ),
     );
     expect(born, 'the pools are no longer born hidden — re-read this guard').toBe(true);
   });

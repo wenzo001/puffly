@@ -61,7 +61,9 @@ describe('the rod is one rod (§1)', () => {
     // own stage-unit length.
     const assignment = /pose\.rodLength\s*=\s*([^;]+);/.exec(POSE);
     expect(assignment, 'the core no longer writes the rod’s length').not.toBeNull();
-    expect(assignment?.[1]?.trim(), 'the rod’s length is no longer just the core’s own').toBe('rod');
+    expect(assignment?.[1]?.trim(), 'the rod’s length is no longer just the core’s own').toBe(
+      'rod',
+    );
     expect(POSE).toMatch(/const rod\s*=\s*CIGARETTE_LENGTH\s*\*\s*clamp01\(rodRemaining\)/);
   });
 
@@ -110,7 +112,8 @@ describe('the rod is one rod (§1)', () => {
     expect(rodMesh).not.toMatch(/:position=/);
     expect(rodMesh).not.toMatch(/:rotation=/);
     // And the transform is written in `placeRod`, from the same reading as the span.
-    const place = /function placeRod\(state: GameStateView \| null\)[\s\S]*?\n}\n/.exec(STAGE)?.[0] ?? '';
+    const place =
+      /function placeRod\(state: GameStateView \| null\)[\s\S]*?\n}\n/.exec(STAGE)?.[0] ?? '';
     expect(place).toContain('rodGeometry(state)');
     expect(place).toMatch(/mesh\.position\.set\(geometryOfRod\.mid/);
     expect(place).toMatch(/mesh\.rotation\.set\(0, 0, geometryOfRod\.angle - Math\.PI \/ 2\)/);
@@ -127,7 +130,8 @@ describe('the rod is one rod (§1)', () => {
     // mid-move hid the rod for the rest of the break. The template's own `:position` never touched
     // `visible`, which is why the pre-fix code got away without it. The hide and the restore have to
     // be a pair in the same function, both driven by this frame's reading.
-    const place = /function placeRod\(state: GameStateView \| null\)[\s\S]*?\n}\n/.exec(STAGE)?.[0] ?? '';
+    const place =
+      /function placeRod\(state: GameStateView \| null\)[\s\S]*?\n}\n/.exec(STAGE)?.[0] ?? '';
     expect(place).toMatch(/mesh\.visible = false/);
     expect(
       place,

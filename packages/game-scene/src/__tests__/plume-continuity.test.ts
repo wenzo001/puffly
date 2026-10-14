@@ -182,7 +182,7 @@ function visibleContinuity(cigaretteId: string, power: number): { covered: numbe
     if (event.kind === 'burst' && event.burst.kind === 'drift') pending.push(event.burst);
   });
   const pool = new ParticlePool(1400);
-  const steps = Math.round((6000 / STEP));
+  const steps = Math.round(6000 / STEP);
   for (let i = 0; i < steps; i++) {
     h.engine.advance(STEP);
     for (const burst of pending.splice(0, pending.length)) {

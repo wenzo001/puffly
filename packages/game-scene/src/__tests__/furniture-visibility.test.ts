@@ -12,12 +12,7 @@
  * measured complaint is exactly that: solid rectangles at fill 1.0, with nothing around them.
  */
 import { describe, expect, it } from 'vitest';
-import {
-  featureBoxes,
-  featureToneColours,
-  interiorWall,
-  type FeatureTone,
-} from '../backdrop';
+import { featureBoxes, featureToneColours, interiorWall, type FeatureTone } from '../backdrop';
 import { skyPalette } from '../room';
 import { ENVIRONMENTS } from '@puffly/game-content';
 
@@ -73,11 +68,13 @@ describe("the room's furniture is drawn in colours the room actually has", () =>
       const wallL = relativeLuminance(wall);
       const inkL = relativeLuminance(tones.ink.rgb);
       // Ratio of the lighter to the darker, the WCAG shape: 1.0 means invisible.
-      const ratio =
-        (Math.max(wallL, inkL) + 0.05) / (Math.min(wallL, inkL) + 0.05);
+      const ratio = (Math.max(wallL, inkL) + 0.05) / (Math.min(wallL, inkL) + 0.05);
       if (ratio < 1.25) offenders.push(`${env.id}: io=${ratio.toFixed(3)}`);
     }
-    expect(offenders, `rooms whose ink furniture is indistinguishable from the wall: ${offenders.join(', ')}`).toEqual([]);
+    expect(
+      offenders,
+      `rooms whose ink furniture is indistinguishable from the wall: ${offenders.join(', ')}`,
+    ).toEqual([]);
   });
 
   it('reports which tones every room draws with, so the palette can be read at a glance', () => {

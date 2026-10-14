@@ -23,7 +23,9 @@ describe('the burn line is the core’s own burn state, read once', () => {
     const half = rodBurnLineAt(0.5);
     const spent = rodBurnLineAt(0.05);
     // Printed, because "it moved" is the weakest form of this claim — how far it moved is the fact.
-    console.log(`BURN line fresh=${fresh.toFixed(3)} half=${half.toFixed(3)} spent=${spent.toFixed(3)}`);
+    console.log(
+      `BURN line fresh=${fresh.toFixed(3)} half=${half.toFixed(3)} spent=${spent.toFixed(3)}`,
+    );
     expect(fresh).toBe(0);
     expect(half).toBeCloseTo(0.5, 6);
     expect(spent).toBeCloseTo(0.95, 6);

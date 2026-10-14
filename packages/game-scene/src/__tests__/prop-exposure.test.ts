@@ -47,9 +47,7 @@ const linearToSrgb = (v: number): number => {
   return Math.round(Math.max(0, Math.min(1, c)) * 255);
 };
 const luminance = (rgb: readonly [number, number, number]): number =>
-  0.2126 * srgbToLinear(rgb[0]) +
-  0.7152 * srgbToLinear(rgb[1]) +
-  0.0722 * srgbToLinear(rgb[2]);
+  0.2126 * srgbToLinear(rgb[0]) + 0.7152 * srgbToLinear(rgb[1]) + 0.0722 * srgbToLinear(rgb[2]);
 
 /**
  * What `MeshStandardMaterial` does with an ink under one light, which is the whole arithmetic this
@@ -132,14 +130,18 @@ describe("the room's props are lit by the room's own exposure", () => {
     // Normalising must not flatten the rooms into one another: the whole point of the old line's
     // *colour* was that a warm room lights its props warm. `pub-corner` and `station-booth` are the
     // two extremes — one warm and one cool — and their key inks must differ.
-    const warm = keyLightInk(skyPalette(
-      ENVIRONMENTS.find((e) => e.id === 'pub-corner')!.lighting,
-      ENVIRONMENTS.find((e) => e.id === 'pub-corner')!.background,
-    ).skyBottom);
-    const cool = keyLightInk(skyPalette(
-      ENVIRONMENTS.find((e) => e.id === 'station-booth')!.lighting,
-      ENVIRONMENTS.find((e) => e.id === 'station-booth')!.background,
-    ).skyBottom);
+    const warm = keyLightInk(
+      skyPalette(
+        ENVIRONMENTS.find((e) => e.id === 'pub-corner')!.lighting,
+        ENVIRONMENTS.find((e) => e.id === 'pub-corner')!.background,
+      ).skyBottom,
+    );
+    const cool = keyLightInk(
+      skyPalette(
+        ENVIRONMENTS.find((e) => e.id === 'station-booth')!.lighting,
+        ENVIRONMENTS.find((e) => e.id === 'station-booth')!.background,
+      ).skyBottom,
+    );
     expect(warm.rgb[0] - warm.rgb[2]).toBeGreaterThan(10);
     expect(cool.rgb[2] - cool.rgb[0]).toBeGreaterThan(10);
   });
@@ -159,10 +161,9 @@ describe("the room's props are lit by the room's own exposure", () => {
         );
       }
     }
-    expect(
-      offenders,
-      `rooms where the props' tonal order broke: ${offenders.join('; ')}`,
-    ).toEqual([]);
+    expect(offenders, `rooms where the props' tonal order broke: ${offenders.join('; ')}`).toEqual(
+      [],
+    );
   });
 
   it('reports the light as dark as the sky would have been, so the rule cannot be silently undone', () => {
@@ -232,7 +233,8 @@ describe("the room's wall marks never land on the wall's own luminance", () => {
     for (const room of everyRoomPalette()) {
       const lit = luminance(detailTone(room.silhouette, room.horizon, 2));
       const wall = luminance(room.wall);
-      if (!(lit > wall)) offenders.push(`${room.id}: lit window ${lit.toFixed(4)} <= wall ${wall.toFixed(4)}`);
+      if (!(lit > wall))
+        offenders.push(`${room.id}: lit window ${lit.toFixed(4)} <= wall ${wall.toFixed(4)}`);
       for (const kind of [0, 1, 3]) {
         const dark = luminance(detailTone(room.silhouette, room.horizon, kind));
         if (!(dark < wall)) {
@@ -240,7 +242,9 @@ describe("the room's wall marks never land on the wall's own luminance", () => {
         }
       }
     }
-    expect(offenders, `wall marks on the wrong side of the wall: ${offenders.join('; ')}`).toEqual([]);
+    expect(offenders, `wall marks on the wrong side of the wall: ${offenders.join('; ')}`).toEqual(
+      [],
+    );
   });
 
   it('reports the room ids when a palette makes its own wall marks invisible', () => {
@@ -250,7 +254,8 @@ describe("the room's wall marks never land on the wall's own luminance", () => {
     for (const room of everyRoomPalette()) {
       const old = mixHalf(room.horizon, room.silhouette);
       const ratio = luminanceRatio(room.wall, old);
-      if (ratio < DETAIL_MIN_RATIO) offenders.push(`${room.id}: old kind 2 at ratio ${ratio.toFixed(3)}`);
+      if (ratio < DETAIL_MIN_RATIO)
+        offenders.push(`${room.id}: old kind 2 at ratio ${ratio.toFixed(3)}`);
     }
     expect(offenders.length).toBe(ENVIRONMENTS.length);
     expect(offenders.join(', ')).toContain('quiet-room');

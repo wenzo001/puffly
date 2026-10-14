@@ -390,9 +390,7 @@ const rodGeometry = (state: GameStateView | null): RodGeometry | null => {
     // is a stage-plane pair and never degenerate for a published anchor pair — the first frames draw
     // from there until the state arrives.
     const mirror = rod.value;
-    return mirror === null
-      ? null
-      : { span: mirror.length, mid: mirror.mid, angle: mirror.angle };
+    return mirror === null ? null : { span: mirror.length, mid: mirror.mid, angle: mirror.angle };
   }
   return {
     span,
@@ -817,10 +815,7 @@ function onSceneReady(context: unknown): void {
   // A `PlaneGeometry` only owns a `color` attribute once `vertexColors` is asked for; it is built by
   // touching the attribute at setup, which also proves the attribute exists before the frame loop
   // ever reads it.
-  const colour = new THREE.BufferAttribute(
-    new Float32Array(12).fill(0.5),
-    3,
-  );
+  const colour = new THREE.BufferAttribute(new Float32Array(12).fill(0.5), 3);
   tableRampMesh.geometry.setAttribute('color', colour);
   tableRampColourAttribute = colour;
 
@@ -2343,7 +2338,10 @@ function placeRodEnd(state: GameStateView | null, len: number): void {
     const inset = acrossWorld * 0.55;
     const cap = pointAt(1);
     cherry.position.set(cap[0] - axis.x * inset, cap[1] - axis.y * inset, 0.007);
-    const radius = Math.max(acrossWorld * 0.5, ember.glowRadius * spanWorld * 0.34 * (1 + ember.flare * 0.5));
+    const radius = Math.max(
+      acrossWorld * 0.5,
+      ember.glowRadius * spanWorld * 0.34 * (1 + ember.flare * 0.5),
+    );
     cherry.scale.set(radius * 2, radius * 2, 1);
     cherryMaterial?.color.setRGB(hot[0] / 255, hot[1] / 255, hot[2] / 255, THREE.SRGBColorSpace);
     if (cherryMaterial !== null) cherryMaterial.opacity = clamp01(0.8 * total);
@@ -4680,11 +4678,7 @@ function placeMouth(state: GameStateView | null): void {
 
       <!-- The rod: a cylinder between the two published points (its true ends), rotated by the
          angle they imply. `placeRod` pinches its rings while a draw is held (S7/S15). -->
-      <TresMesh
-        v-if="rod !== null"
-        ref="rodMesh"
-        name="rod"
-      >
+      <TresMesh v-if="rod !== null" ref="rodMesh" name="rod">
         <TresCylinderGeometry
           :args="[(0.1 * ROD_THICKNESS_SHARE) / 2, (0.1 * ROD_THICKNESS_SHARE) / 2, 0.1, 12, 16]"
         />
