@@ -8170,3 +8170,20 @@ ESLint 选择器匹配 `TSTypeReference` 而实际是 `TSUnknownKeyword`、字�
 改成 **`element.remove()`** 之后守卫立刻按预期走。
 ⇒ 同一教训的第十次：**制造失败形状要用与真实失败相同的机制**（§159 那族是"重渲染把节点摘了"，
 不是"节点藏了"），否则你量的不是你要守的那条路。
+
+### 验收跑抓到两条红，一条是我上一格引入的 flake，另一条归时序族 —— 各自处理（2026-10-13）
+
+全绿之后又跑了一次完整验收（`device-suite9.log`），**172 条里 2 红**。两条都查了归属：
+
+| 红 | 归属 | 处理 |
+| --- | --- | --- |
+| `S10: the scroll proof itself ran on both surfaces` | **我上一格引入的 flake**：sheet 按 §10 在最后一次输入 2.6 s 后自收，而 scroll proof 跑在 1.4 s 等待之后 —— 慢 runner 上那个窗口先关 ⇒ `landed:false / no open sheet`，下一趟又绿 | **已修**：proof 提成 `runScrollProof()`，`landed:false` 时**有界重跑**（wake → 重开 sheet → 再证，最多三次）——与全文件"等条件、不等墙钟"同一规则 |
+| `3D: a cherry going dark dims instead of pushing outward` — "9 步里 1 步在长"（此前两趟 8 步 0 长）| 时序族（#160/#147）："读的是一个瞬间，瞬间未到就红" —— 9 步是采样到的瞬间，其中一步采到了 flare 的**长**而非暗 | **不改**：cherry 半径公式自我 d3f01e0 以来未动（diff 里 4 行全是类型声明/注释/格式化），归 #160/#147 已记的族 |
+
+**验证**：重跑 `device-suite10.log` **172/172**（条数 +2 是上一格新加的两条守卫判据），
+其中 "the scroll proof itself ran on both surfaces — both stage and sheet were present" 与
+"a swipe down over nothing: the swipe itself landed — landed" 都按新路径走到。
+
+**这条也解释了一个此前没记录的现象**：守卫加进去之后，它自己会**制造一个新的失败形状**
+（"守卫触发的那次没跑到"）—— 这是好事（失败可见），但**必须跟着配重跑**，否则守卫本身就是 flake。
+上一格我只写了守卫、没写重跑，验收跑一抓一个准。

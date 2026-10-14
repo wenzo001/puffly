@@ -3020,29 +3020,42 @@ try {
   // The stage is not a scroll box: `overflow: hidden` would still let any descendant that asks to
   // be revealed scroll it, which is how the scene got pushed out above. The sheet must still
   // scroll, or this check would be satisfied by a page that cannot scroll anything.
-  const scrollProof = await page.evaluate(async () => {
-    const stage = document.querySelector('main.stage');
-    // §159's family: each of these is a red with a reason, not a crash that takes the run.
-    if (stage === null) return { landed: false, note: 'no main.stage' };
-    stage.scrollTop = 500;
-    const forced = stage.scrollTop;
-    stage.scrollTop = 0;
-    // The positive control: the sheet that is open right now must still scroll, or `forced === 0`
-    // would only prove that nothing on the page can move.
-    const sheet = document.querySelector('.sheet[data-open="true"]');
-    if (sheet === null) return { landed: false, note: 'no open sheet for the positive control' };
-    sheet.scrollTop = 0;
-    sheet.scrollTop = 200;
-    const sheetMoved = sheet.scrollTop;
-    sheet.scrollTop = 0;
-    return {
-      forced,
-      sheetMoved,
-      overflow: getComputedStyle(stage).overflowY,
-      scrollHeight: stage.scrollHeight,
-      clientHeight: stage.clientHeight,
-    };
-  });
+  //
+  // The sheet folds itself 2.6 s after the last input (§10), and this proof runs after a 1.4 s wait —
+  // on a runner at ~3.5 fps that window closes first, which measured as `landed:false / no open
+  // sheet` on one run and green on the next. So the proof re-runs (bounded) whenever it could not
+  // reach both surfaces, waking and reopening — the same "wait for the condition, not the wall
+  // clock" rule the rest of this file follows.
+  const runScrollProof = () =>
+    page.evaluate(async () => {
+      const stage = document.querySelector('main.stage');
+      // §159's family: each of these is a red with a reason, not a crash that takes the run.
+      if (stage === null) return { landed: false, note: 'no main.stage' };
+      const sheet = document.querySelector('.sheet[data-open="true"]');
+      if (sheet === null) return { landed: false, note: 'no open sheet for the positive control' };
+      stage.scrollTop = 500;
+      const forced = stage.scrollTop;
+      stage.scrollTop = 0;
+      sheet.scrollTop = 0;
+      sheet.scrollTop = 200;
+      const sheetMoved = sheet.scrollTop;
+      sheet.scrollTop = 0;
+      return {
+        landed: true,
+        forced,
+        sheetMoved,
+        overflow: getComputedStyle(stage).overflowY,
+        scrollHeight: stage.scrollHeight,
+        clientHeight: stage.clientHeight,
+      };
+    });
+  let scrollProof = await runScrollProof();
+  for (let retry = 0; retry < 3 && scrollProof.landed === false; retry += 1) {
+    await wakeChrome(page);
+    await page.click('[data-entry="skins"]');
+    await page.waitForTimeout(1200);
+    scrollProof = await runScrollProof();
+  }
   check(
     'S10: the scroll proof itself ran on both surfaces',
     scrollProof.landed === true,
