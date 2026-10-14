@@ -8147,3 +8147,26 @@ ESLint 选择器匹配 `TSTypeReference` 而实际是 `TSUnknownKeyword`、字�
 （像本会话对单元判据做的那样），那是小时级的活，不是一格。
 
 提交：缸沿拍板与全壳复查两格一起进（本笔），`git status` 干净。
+
+### §159 那两道守卫的**失败路径**实测过 —— 而且第一版探针自己量错了（2026-10-13）
+
+上一格给 swipe 与 S10 各补了一道守卫，但只在代码形状上验过。这一格在真页面上把
+**失败形状**驱动出来，确认守卫在"该红的时候"给出的是**原因**而不是抛错。
+
+**结果（真页面）**：
+
+| 形状 | 读数 |
+| --- | --- |
+| swipe，正常 | `{landed:true}` |
+| swipe，`.hit` 被**移除** | `{landed:false, note:"no .hit — the swipe never landed anywhere"}` |
+| S10，sheet 开着 | `{landed:true, forced:0, sheetMoved:200}`（正控真的滚了 200）|
+| S10，sheet 被**移除** | `{landed:false, note:"no open sheet for the positive control"}` |
+
+⇒ **OK: both guards answer with a reason on the failure shape, and both pass on the healthy shape.**
+
+**第一版探针量错了，错在哪（值得记）**：我想制造失败形状用的是**把 `.hit` 设成 `display:none`** ——
+结果守卫根本没触发。原因：**`querySelector` 找得到 `display:none` 的节点** ——
+隐了之后读两帧，元素还在、内联样式还在。守卫拦的是"节点不在了"，不是"节点看不见了"。
+改成 **`element.remove()`** 之后守卫立刻按预期走。
+⇒ 同一教训的第十次：**制造失败形状要用与真实失败相同的机制**（§159 那族是"重渲染把节点摘了"，
+不是"节点藏了"），否则你量的不是你要守的那条路。
