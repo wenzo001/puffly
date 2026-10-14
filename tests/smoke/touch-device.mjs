@@ -936,7 +936,16 @@ const hintCentre = async (page) => {
   const props = await propsOf(page);
   const rod = await stagePoint(page, props.body.x, props.body.y);
   await page.touchscreen.tap(rod.x, rod.y);
-  await page.waitForTimeout(300);
+  // The 300 ms this replaced is a wall-clock window, and on a runner at ~6.7 fps the state machine
+  // has not reached `lighter` in it (measured: `affordance:"pick"` after the tap, red). Wait for the
+  // condition instead — the same rule `holdDraw` and `lightRod` follow.
+  await page
+    .waitForFunction(
+      () => document.querySelector('.stage')?.dataset.affordance === 'lighter',
+      null,
+      { timeout: 4000, polling: 'raf' },
+    )
+    .catch(() => {});
   const inHand = await stageWords(page);
   check(
     'once it is in hand the word changes to the next gesture',
@@ -1189,6 +1198,13 @@ const hintCentre = async (page) => {
   // drawer covers the lower half, so the press is aimed at the canvas above it — and that aim is
   // asserted, because a check that presses the panel reports a working dismissal as a broken one.
   await openSheet(page, 'shelf');
+  // §10's fold can land here too: `data-open` flips false while the node stays, so `querySelector`
+  // returns null, `panelTop` falls back to `canvas.bottom`, and the dismissal press aims *inside*
+  // where the sheet was (measured: point 197,828, `sheets 1 then 1`). Re-open through the same
+  // helper — its retry loop is what a folded sheet needs — before aiming the press.
+  if ((await page.locator('.sheet[data-open="true"]').count()) === 0) {
+    await openSheet(page, 'shelf');
+  }
   const drawerOpen = await panelState(page);
   const spot = await page.evaluate(() => {
     const canvas = document.querySelector('canvas').getBoundingClientRect();
@@ -1217,6 +1233,10 @@ const hintCentre = async (page) => {
     `sheets ${String(drawerOpen.sheets)} then ${String(drawerScene.sheets)}`,
   );
   await openSheet(page, 'shelf');
+  // Same fold guard: the reads below index `.sheet[data-open="true"]` directly.
+  if ((await page.locator('.sheet[data-open="true"]').count()) === 0) {
+    await openSheet(page, 'shelf');
+  }
   // The panel's own header: a tile would answer by taking that rod into the hand, which the reads
   // further down this file depend on not having happened.
   await tapAt(page.locator('.sheet[data-open="true"] .head .count').first());
@@ -1978,7 +1998,26 @@ try {
   const { page, errors, context } = await openPhone({ width: 393, height: 852, dpr: 3 });
   const chrome = () =>
     page.evaluate(() => {
+      // §159's family, and §10 together: the HUD folds itself away 2.6 s after the last input, so
+      // this helper — called from blocks that sometimes run with the chrome folded — has to answer
+      // "not on screen" instead of throwing. The first version read `row.querySelector` on `null`
+      // and crashed the whole run from inside an evaluate.
       const row = document.querySelector('.hud');
+      if (row === null) {
+        const stage = document.querySelector('.stage');
+        return {
+          phase: stage?.dataset.phase ?? '',
+          affordance: stage?.dataset.affordance ?? 'missing',
+          ring: '',
+          arc: '',
+          primary: '',
+          alt: '',
+          figures: [],
+          pill: '',
+          lit: [],
+          folded: true,
+        };
+      }
       const cell = (sel) => (row.querySelector(sel)?.textContent ?? '').trim();
       const stage = document.querySelector('.stage');
       return {
@@ -2661,6 +2700,12 @@ try {
   const zhAimAt = Date.now();
 
   await openSheet(page, 'settings');
+  // §10's fold can land between the language reads above and this open (measured: one run's open
+  // fell after the fold, and the `.close` boundingBox below threw). Re-open through the same helper
+  // — its retry loop is what a folded sheet needs — and only proceed when it really attached.
+  if ((await page.locator('.sheet[data-open="true"]').count()) === 0) {
+    await openSheet(page, 'settings');
+  }
   const sheet = () => page.locator('.sheet[data-open="true"]');
   const rows = async () =>
     (await sheet().locator('.label').allTextContents()).map((line) => line.trim());
@@ -3699,17 +3744,34 @@ try {
   // flame the page did not show. Bounded, and the count travels into the detail (#161).
   let strikeTries = 0;
   let flameAppeared = false;
-  while (strikeTries < 3 && !flameAppeared) {
+  let rodLit = false;
+  while (strikeTries < 3 && !flameAppeared && !rodLit) {
     strikeTries += 1;
     await page
       .locator('.pill')
       .click({ timeout: 5000 })
       .catch(() => {});
-    flameAppeared = await page
-      .waitForFunction(`${flameSrc}.visible`, null, { timeout: 6000, polling: 60 })
+    // The affordance is the state machine's own reading: if it says `lighter` or `puff` the rod is
+    // lit whether or not the flame frame was the one this poll caught. Measured 2026-10-13 on the
+    // software-render path: three strikes reported `flameAppeared:false` while the rod *was* lit
+    // (the wide block lit the same build through this exact condition), and the two ignition checks
+    // reddened on a rod that was already burning.
+    rodLit = await page
+      .waitForFunction(
+        () => {
+          const a = document.querySelector('.stage')?.dataset.affordance ?? '';
+          return a === 'lighter' || a === 'puff';
+        },
+        null,
+        { timeout: 6000, polling: 150 },
+      )
       .then(() => true)
       .catch(() => false);
-    if (!flameAppeared) await wakeChrome(page, '.pill').catch(() => {});
+    flameAppeared = await page
+      .waitForFunction(`${flameSrc}.visible`, null, { timeout: 2500, polling: 60 })
+      .then(() => true)
+      .catch(() => false);
+    if (!flameAppeared && !rodLit) await wakeChrome(page, '.pill').catch(() => {});
   }
   // The cap's throw is an animation, and the lid's angle is the figure this check compares. Reading
   // the frame the flame appears in caught the lid mid-throw (-0.48 of -1.36 rad on 2026-10-11, where
@@ -4915,15 +4977,25 @@ try {
   // The wait therefore stops at whichever comes first, at 30 ms granularity inside a ~830 ms window;
   // a window that closes with no bar leaves the read to report `present: false`, which is the honest
   // answer, not a retry.
-  await page
-    .waitForFunction(
-      () =>
-        document.querySelector('.cta svg.art.force') !== null ||
-        window.__pufflyScene?.puffReady === true,
-      null,
-      { timeout: 1500, polling: 30 },
-    )
-    .catch(() => null);
+  //
+  // The timeout is a *frame* count, not a wall-clock one: on a runner at ~6.7 fps a 1.5 s window is
+  // ~10 frames, and the bar never got a chance to mount (measured: `present:false` after three draws
+  // that provably ran). The core's own settle window (900 ms) at this page's worst measured frame
+  // rate (~5 fps) is ~4.5 s of wall — so the ceiling is `restSettleMs × 5`, the same conversion the
+  // ignition block makes for its 6 s budget, without needing a probe field that does not exist.
+  const settleMs = 900;
+  await Promise.race([
+    page
+      .waitForFunction(
+        () =>
+          document.querySelector('.cta svg.art.force') !== null ||
+          window.__pufflyScene?.puffReady === true,
+        null,
+        { polling: 'raf' },
+      )
+      .catch(() => null),
+    page.waitForTimeout(settleMs * 5).catch(() => null),
+  ]);
   const forceBar = await page.evaluate(() => {
     const svg = document.querySelector('.cta svg.art.force');
     const rects = svg
