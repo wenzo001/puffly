@@ -7662,3 +7662,30 @@ npx vitest run 138 files / 1157 tests green；typecheck 0 error；eslint/prettie
 
 **方法论备忘（这轮又验证一次）**：眼睛先看到"两个矩形浮着"，lum 窗口一放宽就变成 468px 宽的整片墙。
 **"看起来像离散物体"和"真的是离散物体"之间差一次阈值扫描** —— 与 §4537 那条连续性尺子的教训同族。
+
+### §39 的"它自己亮一下"与 moment 行：两处都查到底，都是**已覆盖**，没有新判据可加（2026-10-13）
+
+审计清单收口之后，按目标里的"成就"往深查了一层，看 §39 的 reveal 与审计 #3 里
+"moment 行什么都不显示"那半是不是真的闭合。
+
+**§39 reveal（`useJustLit` → `data-fresh` → 动画）三段都在，且都有判据**：
+- `reveal.test.ts` 4 条钉住"什么时候算新闻"：开门不算成就、只在开着的时候亮才算、
+  关着的时候亮了不补演、第二次亮是新的moment；
+- `achievement-ladder.test.ts` 钉住 `data-fresh` 同时驱动 `rung-lit` 与 `rung-fill`，
+  且两者都在 `prefers-reduced-motion` 里被关掉；
+- `SessionSheet.vue` 里 `@keyframes rung-lit` / `rung-fill` 与 `--ease-out` 都在。
+
+⇒ 我自己写了一个真机探针想从外面再验一遍，**但它驱动不到"跨过一栏"那一刻**：
+第一栏在两个月总量的 1/12（sticks 13 支），现成存档里没有那么多口，而引擎没有
+测试用的 progress 杠杆，我也不打算为一个探针去加一个。探针已删，没留假的绿灯。
+**这里记一句：这条链的判据已经够了，再加一把尺子量不到新东西。**
+
+**moment 行（审计 #3 的" Worse: they show nothing at all"）现成帧上逐行读**：
+
+| 行 | name | count | reached | bar | count 色 |
+| --- | --- | --- | --- | --- | --- |
+| 一阵风 | 可见 | `0.98风力还没有` | false | scaleX(0) | `rgb(242,237,230)` |
+| 妖风 | 可见 | `0.99风力还没有` | false | scaleX(0) | 同上 |
+| 邪风 | 可见 | `0.996风力还没有` | false | scaleX(0) | 同上 |
+
+⇒ 名字、阵风读数、单位词、状态词（还没有）、进度条、颜色**六样都在**。审计那半确认关闭。
