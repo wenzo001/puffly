@@ -100,3 +100,29 @@ describe('the folded chrome leaves no ink behind (§10)', () => {
     );
   });
 });
+
+describe('the warm pools are shown by the one place that owns them (§2 S1)', () => {
+  it('the glow loop still shows its meshes, because they are born hidden', () => {
+    // `3246d9a` deleted `mesh.visible = true` from this loop by accident: a whole-file string replace
+    // aimed at `placeRod`'s own identical line matched here first, because this one comes earlier in
+    // the file. The pools are born `visible = false` (they are, and the backdrop root starts hidden
+    // too), so the loop is the only place that may show them — and the device suite was what caught
+    // it: `pool-bloom` and `pool-warm` reported `vis: false`, two of the three reds in its 170 checks
+    // that were not measurement artefacts.
+    //
+    // The rule this pins: a mesh born hidden must be shown by the pass that owns it, and a pass that
+    // owns a `visible` write may not lose it to a rewrite of some other function's identical line.
+    const start = STAGE.indexOf('structure.glows.forEach(');
+    expect(start, 'the warm pools are no longer placed').toBeGreaterThan(-1);
+    const end = STAGE.indexOf('});', start);
+    const body = STAGE.slice(start, end);
+    expect(body, 'the pools are born hidden, so this loop must show them').toMatch(
+      /mesh\.visible = true/,
+    );
+    // And the meshes really are born hidden, or this guard guards nothing.
+    const born = /mesh\.visible = false;/.test(
+      STAGE.slice(STAGE.indexOf("mesh.name = i === 0 ? 'pool-bloom'"), STAGE.indexOf('root.add(mesh);', STAGE.indexOf("mesh.name = i === 0 ? 'pool-bloom'"))),
+    );
+    expect(born, 'the pools are no longer born hidden — re-read this guard').toBe(true);
+  });
+});

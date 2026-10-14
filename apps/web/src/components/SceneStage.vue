@@ -1625,7 +1625,12 @@ function applyBackdrop(state: GameStateView | null): void {
     const mesh = poolMeshes[index];
     const material = poolMaterials[index];
     if (mesh === undefined || material === undefined) return;
-  
+    // The pools are born invisible (the backdrop root starts hidden too), so this is the one place
+    // that may show them. `3246d9a` deleted this line by accident — a whole-file string replace
+    // aimed at `placeRod`'s own `mesh.visible = true` matched here first, because this one comes
+    // earlier in the file — and the device suite caught it: `pool-bloom` and `pool-warm` reported
+    // `vis: false`, the only two reds in its 170 checks that were not a measurement artefact.
+    mesh.visible = true;
     const world = canvasToWorld({ x: light.x, y: light.y }, box.value, aspect.value);
     // Two pools, two depths, because the deck draws them as two different facts: the one above the
     // table edge is light on the wall (so it has to clear the wall's near-black plate), the one
