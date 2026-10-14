@@ -7918,3 +7918,54 @@ build 过；出厂 `apps/web/dist/atlas/glyphs.json` 读出 406 格 / 18 `.notde
 
 **没有改产品，也没有改判据**（两次变异都还原，`git diff` 干净）。这一格的价值是
 **把上一轮那句过头的话收回来**，并且用两次变异把"它到底拦不拦得住"变成可复算的事实。
+
+### §48「只能读状态」：那句"是编译错误，不是约定"**只对一半**，另一半没有任何闸（2026-10-13）
+
+台账 §5813 那行记着：§48「拿深冻的活快照喂场景读者」那半**今天没有同名读者**
+（`grep -rl freeze --include='*.test.ts'` 只答出 `rain-fall.test.ts` 里不相干的一处）。
+这格去查了，结论分三半。
+
+**① 类型这一半是真的。** 编译一个探针打 `GameStateView`：
+`view.nowMs = 123`、`view.cigarette.puff.lastDraw = 1`、`view.anchors.body.x = 0.5`
+三行**全是** `TS2540: Cannot assign to … because it is a read-only property`，每层嵌套都拦得住。
+⇒ `readonly.ts` 那句「§48 is a compile error rather than a convention」，对**不 cast 的代码**成立。
+
+**② 但类型在运行时不存在。** `DeepReadonly` 编译后抹掉，而 `getState()` 交出去的就是引擎**自己**
+在改的那个对象。实测一行：
+
+    const view = state as unknown as { cigarette: { puff: { lastDraw: number } } };
+    view.cigarette.puff.lastDraw = 0.99;
+    engine.getState().cigarette.puff.lastDraw   // → 0.99，模拟被改了
+
+⇒ 所以那句话的准确写法是：**类型让诚实的写变成编译错误；没有任何东西让不诚实的写失败。**
+
+**③ 缺口有多大（量出来，不猜）**：生产代码里一共 **2 处** `as unknown as`，**一处都没碰到状态** ——
+`SceneStage.vue` 把 `__pufflyScene` 挂到 `window`，`backdrop.ts` 把一个颜色数组 cast 成 `Rgb`。
+⇒ 现在守得住靠的是**纪律**，不是"闸拦住了"。
+
+**新判据**（`apps/web/src/__tests__/state-view-readonly.test.ts`，3 条）钉住能钉的部分，
+并且**把自己抓不抓得住写进了文件头**（三次变异实测）：
+
+| 变异 | 结果 |
+| --- | --- |
+| `view.cigarette.puff.lastDraw = …`（按壳里给 view 的名字）| **红** |
+| `(state as unknown as { nowMs }).nowMs = …`（赋值挂在 cast 上）| **红**（第一版只盯 `view.x =`，这一条**漏过去了**）|
+| `const w = state as unknown as {…}; w.cigarette.… = 0.5`（先取别名再普通写）| **绿 —— 抓不到** |
+
+第三条是这条判据的**真实上限**，也照实写进了注释：一个 source read 看不见另一个名字上的写。
+真正的闸仍然是**类型**（③里那些 cast 才是唯一漏进来的路），而这条路**按构造就是开着的**。
+读数也一并打出来（`CASTS 2 files, 0 reach state` / `WRITES 0`），
+这样有人看到数字变了，知道是判据被放宽了，不用自己去发现。
+
+**这个坑记一笔，因为它是我本会话第六次同一种**：
+① `pose.rodLength` 正则匹配的是"有这行"不是"右边只有 rod"；
+② `<TresMesh…>` 懒惰尾巴吞到文件末尾；
+③ `mesh.visible = true` 单行删（真回归是整块）；
+④ `justLit=[...ids]` 在空列表下与正确实现同构；
+⑤ 新旧两枚字形：一个探针量的是新建 span（漏组件作用域 + line-height 不同）；
+⑥ 本格第一版把 `state.`/`live.` 当 view，报出三个假阳性（一个 PRNG 引用、两个指针坐标）。
+
+⇒ 共用的那条：**判据必须在"错法与对法不同"的场景里被验过**，而写判据时最容易顺手写出一个
+在**空/平凡输入下两者同构**的版本 —— 那样的判据必然是绿的，也必然是装饰的。
+
+npx vitest run **140 files / 1166 tests green**（+3）；typecheck 0 error；eslint/prettier clean。
