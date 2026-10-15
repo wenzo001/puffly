@@ -186,3 +186,37 @@ alongside `gpuAdapter=null`. The probe could not see the adapter the app had jus
 would have relaxed itself on hardware that could meet it: a silent relaxation, which is the failure mode
 this whole file is a catalogue of. The gate is now the backend the app itself chose (`webgpu` is
 positive proof of a GPU; `webgl2` proves nothing either way, and the detail line says which branch ran).
+
+## 6. After the first five commits: three more, one still open
+
+Verified by re-running both paths against the committed tree (`173` checks — the guard below added one
+named check, which is why the denominator moved from 172 to 173):
+
+- **The last unguarded dereference of the #114 family was still in the file.** Under `--disable-gpu` the
+  run died at check 60 of 172 with `TypeError: Cannot read properties of null (reading 'x')` on
+  `ceilingBox.x` — `.pill` folded away and the `box` fallback read before the fold, so both were null at
+  once. Now it wakes once, re-reads, and reports a named miss instead of ending the run. That run then
+  completed: **171/173**, no `TypeError`.
+- **`right-to-left: the burning end stays on the same side` was a fixed constant standing in for a
+  quantity the page measures better.** The canvas half asserted `|ΔmeanX| ≤ 3` between two reads of a
+  rod that is burning; it reddened four times including once on the *normal* path (`x 225.7→214.4`,
+  `227.7→216.7`, tilt drifting 45–57 over the same span). The tolerance is now `3 + (drift measured on
+  the same rod, same language, one more window) × windows`, printed in the detail. Re-run: **173/173**,
+  and that check passed on `x 214.6→214.6 (budget 3.8 = 3 + 0.2px/window × 5)` — a true zero delta, not a
+  widened gate.
+- **The flint's sparks were the last sampler in the block, and the recorder caught it.** With the flame
+  and cap finally reading `lit=true lid=-1.36` on the starved page, `sparks` still answered false: the
+  burst lives ~1 s of sim and the 14 s poll could sit either side of it. It rides the same rAF recorder
+  now.
+- **A bug in my own previous commit, found by reading the line back**: the DPR gate's *else* branch was
+  `TIER_DPR_CAP.balanced` (2) — the else branch is the page running **fine**, so every healthy 3×
+  desktop was being painted at 2×, which is the exact "tapping 少一点烟 blurs the screen" harm the gate
+  exists to prevent. Now `TIER_DPR_CAP.high`.
+
+**Still open, named so it does not get lost:** `the breath has light and dark inside it` reddened once on
+the normal path — `relative spread 0.214 over 5969 cloud pixels (9.0% of the band, 295 discs, painted at
+2x)` against a documented 0.66–1.03 floor. Two candidates, not yet separated: the auto ladder削了羽化
+预算, or the plume really is flatter than the 2026-10-11 baseline. The experiment that separates them is
+reading the same sample with the quality pinned to its top rung; settings live in IndexedDB, so that
+needs a seeded profile and did not fit this round. It is **not** the DPR bug above: that context is a
+coarse pointer, capped at 2× before and after alike (the suite's own first reading says so).
