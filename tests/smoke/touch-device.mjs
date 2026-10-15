@@ -812,8 +812,26 @@ async function wakeChrome(page, target = '.rail') {
     if (await control.isVisible().catch(() => false)) return;
     await page
       .locator('canvas')
-      .click({ position: { x: 24, y: 24 }, force: true, noWaitAfter: true });
-    await page.waitForTimeout(120);
+      .first()
+      .click({ position: { x: 24, y: 24 }, force: true, noWaitAfter: true })
+      .catch(() => {});
+    // Wait for the control, not for a beat. The fixed 120 ms this used to sleep is **less than one
+    // frame** on the page this helper exists for — the same run that reported `handle:"zero-box",
+    // hitTag:"none"` measured 13–24 fps, and an earlier one measured 2 — so the press reset the idle
+    // clock and the helper gave up before the browser had a chance to repaint `display`. Bounded, and
+    // on a healthy page it returns on the first poll.
+    await page
+      .waitForFunction(
+        (sel) => {
+          const el = document.querySelector(sel);
+          if (el === null) return false;
+          const r = el.getBoundingClientRect();
+          return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden';
+        },
+        target,
+        { timeout: 2500, polling: 100 },
+      )
+      .catch(() => {});
   }
   throw new Error(`wakeChrome: ${target} stayed hidden through three presses on the sky`);
 }
