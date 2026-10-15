@@ -2437,9 +2437,26 @@ try {
   /** The row’s 「n / m」 figure — the count itself, whichever slot the current phase parks it in. */
   const drawCount = (read) => countOf(read.figures.find((text) => text.includes('/')) ?? '');
   const beforeCeiling = await chrome();
-  const ceilingBox = (await page.locator('.pill').boundingBox()) ?? box;
-  await page.mouse.move(ceilingBox.x + ceilingBox.width / 2, ceilingBox.y + ceilingBox.height / 2);
-  await page.mouse.down();
+  // The last unguarded dereference of this family (#114 → #159 → #161): `.pill` is folded away on a
+  // starved page and the `box` fallback was read before the fold, so both can be null at once. Measured
+  // 2026-10-15 under `--disable-gpu`: `TypeError: Cannot read properties of null (reading 'x')` here
+  // ended the run at check 60 of 172 — one lost red became a lost run again, which is the exact shape
+  // these guards exist to stop. Wake once, then either press or report the miss by name.
+  const pillBox = (await page.locator('.pill').boundingBox()) ?? box;
+  if (pillBox === null) await wakeChrome(page, '.pill').catch(() => {});
+  const ceilingBox = pillBox ?? (await page.locator('.pill').boundingBox());
+  check(
+    'the pill has a box to press for the ceiling hold',
+    ceilingBox !== null,
+    String(ceilingBox),
+  );
+  if (ceilingBox !== null) {
+    await page.mouse.move(
+      ceilingBox.x + ceilingBox.width / 2,
+      ceilingBox.y + ceilingBox.height / 2,
+    );
+    await page.mouse.down();
+  }
   // Confirm this press actually began a draw before waiting on its ceiling. On the starved CI page
   // (11.6 fps) the press can be swallowed whole — the same shape #122 and #160 caught on the rod —
   // and then the row never wears a force figure for reasons that have nothing to do with the ceiling.
