@@ -215,8 +215,15 @@ named check, which is why the denominator moved from 172 to 173):
 
 **Still open, named so it does not get lost:** `the breath has light and dark inside it` reddened once on
 the normal path — `relative spread 0.214 over 5969 cloud pixels (9.0% of the band, 295 discs, painted at
-2x)` against a documented 0.66–1.03 floor. Two candidates, not yet separated: the auto ladder削了羽化
-预算, or the plume really is flatter than the 2026-10-11 baseline. The experiment that separates them is
-reading the same sample with the quality pinned to its top rung; settings live in IndexedDB, so that
-needs a seeded profile and did not fit this round. It is **not** the DPR bug above: that context is a
-coarse pointer, capped at 2× before and after alike (the suite's own first reading says so).
+2x)` against a documented 0.66–1.03 floor. Two candidates, not yet separated: Two candidates, and reading the check's own escape hatch narrows it: the escape
+`ratio > 0 && ratio < 2` only excuses a low spread when the frame is painted at 1×, and this reading
+came back at **2×** — so the DPR branch of the ladder is ruled out by the number itself. What is left is
+that the cloud genuinely was an even haze (295 discs over 9.0% of the band is a full footprint with no
+internal light-versus-dark), which is the very shape the check was written to catch. So the question is
+not "is the ruler wrong" but "what flattened the plume": either the ladder spends per-disc variation
+before it spends resolution, or the exhale's structure regressed since the 2026-10-11 baseline
+(0.66–1.03). The separating experiment, in order of cost: sample `cloudShape` ~6 times on one build and
+look for bimodality (a haze-versus-structure split, which points at the ladder intervening mid-breath),
+then read the same sample with the rung pinned to its top through the settings row (`button.choice`,
+re-read `aria-pressed` after the tap — settings are persisted in IndexedDB, so a seeded profile is only
+needed if the UI route is unavailable). Not run this round; recorded so it is not lost.
