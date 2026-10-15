@@ -227,3 +227,32 @@ look for bimodality (a haze-versus-structure split, which points at the ladder i
 then read the same sample with the rung pinned to its top through the settings row (`button.choice`,
 re-read `aria-pressed` after the tap — settings are persisted in IndexedDB, so a seeded profile is only
 needed if the UI route is unavailable). Not run this round; recorded so it is not lost.
+
+## 7. The plume red is a true positive, and it is the white-out
+
+The separating experiment ran (`tests/smoke/probe-plume-spread.mjs` — the check's own `cloudShape`
+ruler, copied verbatim, driven by a *held* draw; the first version clicked instead of holding and fed
+16–36 discs where the check's failing reading carried 295, i.e. it measured a breath that never
+happened, which is why that run is discarded rather than quoted). Eight held breaths on a healthy page,
+three samples each, and the answer inverts the check's own comment:
+
+| what the sample is | lifted share of the band | cloudPx | spread |
+| --- | --- | --- | --- |
+| a real exhale, mid-flight | 36.5% | 10 708 | **0.264** |
+| the same breath, one moment later | 9.2% | 2 685 | **0.190** |
+| the tail, a few discs left | 0.05–0.1% | 16–131 | 0.41–0.54 |
+
+So `spread` does not sit at 0.66–1.03 for every state of the breath — that baseline was read while the
+footprint was small. The bigger the breath, the more uniform the lift, and the lower the spread: at a
+third of the band lifted, the cloud is **an even veil**, which is exactly the shape
+`the breath has light and dark inside it` was written to catch. The check is right and the plume is
+wrong.
+
+This is the same fact the player reported as 「按空格吸烟的时候那个界面会有变白」: a held draw covers
+roughly a third of the frame with a near-uniform lift. It is not the warm bloom's alpha and not the
+DOM chrome hiding — those were the earlier candidates — it is that the exhale's own painting has no
+internal structure at the size where it matters. Fixing it means giving the discs per-particle
+variation in alpha/size (the artwork), not tuning a threshold, and it is a decision about how a breath
+should look rather than a measurement I can settle alone.
+
+Reproduce: `node tests/smoke/probe-plume-spread.mjs http://127.0.0.1:4183/puffly/`.
