@@ -6,7 +6,7 @@
  * re-render on a human scale instead of once per particle (§54, §81 (9), §81 (10)).
  */
 
-import { computed, onBeforeUnmount, ref, type ComputedRef, type Ref } from 'vue';
+import { computed, onBeforeUnmount, ref, shallowRef, type ComputedRef, type Ref } from 'vue';
 import { formatClock } from '@puffly/shared';
 import {
   anchorForTarget,
@@ -147,8 +147,22 @@ export function preferredDpr(): number {
   return Math.min(
     window.devicePixelRatio || 1,
     matchMedia('(pointer: coarse)').matches ? MAX_DPR_COARSE : MAX_DPR,
+    tierDprCap.value,
   );
 }
+
+/**
+ * The backing-store cap the frame-rate ladder is allowed to reach for.
+ *
+ * The ladder used to stop at the smoke: `quality` had no reader in the scene at all, so a device
+ * that could not hold frames was told to draw fewer particles and kept drawing four times the
+ * pixels it could not fill. Fill rate is the thing that is actually out of budget on such a machine
+ * — a 393 × 852 phone at dpr 2 is 1.3 million shaded pixels a frame — so the bottom rung now takes
+ * the ratio down with it. A ref, because `preferredDpr()` is read from the scene's template and a
+ * plain `let` there would never re-evaluate.
+ */
+const TIER_DPR_CAP: Record<QualityMode, number> = { auto: 3, high: 3, balanced: 2, light: 1 };
+const tierDprCap = shallowRef<number>(TIER_DPR_CAP.high);
 
 /** A phone at 3x is 3.4 million pixels of smoke per frame; it cannot show the difference. */
 const MAX_DPR_COARSE = 2;
@@ -164,9 +178,19 @@ const MAX_DPR_COARSE = 2;
 const AUTO_TIERS: readonly QualityMode[] = ['high', 'balanced', 'light'];
 /** Below this an average frame is late; above it, the device has room to spare. */
 const SLOW_FRAME_MS = 22;
+/** Spending the backing store takes a worse page than spending smoke does — see `applyEffectiveQuality`. */
+const SLOW_FRAME_MS_FOR_RATIO = 40;
 const FAST_FRAME_MS = 13.5;
 /** ~1/8 of a second of frames, so one stall from a background tab is not a trend. */
 const FRAME_SMOOTHING = 0.06;
+/** The frames a tier must be held before the ladder may move again. */
+const TIER_HOLD_FRAMES = 90;
+/**
+ * ... or the milliseconds, whichever comes first, with a small frame floor so the average has
+ * actually seen something. On a 3 fps page `TIER_HOLD_FRAMES` alone is thirty seconds.
+ */
+const TIER_HOLD_MS = 1500;
+const TIER_HOLD_MIN_FRAMES = 6;
 
 function coarsePointer(): boolean {
   return typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
@@ -434,8 +458,12 @@ export function createPuffly(): Puffly {
   /** The tier `quality: 'auto'` has settled on; the player's own choice is never overwritten. */
   let autoTier: QualityMode = startingTier();
   let frameEmaMs = 1000 / 60;
-  /** Frames spent at the current tier, so a tier cannot be swapped on the very next frame. */
+  /** Frames (and milliseconds) spent at the current tier, so a tier cannot be swapped on the very
+   *  next frame — see `TIER_HOLD_MS` for why frames alone are the wrong unit on a slow page. */
   let tierHeldFrames = 0;
+  let tierHeldMs = 0;
+  /** The frame average that justified the most recent rung change, before the average was re-aimed. */
+  let lastSlowFrameMs = 0;
 
   const effectiveQuality = (): QualityMode =>
     settings.value.quality === 'auto' ? autoTier : settings.value.quality;
@@ -473,18 +501,38 @@ export function createPuffly(): Puffly {
 
   const applyEffectiveQuality = (): void => {
     const quality = effectiveQuality();
+    // Two budgets, two gates. The ladder may spend resolution only when it is the one deciding —
+    // this control is labelled 烟 and its four glyphs read as one thing (how much smoke), so tapping
+    // `·` to thin the smoke must not also soften the whole screen. And spending resolution needs a
+    // worse page than spending smoke does: measured the day this first shipped, on a hardware
+    // accelerated run, the ladder still walked down to `light`, which would have painted that
+    // session at 1× had the ratio been gated on the rung alone.
+    tierDprCap.value =
+      settings.value.quality === 'auto' && lastSlowFrameMs > SLOW_FRAME_MS_FOR_RATIO
+        ? TIER_DPR_CAP[quality]
+        : TIER_DPR_CAP.balanced;
     engine?.setSettings({ ...settings.value, quality });
   };
 
   /**
    * One pass of the ladder, from the frame time that just arrived. Deliberately dumb: no
    * sampling windows, no percentiles, nothing that needs a tuning session on a real device.
+   *
+   * The hold is bounded by wall clock as well as by frames, and that is the whole point. Ninety
+   * frames is a fifth of a second on the device this ladder was written for — but on a machine
+   * rendering at three frames a second it is thirty seconds, and the average itself needs ~1/0.06
+   * frames to converge, so the ladder could not reach a verdict on exactly the hardware it exists
+   * to protect. Six frames is already a trend when each one costs a third of a second.
    */
   const watchFrames = (dt: number): void => {
     if (settings.value.quality !== 'auto') return;
     frameEmaMs += (dt - frameEmaMs) * FRAME_SMOOTHING;
     tierHeldFrames += 1;
-    if (tierHeldFrames < 90) return;
+    tierHeldMs += dt;
+    const settled =
+      tierHeldFrames >= TIER_HOLD_FRAMES ||
+      (tierHeldFrames >= TIER_HOLD_MIN_FRAMES && tierHeldMs >= TIER_HOLD_MS);
+    if (!settled) return;
 
     const index = AUTO_TIERS.indexOf(autoTier);
     let next = index;
@@ -494,6 +542,11 @@ export function createPuffly(): Puffly {
 
     autoTier = AUTO_TIERS[next] ?? autoTier;
     tierHeldFrames = 0;
+    tierHeldMs = 0;
+    // The reading that justified the step, kept across the reset: `applyEffectiveQuality` asks for
+    // it, and by the time it runs the average has already been re-aimed at the new budget. Without
+    // this the ratio gate would compare against 1000/60 and never open.
+    lastSlowFrameMs = frameEmaMs;
     // Re-aim the average at the new tier so the next decision is about the new budget.
     frameEmaMs = 1000 / 60;
     applyEffectiveQuality();
