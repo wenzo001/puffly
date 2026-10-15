@@ -372,3 +372,11 @@ pill stops answering, not tuning the press.
 
 Recorded this way on purpose: the hypothesis is written down *with* its refutation so nobody (including
 the next me) re-proposes the gesture-coalescing story from §10's text alone.
+
+**One candidate left untested, on purpose.** The next thing worth trying was the cheapest version of
+"run the block's prefix": open a sheet on a clean page, then press the pill, and see whether ignition
+fails. The probe for it crashed on my own ordering bug (a `locator.count()` placed after
+`browser.close()`), and fixing a throwaway script was not a better use of the remaining budget than
+finishing the verified work — so the hypothesis *"an open panel is what stops the pill answering in
+that block"* is recorded as **untested, not disproved**. It is the first thing to try next, and
+`tests/smoke/probe-press-route.mjs` (which works, and which is what refuted §10) is the shape to copy.
