@@ -926,7 +926,13 @@ async function openSheet(page, id, mouse = false) {
     if (!(await awake(selector).catch(() => false))) {
       await wakeChrome(page, selector).catch(() => {});
     }
-    const pressed = mouse ? await clickAt(handle) : await tapAt(handle);
+    // The route follows the context, not the caller's flag. CI's own report (and a local run under the
+    // same flags) showed `events:[]` on a button whose hit test was perfect: a `touchscreen.tap` on a
+    // context built without touch is silently a no-op, so every desktop and wide-layout call that
+    // forgot `mouse=true` reported "the sheet never opened". `maxTouchPoints` is the page's own answer
+    // to "can this context be tapped at all", so a caller cannot get it wrong again.
+    const tappable = await page.evaluate(() => navigator.maxTouchPoints > 0).catch(() => false);
+    const pressed = mouse || !tappable ? await clickAt(handle) : await tapAt(handle);
     const opened = await page
       .waitForSelector('.sheet[data-open="true"]', {
         state: 'attached',
