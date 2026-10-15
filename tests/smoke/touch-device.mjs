@@ -874,6 +874,35 @@ async function openSheet(page, id, mouse = false) {
       .catch(() => false);
     if (opened) break;
   }
+  // When all three laps fail, say WHY rather than only THAT. `missing:["close"]` on CI's runner told us
+  // the sheet never opened but not which half of the gesture died: a handle that is not awake (the
+  // chrome folded, so the tap lands on empty stage), an awake handle whose tap produced no sheet (the
+  // press was swallowed), or a sheet that opened and closed again inside the same window. Those three
+  // have three different fixes and only the first two are visible from here.
+  if ((await page.locator('.sheet[data-open="true"]').count()) === 0) {
+    const why = await page
+      .evaluate((target) => {
+        const el = document.querySelector(target);
+        const r = el?.getBoundingClientRect();
+        const hit =
+          r && r.width > 0
+            ? document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)
+            : null;
+        return {
+          handle: el === null ? 'absent' : r && r.width > 0 ? 'onscreen' : 'zero-box',
+          hitIsHandle:
+            hit !== null && el !== null && (el === hit || el.contains(hit) || hit.contains(el)),
+          hitTag: hit
+            ? `${hit.tagName.toLowerCase()}.${String(hit.className).split(' ')[0]}`
+            : 'none',
+          affordance: document.querySelector('.stage')?.dataset.affordance ?? '',
+          sheets: document.querySelectorAll('.sheet').length,
+          openAny: document.querySelectorAll('.sheet[data-open="true"]').length,
+        };
+      }, selector)
+      .catch(() => null);
+    console.log(`FAIL  openSheet(${id}) never opened — ${JSON.stringify(why)}`);
+  }
   // Settle by geometry, not by a fixed beat. The sheet slides in for ~380 ms, and on the software
   // page 460 ms of wall clock is fewer than three frames — reads taken mid-entrance saw the close
   // button somewhere other than where its own hit test landed, and aimed the dismissal tap inside the
