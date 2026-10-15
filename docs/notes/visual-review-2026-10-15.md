@@ -471,3 +471,38 @@ destroyed by me rather than by the product.
 `wake-sw` is the interesting one and is unexamined: it ran **after** the wake fix and still lost a block,
 which is the same shape as §13's unresolved fold race. Reading its FAIL lines is the next thing to do,
 and it is the honest reason this file does not claim CI will go green.
+
+## 15. CI's own report answered the sheet question, and the answer is not timing
+
+After the pushed `35a260e`, the tap-delivery probe (installed in `openSheet`) reports what the button
+itself saw. Both shapes of the failure carry the same payload:
+
+```
+{"handle":"onscreen","rect":[282,787,85,54],"aim":[324,814],"hitIsHandle":true,"hitTag":"button.tab",
+ "events":[], "sheets":3,"openAny":0}                       ← phone context
+{"handle":"zero-box","rect":[0,0,0,0],"viewport":[1280,800],
+ "events":[], "hitIsHandle":false,"hitTag":"none"}           ← desktop context
+```
+
+`events:[]` means **no `pointerdown`, no `touchstart`, no `click` ever reached the element** — in the
+first case although the hit test says the tap point is dead-centre on the button. So every
+"wait longer / wake first / re-tap" theory this round carried is beside the point: the input was never
+delivered.
+
+The two shapes have one common cause and it is the harness, not the page: `openSheet(page, id)` presses
+with `touchscreen.tap` unless the caller passes `mouse=true`, and the desktop/wide blocks reach it
+through paths that mostly do not. A `touchscreen.tap` on a context without touch is **silently a
+no-op** — which is exactly a zero-box desktop handle, an `events:[]` phone tap that looked perfect, and
+then a cascade of "the sheet never opened" reds.
+
+**The fix, stated but not yet applied** (it needs a full run to verify, and this round's budget is
+spent): pick the route from the context rather than from a caller flag — `openSheet` should ask whether
+the page has touch (or read the same `hasTouch` the block used to build the context) and use
+`clickAt` when it does not. Then the desktop bar, the wide sidebar and `settings` on a desktop viewport
+all press by the only route that exists there.
+
+Effect measured so far, same flags, before that fix: the sheet family shrank from CI's 5 reds to 2, the
+ignition pair went green once the sparks moved to a scene-side high-water mark (`probe.sparksPeak`,
+because the burst is shorter than the gap between two frames and even a per-frame sampler misses it),
+and one more bare dereference of the #114 family was closed (`exhale` is `null`, not `undefined`, and
+the old guard let null through — one lost check became an aborted run again).
