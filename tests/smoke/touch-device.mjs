@@ -2369,7 +2369,16 @@ try {
   );
 
   // Hold the pill: the arc is the draw itself, and the row counts seconds while it runs.
-  const box = await page.locator('.pill').boundingBox();
+  // §10's idle timer folds the pill away, and this block reaches here after the lighting loop has spent
+  // its wall clock on a starved page: measured 2026-10-15 under `--disable-gpu`, `boundingBox()` came
+  // back null right here and the four checks downstream of the draw all died with it (169/174, and the
+  // sheet family was green that run — so this one miss, not the panels, is what the software page
+  // actually costs). Wake through the same bounded helper the rest of this family uses, then re-read.
+  let box = await page.locator('.pill').boundingBox();
+  if (box === null) {
+    await wakeChrome(page, '.pill').catch(() => {});
+    box = await page.locator('.pill').boundingBox();
+  }
   if (box === null) {
     // Same family as #159: `boundingBox()` is null for a control that never got a box, and the two
     // lines below used to throw on `.x` — which ended the run rather than reporting one check.
