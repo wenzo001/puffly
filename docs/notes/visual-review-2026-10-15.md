@@ -420,3 +420,29 @@ one line — which is the whole reason to put the state into a red instead of a 
 What this round did *not* fix, unchanged from §5: the props still read dark against a ground roughly
 twice as bright as the design's, and the big exhale is still a near-uniform veil (which is the
 white-out). Both are palette/artwork decisions, not measurements.
+
+## 13. The wake fix did not clear it either — recorded so the next cut starts from the right place
+
+`wakeChrome` was changed from a 120 ms sleep to a bounded wait for the control to actually appear
+(plus `.first()` on the canvas locator, which is a real fix for the wide layout's two canvases). The
+starved page still reports the same line:
+
+```
+FAIL  openSheet(settings) never opened — {"handle":"zero-box","hitIsHandle":false,"hitTag":"none",
+      "affordance":"puff","sheets":3,"openAny":0}
+```
+
+So *"the wake slept through a frame"* is **disproved by the fix itself** — the third hypothesis this
+round that died by my own hand. Two readings in that line had not been looked at:
+
+- `hitTag:"none"` means `elementFromPoint` answered **null**, which does not happen for a point inside
+  the viewport — a folded control at (0,0) returns the element stack there. Null means the point is
+  **off-screen**, i.e. the rail's rect is not zero-at-origin but has a negative or oversized coordinate,
+  so `r.x + r.width / 2` lands outside the frame.
+- `affordance:"puff"` says the break was already running with the rod lit when this block asked for the
+  settings panel — a state the block does not expect to arrive in.
+
+The next cut, therefore, is not "wait longer": it is to print the rail's actual rect and the viewport
+size at that moment (one line in the same diagnostic), and to check whether the settings block assumes
+an idle break that the preceding blocks no longer leave it with. Both are cheap; neither is done, and
+nothing in this file claims otherwise.
