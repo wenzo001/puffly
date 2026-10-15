@@ -2544,7 +2544,10 @@ try {
     'S4: the exhale wears that draw’s force in the ring, and the bar says it without a word',
     heldForce.digits === '' &&
       heldForce.glyph === 'airflow' &&
-      exhale !== undefined &&
+      // `!= null`, not `!== undefined`: when no exhale was sighted the read hands back `null`, which
+      // slipped past the old guard and threw on `.digits` — one lost check became an aborted run
+      // again (measured 2026-10-15 under `--disable-gpu`, at the head of the S4 block).
+      exhale != null &&
       /^\d+$/.test(exhale.digits) &&
       Number(exhale.digits) >= 1 &&
       Number(exhale.digits) <= 100 &&
