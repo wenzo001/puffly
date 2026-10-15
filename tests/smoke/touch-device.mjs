@@ -859,6 +859,26 @@ const clickAt = (locator, withinMs = 2500) =>
 async function openSheet(page, id, mouse = false) {
   const selector = SHEET_HANDLE[id];
   const handle = page.locator(selector);
+  // A pinned archive card left open by the tier blocks covers everything this helper is about to
+  // reach. Measured 2026-10-15 (`/tmp/wake-sw.txt`, a page carrying every fix in this round): the
+  // sheet's own `.close` centre hit `aside.archive` — `blocked:["close=aside.archive<…|open=1|card=1"]`
+  // — the rail handle answered `zero-box`, and the dismissal press aimed at the stage landed on the
+  // card instead of `.hit`. That is not the idle fold and not an overlay theory: the card is only in
+  // the DOM while open (`App.vue`: `v-if="archiveFacts !== null"`), and it was open.
+  //
+  // It has to be closed by its **own** button. A press on the scene deliberately does nothing while the
+  // card is pinned (`dismissArchive` returns early, and that is the design: 钉住就是为了不被划走), so
+  // the wake-style helpers cannot clear it. The card's close handler drops the pin as well, so this
+  // leaves the page in the state the sheet blocks assume.
+  if ((await page.locator('.archive').count()) > 0) {
+    await clickAt(page.locator('.archive .close').first()).catch(() => {});
+    await page
+      .waitForFunction(() => document.querySelectorAll('.archive').length === 0, null, {
+        timeout: 4000,
+        polling: 120,
+      })
+      .catch(() => {});
+  }
   /** Is that handle somewhere a finger would actually land — on screen, and nothing else on top? */
   const awake = (sel) =>
     page.evaluate((target) => {
