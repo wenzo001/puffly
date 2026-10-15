@@ -319,3 +319,34 @@ same grid probe run **at the moment of the failure**, i.e. inside the suite rath
 Recorded so the next session does not re-invent the overlay theory: the two candidate causes that
 *are* dead are (a) stale aim geometry (the aim is computed from the live panel top and lands correctly)
 and (b) a covering layer (nothing covers anything).
+
+## 10. Where the software-rendered page stands at the end of this round
+
+Two more instrument bugs were found and cleared, each by a run rather than by argument:
+
+- `openSheet`'s own diagnostic never fired, and the sheet family (the fifteen that killed CI's run on
+  `31d0461`) is **green** on the starved page in the last two runs.
+- The pill is folded away by §10 before the draw block reaches it, so `boundingBox()` was null there and
+  four downstream checks died with it. It wakes through the same bounded helper the rest of the family
+  uses now; that red is gone, and the normal path stayed at **173/173**.
+
+What is left on the starved page is a single chain, and it is named by its own readings:
+`lighting it moves the rail off the flame … lighting attempts 4` with `affordance:"lighter"`,
+`pill:"点着"`, `lit:["light"]` — **four presses on the pill never ignited the rod**, and
+`holding the pill draws`, `S4's exhale` and `the draw's ceiling` are all downstream of a breath that
+never started. 168/173.
+
+The candidate mechanism, which is testable and not yet tested: the block presses with
+`mouse.down`/`mouse.up` at the pill's box, while the ignition that *did* work in
+`probe-lighter-subtree.mjs` used `locator('.pill').click()`. A down/up pair that lands inside one frame
+of a 13–19 fps page can be coalesced away by the browser's gesture pipeline — which is the same
+"the instrument's timing, not the product" family this whole file documents. The experiment that
+settles it: in that block, press via the same route the working probe used, and if the four reds clear,
+the cause was the gesture route; if they do not, the press is arriving and the sim is refusing to
+ignite, which would be a product question about `LIGHTING` under a starved clock and belongs to the
+player as a decision, not to me as a threshold to tune.
+
+**Not claimed anywhere in this file:** that CI is green. The device job's remaining behaviour on
+GitHub's runner is only knowable from a run there, and the local software proxy's red count has rotated
+between 167 and 171 of 172–174 across seven runs, which is why every count above is written with its
+flags and its command.
