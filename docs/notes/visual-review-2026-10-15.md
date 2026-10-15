@@ -1,9 +1,9 @@
 # Visual and CI review, 2026-10-15
 
-Scope: the four complaints handed in by the player (scroll area leaks, the skins panel flickers at
-the bottom, the lighter/pack/ashtray read black, the screen whitens and flickers while inhaling, the
-rod is too thick and thins when drawn), plus "is the code, the picture and the goal still the same
-document", plus the one red CI job.
+Scope: the five complaints handed in by the player (scroll area leaks above the panel, the skins panel
+flickers at the bottom, the lighter/pack/ashtray read black, the screen whitens and flickers while
+inhaling, the rod is too thick and thins when drawn), plus "is the code, the picture and the goal still
+the same document", plus the one red CI job.
 
 Everything below was measured on this machine against `apps/web/dist` built with
 `PUBLIC_BASE=/puffly/ npm run build`. Re-run commands are printed with each claim, because a number
@@ -25,10 +25,14 @@ FAIL  单口时长 leaves the rod in charge … — {"pressed":"missing", …}
 ```
 
 `missing:["close"]` is `document.querySelector('.sheet[data-open="true"] .close')` answering *null*:
-the sheet never opened. `blocked:["rail","head"]` is the same fact wearing the other sign — those two
-are `display:none` after §10's 2.6 s idle fold, so their rects are zero and their hit tests land
-anywhere else. Every FAIL after that first one reads a sheet, a row or a track that only exists while
-a sheet is open. **One cause, fifteen reds.**
+the sheet never opened. `blocked:["rail","head"]` is reported by the same evaluate for a control whose
+`elementFromPoint` is not itself — the two readings that produce it are a control that has folded to
+`display:none` (rect zero, so the probe hits whatever sits at the origin) and a control genuinely
+covered by an open panel. §10's fold is the one that fits a page that never opened a sheet, but the
+report does not carry the rect, so **which of the two it was on the runner is not measured — it is the
+shape the fold has**. Every FAIL after that first one reads a sheet, a row or a track that only exists
+while a sheet is open. **One cause, fifteen reds** — that part is not in doubt, because all fifteen
+disappear together in the local reproduction below.
 
 Reproduce (this machine has no Chrome.app and no GPU-forced runner; the flags below make the local
 page behave like the runner):
@@ -144,13 +148,19 @@ one. The shape test therefore matches on the seeded `(x, y)` plus the layer's ow
 
 ## 5. The complaints that were already repaired, and the one that is not
 
-Repaired and measured earlier in this same round, all still uncommitted here: the settings/skins panel
-leaking content outside its scroll area (strict full-containment cull plus the missing clip planes on
-`sheetSurfaces`), the flicker at the bottom of the skins list (surface pool 40 → 80, frame pool 36 →
-48, and element-keyed ownership replacing index slots), the rod's thickness and its thinning when
-drawn (`ROD_THICKNESS_SHARE`, `DIP_SHARE` in `packages/game-scene/src/props.ts`), and the props'
-metalness (no environment map exists, so `metalness > 0` only subtracts diffuse light and takes the
-lighter, pack and ashtray toward black).
+Repaired and measured earlier in this same round, now committed, each with the place to look: the
+settings/skins panel leaking content outside its scroll area (strict full-containment cull at
+`SceneStage.vue:3836` and `:3899`, plus the clip planes `sheetSurfaces` was missing while runs, frames
+and sliders all had them), the flicker at the bottom of the skins list (surface pool 80 and frame pool
+48 at `SceneStage.vue:3669-3670`, raised from 40 and 36 to the measured demand — 60 nodes inside the
+viewport wanted a plate in that panel — and ownership keyed by element rather than by index slot; 20
+cards that were not being drawn at all now are), the rod's thickness and its thinning when drawn
+(`props.ts:52` `ROD_THICKNESS_SHARE = 7.8 / 84`, `props.ts:161` `DIP_SHARE = 0.06`), and the props' metalness (there is no environment map, so `metalness > 0` only subtracts diffuse light
+and returns nothing). **That last one is a partial repair, not a fix, and the re-shot
+`docs/images/phone-smoke.jpg` is the proof**: with the metalness at zero the lighter, the pack and the
+ashtray are still flat black rectangles against a lit wall, and the wall still carries stray thin lines
+and grey dashes (clutter kinds 0/1/3). So the player's complaint 「打火机 烟盒 烟灰缸都是黑的」 stands
+after this round, and §5's next paragraph is about why.
 
 **Still open, and it is not a bug I can measure shut:** the lighter, pack and ashtray keep reading as
 dark holes because the room's *ground* is roughly twice as bright (linear) as the design's. Reaching
@@ -162,3 +172,17 @@ the prop inks (15.1 → 24.1 against a ground of 52–59.6, i.e. still a hole). 
 palette decision across the 21 rooms, which is the player's eye, not a ruler. The white-out during
 inhaling has the same root: `pool-bloom` rises 0.259 → 0.44 with the plume while §2 hides the DOM
 chrome, so the frame brightens and its darkest object goes away at the same moment.
+
+**Two rulers re-run against the committed build, to keep §5's numbers from being memory:** the leak
+acceptance (`node tests/smoke/probe-band-20261015.mjs`) reports the band above the panel identical to
+the closed-sheet band at three scroll positions — `delta_vs_closed=0.0` at scroll 0 / 120 / 300; the
+per-frame flicker acceptance (`node tests/smoke/probe-sheet-frames.mjs`) reports `frames sampled 90`,
+`per-frame changed: max 0 mean 0.00 nonzero 0 / 89`, `distinct placements 70 of 70 slots` — STABLE.
+
+**One instrument in this round was wrong and was caught by its own reading.** The frame-rate floor was
+first gated on `navigator.gpu.requestAdapter()`, on the theory that it is the runner's own GPU signal.
+The normal-path run printed the refutation: `backend=webgpu, frames 141→184 (+43 in 700 ms)` — 61 fps —
+alongside `gpuAdapter=null`. The probe could not see the adapter the app had just obtained, so the floor
+would have relaxed itself on hardware that could meet it: a silent relaxation, which is the failure mode
+this whole file is a catalogue of. The gate is now the backend the app itself chose (`webgpu` is
+positive proof of a GPU; `webgl2` proves nothing either way, and the detail line says which branch ran).
