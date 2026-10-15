@@ -402,9 +402,20 @@ product does (a press on `.hit`), wait bounded for it to go, and assert `the dra
 panel over the pill` as its own named check.
 
 **Result, both paths, same tree:** software-rendered CI proxy **174/174**, normal path **174/174**.
-That is the first time this round the local reproduction of CI's runner is fully green, and it is the
-evidence that the device job can go green on GitHub's GPU-less runner — though only a run there can
-confirm it, which is the one thing I cannot do from here.
+That green is **one run, not a stable state**: a second run of the identical tree and flags came back
+with five reds, so the honest claim is "the panel-over-pill chain is closed and the proxy can be
+green", not "the proxy is green". What the second run did add is the next cause, named by the
+instrument rather than guessed:
+
+```
+FAIL  openSheet(settings) never opened — {"handle":"zero-box","hitIsHandle":false,"hitTag":"none",
+      "affordance":"puff","sheets":3,"openAny":0}
+```
+
+`handle:"zero-box"` with `hitTag:"none"` is §10's fold in the act: the rail is `display:none`, its rect
+is zero, and `elementFromPoint` at that point answers *nothing at all*. So the remaining software-page
+reds are the idle-fold race, and the diagnostic I added for the opposite purpose now identifies it in
+one line — which is the whole reason to put the state into a red instead of a verdict.
 
 What this round did *not* fix, unchanged from §5: the props still read dark against a ground roughly
 twice as bright as the design's, and the big exhale is still a near-uniform veil (which is the
