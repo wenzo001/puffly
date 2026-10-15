@@ -2912,8 +2912,19 @@ try {
   // states still have to agree, just not better than time itself lets them.
   await page.waitForTimeout(520);
   const arAimAgain = await propsOf(page);
+  // The canvas half needs the same treatment the state half already got. The rod is burning between
+  // the two language reads, so its drawn centroid moves by whatever the burn moves it — measured
+  // 2026-10-15 on the *normal* path (WebGPU, 61 fps): `x 225.7 → 214.4` across the switch, 11.3 px
+  // against a hand-picked ±3, with `tilt` drifting −1423 → −1366 over the same span. That red is not
+  // the mirror and not the machine: it is a fixed number standing in for a quantity the page measures
+  // better than I did. So the control is the same rod in the same language over one more window, and
+  // the tolerance is ±3 plus that drift scaled by the span the switch took. The claim is unchanged —
+  // switching language must not move the rod beyond what time alone moves it.
+  const arSceneAgain = await rodBox(page);
+  const sceneDrift = Math.abs(arSceneAgain.meanX - arScene.meanX);
   const perWindow = Math.abs(arAimAgain.ember.x - arAimAgain.body.x - arLean);
   const windows = Math.max(1, Math.ceil((arAimAt - zhAimAt) / 520));
+  const xBudget = 3 + sceneDrift * windows;
   // And below that sits the instrument itself: the aim is published as decimal text, so two reads can
   // differ by one quantum of the mirror's own precision with nothing having moved at all (this is
   // what the run measured — the burn had drifted 0.0000 while the two reads differed by 0.0001). The
@@ -2941,7 +2952,7 @@ try {
       // lean sign and the same pixels rather than a mirrored picture.
       arScene.n > 200 &&
       Math.abs(arScene.n - zhScene.n) / zhScene.n < 0.1 &&
-      Math.abs(arScene.meanX - zhScene.meanX) <= 3 &&
+      Math.abs(arScene.meanX - zhScene.meanX) <= xBudget &&
       Math.abs(arScene.meanY - zhScene.meanY) <= 3 &&
       arScene.tilt !== 0 &&
       Math.sign(arScene.tilt) === Math.sign(zhScene.tilt) &&
@@ -2951,8 +2962,7 @@ try {
     `lean ${zhLean.toFixed(4)}→${arLean.toFixed(4)} budget ${leanBudget.toFixed(4)} ` +
       `(the burn moves ${perWindow.toFixed(4)} per 520ms × ${String(windows)} windows, ` +
       `mirror quantum ${quantum.toExponential(0)}), ` +
-      `n ${zhScene.n}→${arScene.n}, ` +
-      `x ${zhScene.meanX.toFixed(1)}/${String(Math.round(zhScene.box[2] / 2))}→${arScene.meanX.toFixed(1)}/${String(Math.round(arScene.box[2] / 2))}, tilt ${zhScene.tilt.toFixed(0)}→${arScene.tilt.toFixed(0)}, ` +
+      `n ${zhScene.n}→${arScene.n}, x ${zhScene.meanX.toFixed(1)}/${String(Math.round(zhScene.box[2] / 2))}→${arScene.meanX.toFixed(1)}/${String(Math.round(arScene.box[2] / 2))} (budget ${xBudget.toFixed(1)} = 3 + burn drift ${sceneDrift.toFixed(1)}px/window × ${String(windows)}), tilt ${zhScene.tilt.toFixed(0)}→${arScene.tilt.toFixed(0)}, ` +
       `flipped=${JSON.stringify(await sceneFlip(page))}`,
   );
 
@@ -3905,6 +3915,13 @@ try {
             w.__lidOpen = q.snap;
           }
         }
+        // The flint's sparks are the same shape of claim and were the last sampler left in this block:
+        // the burst lives ~1 s of sim, so on the starved page the poll could sit either side of it and
+        // answer false for a flint that threw sparks (measured 2026-10-15: the flame and the cap came
+        // through the recorder at `lit=true lid=-1.36` while `sparks` still read false).
+        root?.traverse((o) => {
+          if (o.name === 'sparks' && o.count > 0) w.__sparksEver = true;
+        });
       } catch {
         // A frame that cannot be read is not a failure of the picture; the assertion below only
         // reports the peaks, so a lost sample shows up as a peak that never rose.
@@ -3979,19 +3996,10 @@ try {
   // with room for the burst's own life — the 4 s version reddened on a loaded machine while the
   // runs either side of it were green (2026-10-11).
   const sparksSeen = await page
-    .waitForFunction(
-      () => {
-        const ctx = window.__pufflyScene.context;
-        const scene = 'value' in ctx.scene ? ctx.scene.value : ctx.scene;
-        let count = 0;
-        scene.traverse((o) => {
-          if (o.name === 'sparks') count = o.count;
-        });
-        return count > 0;
-      },
-      null,
-      { timeout: 14_000, polling: 60 },
-    )
+    .waitForFunction(() => window.__sparksEver === true, null, {
+      timeout: 14_000,
+      polling: 120,
+    })
     .then(() => true)
     .catch(() => false);
   // The same strike throws the cap open — `lighter.lid` through LID_THROW_DEG (78°), one input,
