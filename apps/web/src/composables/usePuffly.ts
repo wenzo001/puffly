@@ -507,10 +507,12 @@ export function createPuffly(): Puffly {
     // worse page than spending smoke does: measured the day this first shipped, on a hardware
     // accelerated run, the ladder still walked down to `light`, which would have painted that
     // session at 1× had the ratio been gated on the rung alone.
+    // The other branch is the page running fine, and that is exactly when no cap belongs:
+    // `balanced` here silently put every healthy 3x desktop at 2x.
     tierDprCap.value =
       settings.value.quality === 'auto' && lastSlowFrameMs > SLOW_FRAME_MS_FOR_RATIO
         ? TIER_DPR_CAP[quality]
-        : TIER_DPR_CAP.balanced;
+        : TIER_DPR_CAP.high;
     engine?.setSettings({ ...settings.value, quality });
   };
 
