@@ -2374,6 +2374,38 @@ try {
   // back null right here and the four checks downstream of the draw all died with it (169/174, and the
   // sheet family was green that run — so this one miss, not the panels, is what the software page
   // actually costs). Wake through the same bounded helper the rest of this family uses, then re-read.
+  // A panel left open by the blocks above takes the pill away entirely, and that — not the idle fold —
+  // is why this block reds on the starved page. Measured 2026-10-15 with
+  // `probe-press-with-sheet.mjs`, two trials on the same page and the same flags: with
+  // `.sheet[data-open="true"]` at 1, `.pill` has **no bounding box at all** and the press cannot happen,
+  // so the rod stays at `affordance:"lighter"` / `phase:"light"` and the four checks downstream of the
+  // draw all die with it; the control trial, which opens nothing, reads `pillBox [26,716]` and ignites
+  // to `phase:"puff"`. The wake added a moment earlier cannot help here — the control is absent, not
+  // folded — so the precondition is stated and cleared instead: the product's own way out is a press on
+  // the scene, and it is bounded.
+  const openPanel = () => page.locator('.sheet[data-open="true"]').count();
+  if ((await openPanel()) > 0) {
+    await page
+      .locator('.hit')
+      .click({ force: true, noWaitAfter: true })
+      .catch(() => {});
+    await page
+      .waitForFunction(
+        () => document.querySelectorAll('.sheet[data-open="true"]').length === 0,
+        null,
+        {
+          timeout: 6000,
+          polling: 120,
+        },
+      )
+      .catch(() => {});
+  }
+  const panelsLeft = await openPanel();
+  check(
+    'the draw block starts with no panel over the pill',
+    panelsLeft === 0,
+    `sheets=${String(panelsLeft)}`,
+  );
   let box = await page.locator('.pill').boundingBox();
   if (box === null) {
     await wakeChrome(page, '.pill').catch(() => {});
