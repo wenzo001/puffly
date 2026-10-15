@@ -3471,27 +3471,8 @@ try {
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', (event) => errors.push(String(event).slice(0, 120)));
-  // Whether this page has a hardware adapter at all — the same signal `ci-runtime-probe.mjs` puts in
-  // the device job's report. CI's runner answers `null`, and the product then falls back to a software
-  // WebGL2 rasteriser on purpose (`renderer.ts`'s catch), which carries the whole page at ~3.5 fps.
-  // A frame-rate floor on that page judges the machine rather than the build, so the floor is kept
-  // where it can be met and dropped to "the loop advances" where it cannot — and which branch ran
-  // travels into the detail, so nobody reading the report has to guess. Measured 2026-10-15 on one
-  // build: here `gpuAdapter:["apple","metal-3"]` with `frames 275`; on the software flags `frames 3→7`
-  // inside 700 ms, which is 2 fps and is why this check reddened in the #159 family's second run.
-  const hasGpuAdapter = await page
-    .evaluate(async () => {
-      // `window.navigator`, not the bare `navigator`: this file is a Node source for eslint's
-      // `no-undef`, and `window` is the browser global it already knows here.
-      const gpu = window.navigator.gpu;
-      if (!gpu) return false;
-      try {
-        return (await gpu.requestAdapter()) !== null;
-      } catch {
-        return false;
-      }
-    })
-    .catch(() => false);
+  // Which claim each path below can carry is judged from the backend that path reports, not from a
+  // guess about the machine — see the note at the assertion.
   for (const [label, query, wanted] of [
     ['default landing', '', null],
     ['?scene=3d', '?scene=3d', null],
@@ -3506,10 +3487,21 @@ try {
       backend: window.__pufflyScene?.backend ?? '',
     }));
     const advanced = state.frames - before;
+    // A frame-rate floor is a statement about hardware. CI's runner has none: `gpuAdapter:null`, the
+    // product falls back to a software WebGL2 rasteriser on purpose (`renderer.ts`'s catch) and the page
+    // carries at ~2-4 fps, so `> 5 frames in 700 ms` there judges the machine, not the build. The signal
+    // is the backend this very sample reports — `webgpu` is positive proof of a GPU, so the floor stays;
+    // `webgl2` is what a GPU machine also uses when asked or when WebGPU is missing, so it proves
+    // nothing and only "the loop advances" is claimed. Which branch ran travels into the detail.
+    //
+    // It used to ask `navigator.gpu.requestAdapter()` and that was measured wrong on this machine: the
+    // same run printed `backend=webgpu, frames 141→184 (+43 in 700ms)` — 61 fps — with the adapter
+    // answering null, so the floor would have relaxed itself exactly where it could be met.
+    const gpuBacked = state.backend === 'webgpu';
     check(
       `3D: the ${label} path renders frames`,
-      hasGpuAdapter ? advanced > 5 : advanced > 0,
-      `frames ${String(before)}→${String(state.frames)} (+${String(advanced)} in 700ms), backend=${state.backend}, gpuAdapter=${hasGpuAdapter ? 'present' : 'null — software rasteriser, so the rate floor is not judged here'}`,
+      gpuBacked ? advanced > 5 : advanced > 0,
+      `frames ${String(before)}→${String(state.frames)} (+${String(advanced)} in 700ms), backend=${state.backend}, rate floor=${gpuBacked ? 'enforced' : 'not enforced (this backend does not prove a GPU)'}`,
     );
     if (wanted !== null) {
       check(`3D: ${label} reports the ${wanted} backend`, state.backend === wanted, state.backend);
