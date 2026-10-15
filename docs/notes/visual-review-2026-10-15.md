@@ -256,3 +256,37 @@ variation in alpha/size (the artwork), not tuning a threshold, and it is a decis
 should look rather than a measurement I can settle alone.
 
 Reproduce: `node tests/smoke/probe-plume-spread.mjs http://127.0.0.1:4183/puffly/`.
+
+## 8. Correction to the commit that preceded this note: the last family is a covering layer, not a slide
+
+The commit message on `5974040` attributed the remaining software-render reds to *"the aim is read
+before the sheet finishes sliding"*. The numbers in the same log refute that, so the attribution is
+withdrawn here rather than left standing:
+
+- `the phone dismissal presses the scene, not the panel — point 197,180`. The aim is computed as
+  `max(canvas.top + 12, panelTop - 24)`, so a press at y = 180 means the open sheet's top edge was at
+  **204** — the press was 24 px *above* the panel, exactly where it is meant to be. The aim was not
+  stale.
+- What failed is the assertion attached to that point: `elementFromPoint(197, 180)` did not answer the
+  stage's own hit surface (`.hit`).
+- The same run reports `missing:[]` with `blocked:["close"]` — the sheet's close button exists, but its
+  own centre hits some other element too.
+
+Two independent points on the frame (the stage above the drawer, and the close button inside the drawer)
+are both covered while a sheet is open. That is one object, not two races: **something is sitting on top
+of the stage while a sheet is open on a starved page.** It is also the shape of what the player reported
+as 「滚动区域以外的地方有时候会漏出来一些东西」, which this round closed only for *painting* (the leak
+ruler reads `delta_vs_closed=0.0`) — a layer that is invisible but still hit-testable would pass that
+ruler and produce exactly these reds.
+
+The measurement that names it, next time: with a sheet open on the `--disable-gpu` page, walk
+`document.elementFromPoint` over a grid and print the top-most element chain at each point, then hide
+candidates one at a time (`pointer-events`, then `visibility`) and re-read the same point. The
+suspects, in the order the code makes them plausible: the sheet's own root (it spans the frame while
+its drawer does not), the scene's DOM-mirror mask layer, and the wide-layout sidebar that shares the
+`.sheet` machinery.
+
+**Not a product conclusion yet** — on the normal path all of these checks are green (173/173 twice), so
+whatever covers the stage is either only present while the page is starved, or it is present always and
+only *moves into the way of a tap* when frames are slow. That distinction is the first thing the grid
+above will settle.
