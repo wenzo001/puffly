@@ -172,6 +172,21 @@ export const DETAIL_MIN_RATIO = 1.25;
 /** The colour a lit window is pushed toward: light, not another wall tone. */
 const WINDOW_LIGHT: Rgb = [226, 232, 244];
 
+/**
+ * The lit window's width against its height, in CSS pixels.
+ *
+ * It is a *window*, so it is wider than it is tall. The number is here rather than inside
+ * `backgroundStructure` because the two axes of `StageBoxFrac` are two units — `w` is a fraction of
+ * the box's width, `h` a fraction of its height — so an aspect can only be stated once the pair is
+ * converted, and a constant is where a reader looks for it.
+ */
+export const LIT_WINDOW_ASPECT = 2;
+
+/** The window's width, in fractions of the box: seeded, then clamped to sizes a wall can show. */
+function litWindowWidthFrac(seeded: number): number {
+  return Math.min(0.09, Math.max(0.036, seeded));
+}
+
 /** WCAG's contrast ratio between two colours, on their relative luminances. 1.0 means identical. */
 export function luminanceRatio(a: Rgb, b: Rgb): number {
   const la = relativeLuminance(a);
@@ -622,12 +637,18 @@ export function backgroundStructure(
         alpha: 0.3,
       });
     } else if (detail.kind === 2) {
-      // A window further off, lit by someone else's evening.
+      // A window further off, lit by someone else's evening. Only its width is the seed's; the height
+      // is derived from it, because a fraction of the box's width and a fraction of its height are two
+      // units and the seeded pair was never compared. Both axes came from the seed until 2026-10-15,
+      // which put the mark at 17.4 × 102 CSS px on a phone — measured off the served build
+      // (`tests/smoke/probe-bar-owner.mjs`) as the two brightest things on `quiet-room`'s wall, and
+      // read by the eye as two lit bars rather than a window (#132).
+      const windowW = litWindowWidthFrac(detail.w);
       boxes.push({
         x: detail.x,
         y: detail.y,
-        w: Math.min(0.09, detail.w),
-        h: Math.min(0.12, detail.h),
+        w: windowW,
+        h: (windowW * w) / (LIT_WINDOW_ASPECT * h),
         rgb,
         alpha: 0.3,
       });
