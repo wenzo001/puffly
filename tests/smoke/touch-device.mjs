@@ -5177,7 +5177,22 @@ try {
   // divide by (`propsOf` stays a single read, because other sites ask it precisely for an absence).
   const packProps = await waitForProps(page, ['body']);
   if (packProps.body === undefined) {
-    check("the breath block's rod is on the mirror to be taken", false, JSON.stringify(packProps));
+    // `{}` on its own forces the reader to know that an empty object means *no anchors at all*. Say
+    // which of the two empties it was: the mirror never published (raw aim empty, phase the default),
+    // or it published and the pack's anchor simply is not in it.
+    const why = await page
+      .evaluate(() => ({
+        aim: (document.querySelector('.stage')?.dataset.aim ?? '').slice(0, 120),
+        phase: document.querySelector('.stage')?.dataset.phase ?? '',
+        affordance: document.querySelector('.stage')?.dataset.affordance ?? '',
+        frames: window.__pufflyScene?.frames ?? -1,
+      }))
+      .catch(() => null);
+    check(
+      "the breath block's rod is on the mirror to be taken",
+      false,
+      `${JSON.stringify(packProps)} ${JSON.stringify(why)}`,
+    );
   } else {
     const packPoint = await stagePoint(page, packProps.body.x, packProps.body.y);
     await page.touchscreen.tap(packPoint.x, packPoint.y);
