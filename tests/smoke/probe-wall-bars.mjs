@@ -1,0 +1,15 @@
+import { chromium } from 'playwright';
+const browser = await chromium.launch();
+const page = await (await browser.newContext({viewport:{width:393,height:852},deviceScaleFactor:2,isMobile:true,hasTouch:true})).newPage();
+await page.goto('http://127.0.0.1:4173/puffly/', {waitUntil:'load'});
+await page.waitForSelector('.stage[data-aim]', {timeout:30000});
+await page.waitForTimeout(2800);
+const shot = await page.screenshot({ path: '/tmp/puffly-repro/bars.png' });
+const r = await page.evaluate((b64)=>new Promise(res=>{const img=new Image();img.onload=()=>{const c=document.createElement('canvas');c.width=img.width;c.height=img.height;
+ const g=c.getContext('2d',{willReadFrequently:true});g.drawImage(img,0,0);
+ const L=(d,i)=>0.2126*d[i]+0.7152*d[i+1]+0.0722*d[i+2];
+ const box=(x,y,w,h)=>{const p=g.getImageData(Math.round(x*2),Math.round(y*2),Math.round(w*2),Math.round(h*2)).data;let n=0,a=0,mx=0;for(let i=0;i<p.length;i+=4){const v=L(p,i);a+=v;if(v>mx)mx=v;n++;}return {L:+(a/n).toFixed(1),max:+mx.toFixed(1)};};
+ res({ bar: box(232,258,18,120), bar2: box(232,368,14,105), wallLeftOfBar: box(200,300,20,40), wallRightOfBar: box(258,300,20,40), wallHigh: box(120,120,40,40) });
+};img.src=`data:image/png;base64,${b64}`;}), shot.toString('base64'));
+console.log(JSON.stringify(r, null, 1));
+await browser.close();

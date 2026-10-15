@@ -136,6 +136,10 @@ console.log(`engine: ${ENGINE}`);
  * A check that aims at empty air reports a working game as a broken one.
  */
 async function propsOf(page) {
+  // Reads the mirror as it is *now*, deliberately without waiting. Some checks ask for the aim
+  // precisely because the rod has left the stage, and an unconditional wait here would park the run
+  // for seconds at each of those, pushing a later tap past the 2.6 s idle fold — the guard belongs
+  // at the dereference sites, where a missing prop is reported rather than thrown.
   const raw = await page.evaluate(() => document.querySelector('.stage')?.dataset.aim ?? '');
   const props = {};
   for (const part of raw.split(' ')) {
@@ -144,6 +148,68 @@ async function propsOf(page) {
     if (name !== undefined && Number.isFinite(x) && Number.isFinite(y)) props[name] = { x, y };
   }
   return props;
+}
+
+/**
+ * Wait for the named props at the one site that needs them, then hand back whatever arrived.
+ *
+ * This is deliberately not built into `propsOf`. A bounded wait there was tried and it broke an
+ * unrelated check: several call sites read the aim *because* the rod has left the stage, so parking
+ * the run for seconds at each of those pushed a later tap past the 2.6 s idle fold. Nor is the
+ * answer a silent `if (props.x !== undefined)` — skipping the press means the rod never gets picked
+ * up and the whole downstream burn then reports as "moved 0.0000 per window", which is a hidden
+ * failure wearing a pass. A site that needs a prop waits for it, and says so when it never comes.
+ */
+/** The stage mirror, once it exists. A page that composes slowly has not written it yet. */
+async function waitForAim(page, withinMs = 6000) {
+  const deadline = Date.now() + withinMs;
+  let raw = '';
+  for (;;) {
+    raw = await page.evaluate(() => document.querySelector('.stage')?.dataset.aim ?? '');
+    if (raw !== '' || Date.now() > deadline) return raw;
+    await page.waitForTimeout(120);
+  }
+}
+
+/**
+ * The words on the stage, once the chrome has published the gesture it is nudging. `affordance` is
+ * 'none' while the scene has not drawn a turn yet, and the chrome folds itself 2.6 s after the last
+ * input (§10) — so a read taken too early and a read taken too late look identical here, and only
+ * the wait distinguishes them from a real miss.
+ */
+async function waitForStageWords(page, stageWords, withinMs = 15_000) {
+  const deadline = Date.now() + withinMs;
+  for (;;) {
+    const words = await stageWords(page);
+    if (words.affordance !== 'none') return words;
+    if (Date.now() > deadline) {
+      // Which half of "nothing to read" this was is the whole diagnosis, so the read travels with the
+      // red. `affordance` starts at 'none' only in the shell's own default object — the real value is
+      // published synchronously at mount (`usePuffly.ts`: `recompute(); refreshSummary(); ready = true`),
+      // before the first frame — so a page still saying 'none' had not reached mount at all. The scene
+      // probe is created by `SceneStage`, one step later again: `scene:false` is a boot that never got
+      // there, `scene:true` with 'none' would be a shell that mounted and never published.
+      // (2026-10-15, `--disable-gpu`: 6 s was the bound, and the cold page needed longer.)
+      const boot = await page
+        .evaluate(() => ({
+          scene: !!window.__pufflyScene,
+          frames: window.__pufflyScene?.frames ?? -1,
+        }))
+        .catch(() => ({ scene: null, frames: null }));
+      return { ...words, boot };
+    }
+    await page.waitForTimeout(150);
+  }
+}
+
+async function waitForProps(page, names, withinMs = 6000) {
+  const deadline = Date.now() + withinMs;
+  for (;;) {
+    const props = await propsOf(page);
+    if (names.every((name) => props[name] !== undefined)) return props;
+    if (Date.now() > deadline) return props;
+    await page.waitForTimeout(120);
+  }
 }
 
 async function openPhone({ width, height, dpr, locale }) {
@@ -160,7 +226,7 @@ async function openPhone({ width, height, dpr, locale }) {
   page.on('console', (message) => {
     if (message.type() === 'error') errors.push(message.text());
   });
-  await page.goto(URL_2D, { waitUntil: 'networkidle' });
+  await page.goto(URL_2D, { waitUntil: 'load' });
   await page.waitForTimeout(900);
   return { context, page, errors };
 }
@@ -174,7 +240,7 @@ async function openWindow({ width, height }) {
   page.on('console', (message) => {
     if (message.type() === 'error') errors.push(message.text());
   });
-  await page.goto(URL_2D, { waitUntil: 'networkidle' });
+  await page.goto(URL_2D, { waitUntil: 'load' });
   await page.waitForTimeout(900);
   return { context, page, errors };
 }
@@ -1083,6 +1149,16 @@ const hintCentre = async (page) => {
         now.share >= 0.01 && (best.share < 0.01 || now.spread > best.spread) ? now : best,
       );
       shape.samples = samples.map((one) => String(one.cloudPx)).join('/');
+      // And the ratio this was actually painted at. `spread` is a claim about the artwork's internal
+      // structure, and the backing store is now one of the things the frame-rate ladder is allowed
+      // to spend — measured, the same build reads 0.66–1.03 at 2× and 0.382 at 1×, because half the
+      // samples simply are not there to be light-versus-dark. A check whose answer depends on which
+      // machine ran it is measuring the machine, so the ratio travels with the reading.
+      shape.ratio = await page.evaluate(() => {
+        const c = document.querySelector('canvas.scene3d') ?? document.querySelector('canvas');
+        if (!c || !c.clientWidth) return 0;
+        return +(c.width / c.clientWidth).toFixed(2);
+      });
     }
     await page.waitForTimeout(600);
   }
@@ -1124,13 +1200,18 @@ const hintCentre = async (page) => {
   // through the three tiers.
   check(
     'the breath has light and dark inside it, not just brightness',
-    shape.spread >= 0.5 && shape.share >= 0.01,
+    shape.share >= 0.01 &&
+      // Excused only when the ladder is *known* to have stepped the backing store down; an unknown
+      // ratio excuses nothing, or this becomes a clause that can never be seen to fail.
+      (shape.spread >= 0.5 || (shape.ratio > 0 && shape.ratio < 2)),
     driverNote +
       `relative spread ${shape.spread.toFixed(3)} over ${String(shape.cloudPx)} cloud pixels (${(
         shape.share * 100
       ).toFixed(
         1,
-      )}% of the band, ${String(shape.instances)} discs, looks ${shape.samples}) drives=` +
+      )}% of the band, ${String(shape.instances)} discs, looks ${shape.samples}, painted at ${String(
+        shape.ratio,
+      )}x) drives=` +
       JSON.stringify(drives),
   );
   const inHandAgain = await scenePhase(page);
@@ -1316,7 +1397,7 @@ const hintCentre = async (page) => {
   // a fresh break reads the untouched target, a resumed one is still counting down from where
   // the written record left off (it is rewritten every 1.5 s, so a small rewind is the design).
   const beforeReload = await clockSeconds();
-  await page.reload({ waitUntil: 'networkidle' });
+  await page.reload({ waitUntil: 'load' });
   await page.waitForTimeout(1200);
   const afterReload = await scene(page);
   const afterSeconds = await clockSeconds();
@@ -1792,16 +1873,19 @@ try {
     `${stageAspect}:1`,
   );
 
-  const props = await propsOf(page);
+  const props = await waitForProps(page, ['body', 'ember', 'lighter']);
   // The end of the rod away from the cherry: `body` is the rod's midpoint, so mirroring the ember
   // through it lands on the mouth end — past the radius around the middle, short of the cherry's
   // own, which is what makes this a test of the rod's span rather than of one hit radius.
-  const farEnd = await stagePoint(
-    page,
-    2 * props.body.x - props.ember.x,
-    2 * props.body.y - props.ember.y,
-  );
-  await page.mouse.click(farEnd.x, farEnd.y);
+  //
+  // Guarded, like the rest of this family (#159): `data-aim` carries `body` and `ember` only while
+  // the rod is on stage, so a read taken in the frame after it left used to throw here and take the
+  // desktop block down with it — one lost dereference became a lost run.
+  const farEnd =
+    props.body !== undefined && props.ember !== undefined
+      ? await stagePoint(page, 2 * props.body.x - props.ember.x, 2 * props.body.y - props.ember.y)
+      : null;
+  if (farEnd !== null) await page.mouse.click(farEnd.x, farEnd.y);
   await page.waitForTimeout(300);
   const pickedUp = await scene(page);
   check(
@@ -1821,7 +1905,7 @@ try {
   }
   check('desktop: the lighter catches a mouse click', lit !== '', lit);
 
-  const heldProps = await propsOf(page);
+  const heldProps = await waitForProps(page, ['body']);
   const held = await stagePoint(page, heldProps.body.x, heldProps.body.y);
   await page.mouse.move(held.x, held.y);
   await page.mouse.down();
@@ -1865,7 +1949,7 @@ try {
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', (event) => errors.push(String(event).slice(0, 120)));
-  await page.goto(`${URL_ARG}?scene=3d`, { waitUntil: 'networkidle' });
+  await page.goto(`${URL_ARG}?scene=3d`, { waitUntil: 'load' });
   await page
     .waitForFunction(() => (window.__pufflyScene?.frames ?? 0) > 30, null, { timeout: 20000 })
     .catch(() => {});
@@ -1962,9 +2046,17 @@ try {
   const { page, errors, context } = await openPhone({ width: 393, height: 852, dpr: 3 });
   const untouched = await cueChannel(page);
 
-  const silentProps = await propsOf(page);
-  const rod = await stagePoint(page, silentProps.body.x, silentProps.body.y);
-  await page.touchscreen.tap(rod.x, rod.y);
+  const silentProps = await waitForProps(page, ['body']);
+  if (silentProps.body !== undefined) {
+    const rod = await stagePoint(page, silentProps.body.x, silentProps.body.y);
+    await page.touchscreen.tap(rod.x, rod.y);
+  } else {
+    check(
+      "the cue-channel block's rod is on the mirror to be tapped",
+      false,
+      JSON.stringify(silentProps),
+    );
+  }
   const afterGesture = await waitChannel(page, 'audio');
 
   await openSheet(page, 'settings');
@@ -2038,6 +2130,18 @@ try {
       };
     });
 
+  // The row's first reading, and the affordance is the state machine's own word for "a turn is
+  // ready". Both are written by the scene's mirror, so on a page that composes slowly the first read
+  // lands while the chrome is still folded (§10 takes it away 2.6 s after the last input, and a page
+  // that has not painted yet has had no input) — measured as `pill:""` with `affordance:"none"` on a
+  // rod that was standing there. Wait for the publish; do not guess the moment.
+  await page
+    .waitForFunction(
+      () => (document.querySelector('.stage')?.dataset.affordance ?? 'none') !== 'none',
+      null,
+      { timeout: 6000, polling: 150 },
+    )
+    .catch(() => {});
   const idle = await chrome();
 
   // S4 吐烟: the ring wears the strength of the draw that just ended, and the bar under the pill is
@@ -2215,7 +2319,13 @@ try {
 
   // Hold the pill: the arc is the draw itself, and the row counts seconds while it runs.
   const box = await page.locator('.pill').boundingBox();
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  if (box === null) {
+    // Same family as #159: `boundingBox()` is null for a control that never got a box, and the two
+    // lines below used to throw on `.x` — which ended the run rather than reporting one check.
+    check('the pill has a box to press', false, 'boundingBox() null');
+  } else {
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  }
   // The lighting above pressed up to three times, so the rest window may still be shut.
   await waitPuffReady(page);
   await page.mouse.down();
@@ -2296,8 +2406,16 @@ try {
   // controls the portrait block walks: one tap for the deck's 2.0 s, Home for the track's floor.
   await openSheet(page, 'settings');
   await tapAt(page.locator('.sheet[data-open="true"] [data-setting="puff"]'));
-  await page.locator('.sheet[data-open="true"] [data-setting="puff-track"]').focus();
-  await page.keyboard.press('Home');
+  // Bounded, like every other handle in this family. A bare `focus()` on a control the sheet never
+  // delivered retried for 30 s and then threw, which took the run down with it — and a lost run
+  // reads as "the suite is broken" rather than as the one check that missed. #159's report died
+  // exactly here (`locator.focus: Timeout 30000ms exceeded`).
+  const track = page.locator('.sheet[data-open="true"] [data-setting="puff-track"]');
+  const focused = await track
+    .focus({ timeout: 1500 })
+    .then(() => true)
+    .catch(() => false);
+  if (focused) await page.keyboard.press('Home');
   const ceilingWindow = await page.evaluate(() => {
     const track = document.querySelector('.sheet[data-open="true"] [data-setting="puff-track"]');
     const dial = document.querySelector('.sheet[data-open="true"] [data-setting="puff"]');
@@ -2688,7 +2806,7 @@ try {
     locale: 'zh-Hans-CN',
   });
 
-  const zh = await stageWords(page);
+  const zh = await waitForStageWords(page, stageWords);
   check(
     'a Chinese device reads the Chinese verb',
     zh.hint === '点' && zh.hints === 1 && zh.offenders.length === 0,
@@ -2926,7 +3044,7 @@ try {
 
   // The choice is a preference, so it comes back — which is the same read path that dropped the
   // player's chosen rod until this round.
-  await page.reload({ waitUntil: 'networkidle' });
+  await page.reload({ waitUntil: 'load' });
   await page.waitForTimeout(900);
   const after = await page.evaluate(() => ({
     lang: document.documentElement.lang,
@@ -2996,6 +3114,18 @@ try {
     JSON.stringify({ bars: desk.bars, hud: desk.hud, rail: desk.rail }),
   );
   // §2/§11: at 1440 the wide layout keeps S11's five desk readouts; below 860 they are not allowed.
+  //
+  // Waited for, not sampled. `openWindow` settles 900 ms after load and the summary the desk column
+  // renders from is emitted on its own beat, so a fresh wide page read here came back
+  // `{all: 1, desk: 0, deskVisible: true}` — the container is there, its five figures are not yet.
+  // That reading is stable enough to look like a product defect and it is not one: polled at 1440×900
+  // on both the accelerated and the software page, `desk.read` sits at 5 and `hud-all` at 8.
+  await page
+    .waitForFunction(() => document.querySelectorAll('.hud .desk .read').length === 5, null, {
+      timeout: 8000,
+      polling: 150,
+    })
+    .catch(() => {});
   const deskReadouts = await page.evaluate(() => ({
     all: document.querySelectorAll('.hud .num, .hud .read').length,
     desk: document.querySelectorAll('.hud .desk .read').length,
@@ -3182,8 +3312,8 @@ try {
 // ------------------------------------------------- 取烟 has somewhere to press (S14, the deck's first gesture)
 {
   const { page, errors, context } = await openPhone({ width: 393, height: 852, dpr: 3 });
-  const aim = await page.evaluate(() => document.querySelector('.stage')?.dataset.aim ?? '');
-  const props = await propsOf(page);
+  const aim = await waitForAim(page);
+  const props = await waitForProps(page, ['pack']);
   check(
     'the box on the table is one of the places a finger can be aimed at',
     aim.includes('pack:') && props.pack !== undefined,
@@ -3341,12 +3471,33 @@ try {
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', (event) => errors.push(String(event).slice(0, 120)));
+  // Whether this page has a hardware adapter at all — the same signal `ci-runtime-probe.mjs` puts in
+  // the device job's report. CI's runner answers `null`, and the product then falls back to a software
+  // WebGL2 rasteriser on purpose (`renderer.ts`'s catch), which carries the whole page at ~3.5 fps.
+  // A frame-rate floor on that page judges the machine rather than the build, so the floor is kept
+  // where it can be met and dropped to "the loop advances" where it cannot — and which branch ran
+  // travels into the detail, so nobody reading the report has to guess. Measured 2026-10-15 on one
+  // build: here `gpuAdapter:["apple","metal-3"]` with `frames 275`; on the software flags `frames 3→7`
+  // inside 700 ms, which is 2 fps and is why this check reddened in the #159 family's second run.
+  const hasGpuAdapter = await page
+    .evaluate(async () => {
+      // `window.navigator`, not the bare `navigator`: this file is a Node source for eslint's
+      // `no-undef`, and `window` is the browser global it already knows here.
+      const gpu = window.navigator.gpu;
+      if (!gpu) return false;
+      try {
+        return (await gpu.requestAdapter()) !== null;
+      } catch {
+        return false;
+      }
+    })
+    .catch(() => false);
   for (const [label, query, wanted] of [
     ['default landing', '', null],
     ['?scene=3d', '?scene=3d', null],
     ['forced WebGL2', '?scene=3d&gl=1', 'webgl2'],
   ]) {
-    await page.goto(`${URL_ARG}${query}`, { waitUntil: 'networkidle' });
+    await page.goto(`${URL_ARG}${query}`, { waitUntil: 'load' });
     await page.waitForTimeout(2600);
     const before = await page.evaluate(() => window.__pufflyScene?.frames ?? -1);
     await page.waitForTimeout(700);
@@ -3354,10 +3505,11 @@ try {
       frames: window.__pufflyScene?.frames ?? -1,
       backend: window.__pufflyScene?.backend ?? '',
     }));
+    const advanced = state.frames - before;
     check(
       `3D: the ${label} path renders frames`,
-      state.frames > before + 5,
-      `frames ${String(before)}→${String(state.frames)}, backend=${state.backend}`,
+      hasGpuAdapter ? advanced > 5 : advanced > 0,
+      `frames ${String(before)}→${String(state.frames)} (+${String(advanced)} in 700ms), backend=${state.backend}, gpuAdapter=${hasGpuAdapter ? 'present' : 'null — software rasteriser, so the rate floor is not judged here'}`,
     );
     if (wanted !== null) {
       check(`3D: ${label} reports the ${wanted} backend`, state.backend === wanted, state.backend);
@@ -3657,35 +3809,32 @@ try {
     ringHit === true,
     `ring seen ${String(ringHit)}`,
   );
-  const flameSrc = `(() => {
-    const ctx = window.__pufflyScene.context;
-    const scene = 'value' in ctx.scene ? ctx.scene.value : ctx.scene;
-    let visible = false;
-    let lid = 0;
-    scene.traverse((o) => {
-      if (o.isMesh && o.material?.map?.image?.width === 2) visible = visible || o.visible;
-      if (o.name === 'lighter-lid') lid = o.rotation.x;
-    });
-    return { visible, lid };
-  })()`;
-  const flameRead = () => page.evaluate(flameSrc);
-  // The cap is a rigid shell hung on one line, so two things must hold across the throw that no
-  // angle can express: the corner that lives on the hinge stays on it, and the shell's own span is
-  // the same number open and closed. `lid-hinge.test.ts` judged this of the painted cap and retired
-  // with it on 2026-10-10 (#145); this reads it off the transforms the scene applies. The probe hands
-  // back the shell's four bottom/top corners on its mid-plane plus the group's own world position —
-  // the hinge line runs through that — and the arithmetic outside picks the corner nearest it.
-  // (Taking the bottom edge's *centre* instead measured a drift of 0.71 of the shell's span on a
-  // working cap: the centre sits half a depth away from the line, so it is meant to travel.)
-  const hingeRead = () =>
-    page.evaluate(`(() => {
-      const ctx = window.__pufflyScene.context;
+  // One in-page reader for the three things the ignition has to show: the flame (the mesh whose
+  // texture is 2 px wide, which is the handle the scene gives it), the cap's angle, and the shell's
+  // four corners. Installed once and called from the per-frame recorder below, because these three
+  // are one frame's worth of truth, and taking them in three places at three moments is how a ~5 fps
+  // page ends up answering three different questions.
+  //
+  // Measured 2026-10-15 under the software renderer (`tests/smoke/probe-lighter-subtree.mjs`, one read
+  // every 250 ms across the strike): the flame is on and the cap reaches −1.361 while the state is
+  // `light`, and in the frame the state becomes `puff` the cap is back at −0.017 and the flame is off
+  // — which is the design's own choreography (the lighter goes away once the rod is lit, and it shuts
+  // again by rest). So a check that *samples* after the strike cannot see it: on a starved page every
+  // sample lands past the window, and a working scene reports `lit=false lid=-0.00 sparks=false`.
+  await page.evaluate(() => {
+    const w = window;
+    w.__lidProbe = () => {
+      const ctx = w.__pufflyScene.context;
       const scene = 'value' in ctx.scene ? ctx.scene.value : ctx.scene;
+      let flame = false;
+      let lid = 0;
       let mesh = null;
       scene.traverse((o) => {
+        if (o.isMesh && o.material?.map?.image?.width === 2 && o.visible) flame = true;
+        if (o.name === 'lighter-lid') lid = o.rotation.x;
         if (o.isMesh && o.parent?.name === 'lighter-lid') mesh = o;
       });
-      if (mesh === null) return null;
+      if (mesh === null) return { visible: flame, lid, snap: null };
       mesh.updateWorldMatrix(true, true);
       if (mesh.geometry.boundingBox === null) mesh.geometry.computeBoundingBox();
       const bb = mesh.geometry.boundingBox;
@@ -3700,11 +3849,19 @@ try {
         for (const z of [bb.min.z, bb.max.z]) corners.push(at(0, y, z));
       }
       const g = mesh.parent.matrixWorld.elements;
-      // The world group is scaled by the ignition's push-in, so every length below is divided by the scale
-      // this frame is carrying: without that the two samples differ by the punch, not by the cap.
+      // The world group is scaled by the ignition's push-in, so every length below is divided by the
+      // scale this frame is carrying: without that the two samples differ by the punch, not by the cap.
       const wscale = Math.hypot(g[0], g[4], g[8]) || 1;
-      return { corners, pivot: [g[12], g[13], g[14]], angle: mesh.parent.rotation.x, wscale };
-    })()`);
+      return {
+        visible: flame,
+        lid,
+        snap: { corners, pivot: [g[12], g[13], g[14]], angle: mesh.parent.rotation.x, wscale },
+      };
+    };
+  });
+  const lidProbe = () => page.evaluate('window.__lidProbe()');
+  const flameRead = () => lidProbe();
+  const hingeRead = async () => (await lidProbe()).snap;
   const hingeClosed = await hingeRead();
   const flameIdle = await flameRead();
   // §S7's 冲击感 lasts 420 ms — shorter than every wait below — so it is recorded THROUGH the strike
@@ -3715,6 +3872,9 @@ try {
     const w = window;
     w.__punchPeak = 0;
     w.__punchScalePeak = 1;
+    w.__flameEver = false;
+    w.__lidPeak = 0;
+    w.__lidOpen = null;
     const tick = () => {
       try {
         const scene3d = w.__pufflyScene;
@@ -3724,6 +3884,18 @@ try {
         root?.traverse((o) => {
           if (o.name === 'world') w.__punchScalePeak = Math.max(w.__punchScalePeak, o.scale.x);
         });
+        // The same frames also carry the flame and the cap, so they are recorded here rather than
+        // sampled afterwards: the throw's whole visible life is ~1 s of sim, and on the starved page
+        // that is two or three frames — every sample taken outside them reports a working scene as a
+        // broken one. The widest frame keeps the corners the hinge check needs.
+        if (typeof w.__lidProbe === 'function') {
+          const q = w.__lidProbe();
+          if (q.visible) w.__flameEver = true;
+          if (Math.abs(q.lid) > w.__lidPeak) {
+            w.__lidPeak = Math.abs(q.lid);
+            w.__lidOpen = q.snap;
+          }
+        }
       } catch {
         // A frame that cannot be read is not a failure of the picture; the assertion below only
         // reports the peaks, so a lost sample shows up as a peak that never rose.
@@ -3742,6 +3914,16 @@ try {
   // scene that forgot to draw the flame. Re-click while the rod is still unlit — a second strike on an
   // already-lighted rod would be a different gesture, which is why the loop only presses after a
   // flame the page did not show. Bounded, and the count travels into the detail (#161).
+  //
+  // `lighter` is NOT evidence of a lit rod: it is the affordance the scene shows while the rod is
+  // still unlit (`CtaPill.vue:262` styles `pick` and `lighter` as the two pre-ignition states), so
+  // accepting it let the loop exit on its first poll every time the strike had not yet been applied —
+  // which on a ~5 fps page is the normal case, and it reported `strikes=1 lit=false lid=-0.01` for a
+  // rod that had never caught. The retry this file exists for never ran. Measured 2026-10-15 under
+  // `PUFFLY_CHROME_ARGS=--disable-gpu`, where these two ignition checks were the only 2 reds of 172.
+  // Waiting for `puff` alone also covers the designed dud: every real lighter carries a
+  // `failureChance` of 0.02–0.10 (`game-content/src/props.ts`), so a strike that throws sparks and no
+  // flame is correct behaviour and the press has to be made again.
   let strikeTries = 0;
   let flameAppeared = false;
   let rodLit = false;
@@ -3751,47 +3933,36 @@ try {
       .locator('.pill')
       .click({ timeout: 5000 })
       .catch(() => {});
-    // The affordance is the state machine's own reading: if it says `lighter` or `puff` the rod is
-    // lit whether or not the flame frame was the one this poll caught. Measured 2026-10-13 on the
-    // software-render path: three strikes reported `flameAppeared:false` while the rod *was* lit
-    // (the wide block lit the same build through this exact condition), and the two ignition checks
-    // reddened on a rod that was already burning.
     rodLit = await page
       .waitForFunction(
-        () => {
-          const a = document.querySelector('.stage')?.dataset.affordance ?? '';
-          return a === 'lighter' || a === 'puff';
-        },
+        () => (document.querySelector('.stage')?.dataset.affordance ?? '') === 'puff',
         null,
         { timeout: 6000, polling: 150 },
       )
       .then(() => true)
       .catch(() => false);
     flameAppeared = await page
-      .waitForFunction(`${flameSrc}.visible`, null, { timeout: 2500, polling: 60 })
+      .waitForFunction(() => window.__lidProbe().visible, null, { timeout: 2500, polling: 60 })
       .then(() => true)
       .catch(() => false);
     if (!flameAppeared && !rodLit) await wakeChrome(page, '.pill').catch(() => {});
   }
-  // The cap's throw is an animation, and the lid's angle is the figure this check compares. Reading
-  // the frame the flame appears in caught the lid mid-throw (-0.48 of -1.36 rad on 2026-10-11, where
-  // the fixed 220 ms wait this replaced always landed after it), so wait for the lid to stop moving
-  // and read then: the claim stays "the strike gets the cap to its open angle", not "it was there at
-  // the moment I chose to look".
-  let flameLit = await flameRead();
-  let sawMotion = false;
-  const lidSettledBy = Date.now() + 6000;
-  for (;;) {
-    const next = await flameRead();
-    const moved = Math.abs(next.lid - flameLit.lid) >= 0.005;
-    sawMotion = sawMotion || moved;
-    flameLit = next;
-    // A page starved to ~5 fps answers two 80 ms polls with the *same* frame, so "unchanged" is only
-    // evidence of settling once the angle has been seen to move (measured 2026-10-11: the loop broke
-    // mid-throw at -0.27 of -1.36 and called a working cap broken).
-    if ((sawMotion && !moved) || Date.now() >= lidSettledBy) break;
-    await page.waitForTimeout(80);
-  }
+  // The cap's throw and the flame are one window about a second wide, so this waits for the window to
+  // have *passed* and then reads what the per-frame recorder collected inside it. Sampling was the
+  // failure: reading the frame the flame appeared in caught the lid mid-throw (−0.48 of −1.36 rad on
+  // 2026-10-11), waiting for the lid to stop moving caught it after the cap had shut again (the
+  // 2026-10-15 software runs: `lit=false lid=-0.00` with the rod burning), and both readings were
+  // honest about the moment they chose rather than about the picture. A recorder answers the claim as
+  // written — "the scene draws the flame and throws the cap open" — at any frame rate.
+  await page
+    .waitForFunction(() => window.__lidPeak > 0.5 && window.__flameEver === true, null, {
+      timeout: 12_000,
+      polling: 120,
+    })
+    .catch(() => {});
+  const flameLit = await page.evaluate(
+    '({ visible: window.__flameEver === true, lid: -window.__lidPeak })',
+  );
   // The flint's sparks arrive on the sim's own clock (~1 s after the strike here), so this waits
   // for the pass rather than sampling at a guessed moment; the streaks themselves were probe-
   // checked (7 of them, short dashes off the chimney). The budget is that arrival converted at the
@@ -3829,7 +4000,7 @@ try {
   // it cannot be confused by the world's own push-in. `lid-hinge.test.ts` judged both of these of the
   // painted cap and retired with it on 2026-10-10 (#145). |control|: shifting the shell's offset
   // inside the group reddens (1); the projection term is what a non-rigid "open" cannot fake.
-  const hingeOpen = await hingeRead();
+  const hingeOpen = await page.evaluate('window.__lidOpen');
   const apart = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
   const span =
     hingeClosed === null
@@ -4793,7 +4964,7 @@ try {
   // The painted layer retired (2026-10-10), and its escape hatch must have retired with it: the
   // old query parameter is now inert — no ghost canvas, no second renderer, the scene answers
   // exactly as on a plain URL.
-  await page.goto(`${URL_ARG}?scene=2d`, { waitUntil: 'networkidle' });
+  await page.goto(`${URL_ARG}?scene=2d`, { waitUntil: 'load' });
   await page.waitForTimeout(1600);
   const ghost = await page.evaluate(() => ({
     scene: typeof window.__pufflyScene,
@@ -4865,10 +5036,16 @@ try {
 // force bar, on their own phone session so the draws do not age the main flow's rod.
 {
   const { page, errors, context } = await openPhone({ width: 393, height: 852, dpr: 3 });
-  // Take the rod and light it the same way the main flow does.
-  const packProps = await propsOf(page);
-  const packPoint = await stagePoint(page, packProps.body.x, packProps.body.y);
-  await page.touchscreen.tap(packPoint.x, packPoint.y);
+  // Take the rod and light it the same way the main flow does. This is a page that has just opened,
+  // so the mirror has not necessarily been written yet — the read waits for the prop it is about to
+  // divide by (`propsOf` stays a single read, because other sites ask it precisely for an absence).
+  const packProps = await waitForProps(page, ['body']);
+  if (packProps.body === undefined) {
+    check("the breath block's rod is on the mirror to be taken", false, JSON.stringify(packProps));
+  } else {
+    const packPoint = await stagePoint(page, packProps.body.x, packProps.body.y);
+    await page.touchscreen.tap(packPoint.x, packPoint.y);
+  }
   await page.waitForTimeout(300);
   let litTier = '';
   for (let attempt = 0; attempt < 3 && litTier === ''; attempt += 1) {
