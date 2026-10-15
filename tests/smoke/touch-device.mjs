@@ -931,7 +931,9 @@ async function openSheet(page, id, mouse = false) {
     // context built without touch is silently a no-op, so every desktop and wide-layout call that
     // forgot `mouse=true` reported "the sheet never opened". `maxTouchPoints` is the page's own answer
     // to "can this context be tapped at all", so a caller cannot get it wrong again.
-    const tappable = await page.evaluate(() => navigator.maxTouchPoints > 0).catch(() => false);
+    const tappable = await page
+      .evaluate(() => window.navigator.maxTouchPoints > 0)
+      .catch(() => false);
     const pressed = mouse || !tappable ? await clickAt(handle) : await tapAt(handle);
     const opened = await page
       .waitForSelector('.sheet[data-open="true"]', {
