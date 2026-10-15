@@ -33,6 +33,7 @@ import {
   FIELD_SCALE,
   intakeBurst,
   interiorEdgeInk,
+  interiorWall,
   ParticlePool,
   plumeIntakeOptions,
   PUFF_FLATTEN,
@@ -446,6 +447,42 @@ const tableInk = computed(() => {
   const ink = interiorEdgeInk(r.silhouette);
   return new THREE.Color().setRGB(ink[0] / 255, ink[1] / 255, ink[2] / 255, THREE.SRGBColorSpace);
 });
+/**
+ * The rim a prop is actually read by.
+ *
+ * §2 draws each prop with `border: 1px solid rgba(255,255,255,.05)` and SPEC records what that edge
+ * is for — "白送轮廓": the objects are near-black on purpose, and the light line around them is the
+ * only thing that separates one from the room. `PROP_INK.packEdge` resolves that border over the
+ * prop's own fill, which is exactly how CSS composites it, and it is right whenever the ground is
+ * darker than the prop — which is how the Demo paints it (`--bg-stage: #08070A`). Our rooms are much
+ * lighter than that, so the same value lands *below* the wall and the rim inverts: a dark halo around
+ * a dark object, which is the black plate the eye reads as broken geometry.
+ *
+ * So the border is resolved against the ground it has to stand out from, and only ever upward: on a
+ * room dark enough to be the Demo's, the authored value still wins and nothing changes.
+ */
+/** The room's own wall, as the surface a prop is read against. */
+function groundRgb(): readonly [number, number, number] | null {
+  const r = room.value;
+  return r === null ? null : interiorWall(r.horizon, r.silhouette);
+}
+
+function propRim(ink: string): THREE.Color {
+  const base = new THREE.Color(ink);
+  const wall = groundRgb();
+  if (wall === null) return base;
+  const rim = new THREE.Color().setRGB(
+    (wall[0] * 0.95 + 255 * 0.05) / 255,
+    (wall[1] * 0.95 + 255 * 0.05) / 255,
+    (wall[2] * 0.95 + 255 * 0.05) / 255,
+    THREE.SRGBColorSpace,
+  );
+  // Both are in the same space, so a monotone sum is all the comparison needs: the authored value
+  // wins whenever it is already the lighter of the two.
+  const lum = (c: THREE.Color) => c.r + c.g + c.b;
+  return lum(rim) > lum(base) ? rim : base;
+}
+
 const keyLight = computed<{
   position: readonly [number, number, number];
   intensity: number;
@@ -651,6 +688,9 @@ let boxSignature = '';
 
 function onSceneReady(context: unknown): void {
   probe.context = context;
+  // Before any sheet material has compiled, so the clip planes are live from the first frame the
+  // panel is drawn rather than one frame after a hook happens to fire.
+  turnOnLocalClipping();
   // The camera now measures the surface it draws into, and a `.stage` that changes size without a
   // window resize (the sheet opening, the rail appearing) has to be heard rather than polled.
   const given = (context as { canvas?: unknown }).canvas;
@@ -880,12 +920,17 @@ function onSceneReady(context: unknown): void {
   hudRig.value = buildRig();
   pillRig.value = buildRig();
 
-  const buildCard = (z: number, name = ''): CardRig => {
-    const material = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false });
+  const buildCard = (z: number, name = '', clip: THREE.Plane[] | null = null): CardRig => {
+    const material = new THREE.MeshBasicMaterial({
+      transparent: true,
+      depthWrite: false,
+      clippingPlanes: clip ?? undefined,
+    });
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
     mesh.frustumCulled = false;
     mesh.visible = false;
     mesh.position.z = z;
+    if (clip !== null) mesh.onBeforeRender = enableLocalClipping;
     // Named where a browser check has to point at one specific plate — the rail's four tabs are the
     // only cards whose fill arrives and leaves with the state, so that is where the claim lives.
     mesh.name = name;
@@ -1340,11 +1385,16 @@ function onSceneReady(context: unknown): void {
     sheetMesh.frustumCulled = false;
     sheetMesh.visible = false;
     sheetMesh.position.z = RUN_TEXT_Z;
+    sheetMesh.onBeforeRender = enableLocalClipping;
     rigGroup.add(sheetMesh);
     sheetRuns.push({ mesh: sheetMesh, material: sheetMaterial, signature: '', skipped: false });
   }
   for (let i = 0; i < SHEET_SURFACE_POOL; i += 1) {
-    const surface = buildCard(0.098);
+    // Clipped by the panel's own four half-spaces, exactly like the rows and the frames. Without
+    // them a chip or card that only *overlaps* the scroll口 — the cull test keeps anything within
+    // 4 px of the edge — is drawn whole, so its plate stands above the panel on the wall. That is
+    // the leak the eye reads as "内容滚出滚动区外面了"; the text on it was already being cut.
+    const surface = buildCard(0.098, '', sheetClip);
     sheetSurfaces.push(surface);
   }
   for (let i = 0; i < SHEET_FRAME_POOL; i += 1) {
@@ -1358,6 +1408,7 @@ function onSceneReady(context: unknown): void {
     frameMesh.frustumCulled = false;
     frameMesh.visible = false;
     frameMesh.position.z = 0.0985;
+    frameMesh.onBeforeRender = enableLocalClipping;
     rigGroup.add(frameMesh);
     sheetFrames.push({ mesh: frameMesh, material: frameMaterial, signature: '', skipped: false });
   }
@@ -1384,6 +1435,7 @@ function onSceneReady(context: unknown): void {
       sliderMesh.visible = false;
       sliderMesh.position.z = z;
       if (pool === sheetSliderThumbs) sliderMaterial.map = sliderCircle;
+      sliderMesh.onBeforeRender = enableLocalClipping;
       rigGroup.add(sliderMesh);
       pool.push({ mesh: sliderMesh, material: sliderMaterial, signature: '' });
     }
@@ -3527,6 +3579,74 @@ function placeArchive(): void {
 const SHEET_POOL = 44;
 const sheetRuns: InkRig[] = [];
 const sheetCardRig = shallowRef<CardRig | null>(null);
+/**
+ * Turn on `localClippingEnabled`, without which `clippingPlanes` on a material is a decoration.
+ *
+ * This used to be done by reaching for `probe.context.renderer` and testing
+ * `'localClippingEnabled' in renderer`. Measured on the shipped build that object is a plain TresJS
+ * wrapper — the property is not there — so the test never matched, `sheetClippingOn` stayed false
+ * forever, and the panel's mirror has *never* been clipped: a scrolled row or chip drew straight on
+ * past the panel's top edge onto the wall. That is the leak, and it failed silently because the
+ * lookup simply did nothing. `onBeforeRender` is the one channel that is handed the real renderer,
+ * so it goes on the meshes that need the switch.
+ */
+let localClippingTurnedOn = false;
+
+/** Unwrap whatever TresJS handed over on `context.renderer` down to the `WebGLRenderer`. */
+function resolveRenderer(): { localClippingEnabled: boolean } | null {
+  const context = probe.context as { renderer?: unknown } | null;
+  let node = context?.renderer;
+  for (let hop = 0; hop < 4; hop += 1) {
+    if (node !== null && typeof node === 'object' && 'localClippingEnabled' in node) {
+      return node as { localClippingEnabled: boolean };
+    }
+    if (node === null || typeof node !== 'object') return null;
+    node =
+      (node as { instance?: unknown }).instance ??
+      (node as { value?: unknown }).value ??
+      (node as { object?: unknown }).object ??
+      null;
+  }
+  return null;
+}
+
+function turnOnLocalClipping(): boolean {
+  const renderer = resolveRenderer();
+  if (renderer === null) return false;
+  const was = renderer.localClippingEnabled;
+  renderer.localClippingEnabled = true;
+  if (!was) {
+    // The clipping plane count is baked into a material's program cache key, so anything compiled
+    // while the switch was off keeps its unclipped shader.
+    for (const rig of [...sheetRuns, ...sheetSurfaces, ...sheetFrames])
+      rig.material.needsUpdate = true;
+    for (const rig of [...sheetSliderTracks, ...sheetSliderThumbs, ...sheetSliderRings])
+      rig.material.needsUpdate = true;
+  }
+  localClippingTurnedOn = true;
+  return true;
+}
+
+function enableLocalClipping(renderer: THREE.WebGLRenderer): void {
+  if (localClippingTurnedOn) return;
+  if (renderer.localClippingEnabled === true) {
+    localClippingTurnedOn = true;
+    return;
+  }
+  renderer.localClippingEnabled = true;
+  localClippingTurnedOn = true;
+  for (const rig of [
+    ...sheetRuns,
+    ...sheetSurfaces,
+    ...sheetFrames,
+    ...sheetSliderTracks,
+    ...sheetSliderThumbs,
+    ...sheetSliderRings,
+  ]) {
+    rig.material.needsUpdate = true;
+  }
+}
+
 const sheetClip: THREE.Plane[] = [
   new THREE.Plane(new THREE.Vector3(-1, 0, 0), -1e6),
   new THREE.Plane(new THREE.Vector3(1, 0, 0), -1e6),
@@ -3535,8 +3655,19 @@ const sheetClip: THREE.Plane[] = [
 ];
 const maskedLeaves = new Set<HTMLElement>();
 /** The sheet's painted controls: one fill rig each, plus a frame rig for the bordered ones. */
-const SHEET_SURFACE_POOL = 40;
-const SHEET_FRAME_POOL = 36;
+/**
+ * The pools' sizes are the shipped content's own denominator, not a round number.
+ *
+ * Both used to sit *under* what the shelf asks for on a phone: measured with the skins group open
+ * and scrolled to its bottom, 60 nodes fully inside the panel want a plate (pool was 40) and 32
+ * want a border (pool was 36). With the surface pool saturated, which node loses a plate is decided
+ * by document order, so one card leaving the top hands its rig to the next and the shortfall walks
+ * through the middle of the screen — a card flips between being drawn by the scene and being drawn
+ * by the DOM, which is the flicker at the bottom of that list. The text pool never overflowed there
+ * (24 leaves on stage against 44), which is why the settings sheet never showed it: 9 against 40.
+ */
+const SHEET_SURFACE_POOL = 80;
+const SHEET_FRAME_POOL = 48;
 /**
  * The slider trio. Track and thumb paint lives in `::-webkit-slider-*` pseudo-elements — invisible
  * to `getComputedStyle` and to inline masking — so `global.css` declares the geometry and colours
@@ -3553,6 +3684,16 @@ const sheetSliderTracks: SliderRig[] = [];
 const sheetSliderThumbs: SliderRig[] = [];
 const sheetSliderRings: SliderRig[] = [];
 const sheetSurfaces: CardRig[] = [];
+/**
+ * Which plate belongs to which node, and the same for the border frames. These existed as an
+ * index pairing (`sheetSurfaces[index]` over a `painted` array rebuilt every frame), and that is
+ * what made the bottom of a long sheet flicker: the cull test keeps anything overlapping the
+ * panel, so one node crossing `panelBox.bottom + 4` shifts every later node into a different rig,
+ * and each of those then rebuilds a geometry and a generated texture it had no reason to rebuild.
+ * Ownership by node means a plate is only ever taken up or handed back by the one element it draws.
+ */
+const surfaceOwners = new Map<HTMLElement, CardRig>();
+const frameOwners = new Map<HTMLElement, InkRig>();
 const sheetFrames: InkRig[] = [];
 const markedSurfaces = new Set<HTMLElement>();
 let sheetClippingOn = false;
@@ -3616,6 +3757,8 @@ function hideSheetMirror(): void {
   for (const rig of sheetRuns) rig.mesh.visible = false;
   for (const rig of sheetSurfaces) rig.mesh.visible = false;
   for (const rig of sheetFrames) rig.mesh.visible = false;
+  surfaceOwners.clear();
+  frameOwners.clear();
   for (const rig of sheetSliderTracks) rig.mesh.visible = false;
   for (const rig of sheetSliderThumbs) rig.mesh.visible = false;
   for (const rig of sheetSliderRings) rig.mesh.visible = false;
@@ -3650,13 +3793,14 @@ function placeSheet(): void {
     return;
   }
   if (!sheetClippingOn) {
-    const context = probe.context as { renderer?: unknown } | null;
-    const raw = context?.renderer;
-    const renderer = raw !== null && typeof raw === 'object' && 'value' in raw ? raw.value : raw;
-    if (renderer !== null && typeof renderer === 'object' && 'localClippingEnabled' in renderer) {
-      (renderer as { localClippingEnabled: boolean }).localClippingEnabled = true;
-      sheetClippingOn = true;
-    }
+    // The real renderer is one unwrap away, and it is not the one this line used to try. Measured on
+    // the shipped build, TresJS hands over `context.renderer` as a plain wrapper whose keys are
+    // `loop, instance, advance, onReady, …` — the `WebGLRenderer` rides on **`instance`**. The old
+    // test looked only at `.value`, so it never matched, `localClippingEnabled` stayed false, and
+    // the four clip planes below have been inert since the day they were written: a scrolled row
+    // drew straight on past the panel's top edge onto the wall. Silent, because a failed lookup here
+    // changes nothing anyone can see until they look for the leak.
+    sheetClippingOn = turnOnLocalClipping();
   }
   // The root's own paint is this layer's to withhold, and it is withheld the same way a chip's is —
   // background and border, never `visibility`. The sheet is also the scroll container, and a
@@ -3682,11 +3826,15 @@ function placeSheet(): void {
     const style = getComputedStyle(node);
     // A rect question only: the closed sheet is already excluded by the `[data-open]` query, and a
     // visibility read here would see this layer's own mask (a marked surface computes `hidden`).
+    // Full containment, not overlap. A row that only straddles the edge is left to the DOM, which
+    // the browser clips correctly for free; anything the mirror draws has to fit inside the panel
+    // because the shader clip that was supposed to cut it cannot be trusted here (see
+    // `turnOnLocalClipping`, whose planes were inert from the day they were written).
     const outside =
       rect.width === 0 ||
       rect.height === 0 ||
-      rect.bottom < panelBox.top - 4 ||
-      rect.top > panelBox.bottom + 4;
+      rect.top < panelBox.top - 1 ||
+      rect.bottom > panelBox.bottom + 1;
     const text = node.textContent?.trim() ?? '';
     const fontSize = Number.parseFloat(style.fontSize) || 15;
     const signature = `${text}|${rect.left.toFixed(1)},${rect.top.toFixed(1)},${rect.width.toFixed(1)},${rect.height.toFixed(1)}|${fontSize}|${style.color}`;
@@ -3748,8 +3896,8 @@ function placeSheet(): void {
     if (
       rect.width === 0 ||
       rect.height === 0 ||
-      rect.bottom < panelBox.top - 4 ||
-      rect.top > panelBox.bottom + 4
+      rect.top < panelBox.top - 1 ||
+      rect.bottom > panelBox.bottom + 1
     ) {
       return false;
     }
@@ -3759,28 +3907,50 @@ function placeSheet(): void {
     return fills || bordered;
   });
   const wantedSurfaces = new Set<HTMLElement>();
-  painted.forEach((element, index) => {
-    const rig = sheetSurfaces[index];
-    if (rig === undefined) return;
+  const paintedSet = new Set(painted);
+  for (const [element, rig] of [...surfaceOwners]) {
+    if (paintedSet.has(element)) continue;
+    surfaceOwners.delete(element);
+    rig.mesh.visible = false;
+  }
+  const heldSurfaces = new Set(surfaceOwners.values());
+  painted.forEach((element) => {
+    let rig = surfaceOwners.get(element);
+    if (rig === undefined) {
+      rig = sheetSurfaces.find((candidate) => !heldSurfaces.has(candidate));
+      if (rig === undefined) return;
+      surfaceOwners.set(element, rig);
+      heldSurfaces.add(rig);
+    }
+    wantedSurfaces.add(element);
     fillCard(rig, element, 1);
     if (!rig.mesh.visible) return;
     const style = getComputedStyle(element);
     const own = Number.parseFloat(style.opacity);
     rig.material.opacity = rig.baseOpacity * panelAlpha * (Number.isFinite(own) ? own : 1);
-    wantedSurfaces.add(element);
   });
-  for (let index = painted.length; index < sheetSurfaces.length; index += 1) {
-    const rig = sheetSurfaces[index];
+  const bordered = painted.filter((element) => {
+    const style = getComputedStyle(element);
+    return (Number.parseFloat(style.borderTopWidth) || 0) > 0 && style.borderTopStyle !== 'none';
+  });
+  const borderedSet = new Set(bordered);
+  for (const element of [...frameOwners.keys()]) {
+    if (borderedSet.has(element)) continue;
+    const rig = frameOwners.get(element);
+    frameOwners.delete(element);
     if (rig !== undefined) rig.mesh.visible = false;
   }
-  let frameSlot = 0;
-  painted.forEach((element) => {
+  const heldFrames = new Set(frameOwners.values());
+  bordered.forEach((element) => {
     const style = getComputedStyle(element);
     const width = Number.parseFloat(style.borderTopWidth) || 0;
-    if (!(width > 0) || style.borderTopStyle === 'none') return;
-    const rig = sheetFrames[frameSlot];
-    frameSlot += 1;
-    if (rig === undefined) return;
+    let rig = frameOwners.get(element);
+    if (rig === undefined) {
+      rig = sheetFrames.find((candidate) => !heldFrames.has(candidate));
+      if (rig === undefined) return;
+      frameOwners.set(element, rig);
+      heldFrames.add(rig);
+    }
     const rect = element.getBoundingClientRect();
     const signature = `${rect.left.toFixed(1)},${rect.top.toFixed(1)},${rect.width.toFixed(1)},${rect.height.toFixed(1)}|${String(width)}|${style.borderTopColor}|${style.borderRadius}`;
     if (signature !== rig.signature) {
@@ -3811,10 +3981,6 @@ function placeSheet(): void {
     }
     rig.mesh.visible = true;
   });
-  for (let index = frameSlot; index < sheetFrames.length; index += 1) {
-    const rig = sheetFrames[index];
-    if (rig !== undefined) rig.mesh.visible = false;
-  }
   // The sliders. Their paint lives in `::-webkit-slider-*` pseudo-elements — invisible to
   // getComputedStyle and to inline masking — so global.css declares geometry and colours as
   // `--slider-*` custom properties and masks the pseudo-elements, and this loop draws what the
@@ -3827,12 +3993,16 @@ function placeSheet(): void {
     const style = getComputedStyle(element);
     if (style.display === 'none') return false;
     const rect = element.getBoundingClientRect();
-    return (
-      rect.width > 0 &&
-      rect.height > 0 &&
-      rect.bottom >= panelBox.top - 4 &&
-      rect.top <= panelBox.bottom + 4
-    );
+    if (!(rect.width > 0 && rect.height > 0)) return false;
+    // The same full-containment rule as the rows and the plates, and it has to include the thumb:
+    // the track is a line on the input's centre, but the thumb is `--slider-thumb-size` tall and
+    // rides above and below it, so the input's own box is not what reaches the panel's edge. A
+    // slider that straddles the edge is left undrawn — its DOM track and thumb are already masked
+    // transparent by `global.css`, so the cost is a control that is half off-panel for a moment,
+    // and the gain is nothing standing on the wall above the panel.
+    const thumb = Number.parseFloat(style.getPropertyValue('--slider-thumb-size')) || rect.height;
+    const overhang = Math.max(0, (thumb - rect.height) / 2);
+    return rect.top - overhang >= panelBox.top - 1 && rect.bottom + overhang <= panelBox.bottom + 1;
   });
   for (const input of sliders) {
     const track = sheetSliderTracks[sliderSlot];
@@ -4577,10 +4747,18 @@ function placeMouth(state: GameStateView | null): void {
       <primitive v-if="backdrop !== null" :object="backdrop" />
 
       <!-- The table: a slab, not a plane, so it catches the key light the way the 2D one does — and
-         in the room's own ink, so the slab and the painted band below the edge are one colour. -->
+         in the room's own ink, so the slab and the painted band below the edge are one colour.
+
+         `metalness: 0` on every lit surface in this scene, and the reason is stated once here: there
+         is no environment map, so a metal has nothing to reflect. `MeshStandardMaterial` multiplies
+         its diffuse by (1 − metalness) and offers back only a specular lobe pointed at the one
+         directional light, so the default 0.5 silently halves the ink of everything standing in the
+         room — the props rendered at rgb(2,2,1) against a wall of rgb(45,42,41), which is the black
+         plate the eye reads as broken mesh. `keyLightInk` already puts a lit face at its own ink;
+         metalness was the only thing taking that back away. -->
       <TresMesh :position="[0, tableY, -0.4]">
         <TresBoxGeometry :args="[frame.width * 1.2, WORLD_HEIGHT * 0.6, 0.3]" />
-        <TresMeshStandardMaterial :color="tableInk" :roughness="0.85" />
+        <TresMeshStandardMaterial :color="tableInk" :metalness="0" :roughness="0.85" />
       </TresMesh>
 
       <!-- The lighter as the painted layer's own bands: a tank up to the shoulder, the chimney and
@@ -4591,16 +4769,12 @@ function placeMouth(state: GameStateView | null): void {
         <!-- Tank: −0.7H…−0.14H. -->
         <TresMesh :position="[0, -0.42 * lighter.h, 0]">
           <TresBoxGeometry :args="[lighter.w, 0.56 * lighter.h, lighter.w * 0.7]" />
-          <TresMeshStandardMaterial
-            :color="PROP_INK.lighterTank"
-            :metalness="0.5"
-            :roughness="0.4"
-          />
+          <TresMeshStandardMaterial :color="PROP_INK.lighterTank" :metalness="0" :roughness="0.4" />
         </TresMesh>
         <!-- Chimney and wick: −0.14H…−0.03H. -->
         <TresMesh :position="[0, -0.085 * lighter.h, 0]">
           <TresBoxGeometry :args="[lighter.w * 0.56, 0.11 * lighter.h, lighter.w * 0.5]" />
-          <TresMeshStandardMaterial color="#6d6259" :metalness="0.35" :roughness="0.7" />
+          <TresMeshStandardMaterial color="#6d6259" :metalness="0" :roughness="0.7" />
         </TresMesh>
         <!-- The cap: hinged at the shoulder's back edge, `lighter.lid` its only input. Closed it
            covers the chimney; at full throw the shell tips back and the wick comes out. -->
@@ -4622,14 +4796,14 @@ function placeMouth(state: GameStateView | null): void {
             <TresBoxGeometry :args="[lighter.w, 0.22 * lighter.h, lighter.w * 0.7]" />
             <TresMeshStandardMaterial
               :color="PROP_INK.lighterCap"
-              :metalness="0.55"
+              :metalness="0"
               :roughness="0.3"
             />
             <!-- `box-shadow: inset 0 1px 0 rgba(255,255,255,.06)`, as the line it draws: the shell's
                top face, a hair in front of it so it is not z-fighting with the can. -->
             <TresMesh :position="[0, 0.11 * lighter.h, lighter.w * 0.01]">
               <TresPlaneGeometry :args="[lighter.w * 1.035, edgePx]" />
-              <TresMeshBasicMaterial :color="PROP_INK.lighterEdge" />
+              <TresMeshBasicMaterial :color="propRim(PROP_INK.lighterEdge)" />
             </TresMesh>
           </TresMesh>
         </TresGroup>
@@ -4639,10 +4813,10 @@ function placeMouth(state: GameStateView | null): void {
            only way a box can have an edge in this layer. -->
         <TresMesh :position="[0, 0, -pack.w * 0.32]">
           <TresPlaneGeometry :args="[pack.w + 2 * edgePx, pack.h + 2 * edgePx]" />
-          <TresMeshBasicMaterial :color="PROP_INK.packEdge" />
+          <TresMeshBasicMaterial :color="propRim(PROP_INK.packEdge)" />
         </TresMesh>
         <TresBoxGeometry :args="[pack.w, pack.h, pack.w * 0.6]" />
-        <TresMeshStandardMaterial :color="PROP_INK.pack" :roughness="0.6" />
+        <TresMeshStandardMaterial :color="PROP_INK.pack" :metalness="0" :roughness="0.6" />
       </TresMesh>
       <!--
       A disc facing the camera, squashed by the 2D layer's own ratio: the canvas draws the tray as an
@@ -4657,7 +4831,7 @@ function placeMouth(state: GameStateView | null): void {
       <TresGroup ref="trayGroup" name="tray" :position="at('ashtray')">
         <TresMesh :rotation="[-Math.PI / 2, 0, 0]" :scale="[1, 1, TRAY_FLATTEN]">
           <TresCylinderGeometry :args="[trayRadius, trayRadius, trayRadius * 0.28, 32]" />
-          <TresMeshStandardMaterial :color="PROP_INK.ashtray" :metalness="0.3" :roughness="0.5" />
+          <TresMeshStandardMaterial :color="PROP_INK.ashtray" :metalness="0" :roughness="0.5" />
         </TresMesh>
         <!-- §20's answer to a drag. The back rim is the only place a tray shows its material, and it is
            also what the tray says while the rod is being carried toward it — the destination answers,

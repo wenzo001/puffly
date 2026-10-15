@@ -41,12 +41,15 @@ export const PROP_INK = {
 } as const;
 
 /**
- * The rod's thickness as a share of its own length. §2 draws the held cigarette 168 × 34 and the
- * one resting on the pack 96 × 16, so the paper tube is about a fifth of its length across — the
- * 1 : 55 of a real cigarette is what the *simulation* keeps, and this is the 20 % cartoon the
- * redline allows on the way it is drawn.
+ * The rod's thickness as a share of its own length — a real cigarette's 7.8 mm over 84 mm.
+ *
+ * This used to be the Demo's own `168 × 34` (0.20, about 1 : 5). That number is right *in the
+ * Demo*: there the rod is a flat rect with a top-to-bottom paper gradient and 5 px ends, so a
+ * wide body still reads as a cigarette. Here the same ratio is a shaded cylinder, and 1 : 5 is
+ * how a pipe is drawn — which is what it started reading as. The length the core publishes is
+ * unchanged; only the share of it that is thickness comes down to the object being simulated.
  */
-export const ROD_THICKNESS_SHARE = 34 / 168;
+export const ROD_THICKNESS_SHARE = 7.8 / 84;
 
 export const LIGHTER_SIZE = { width: 0.05, height: 0.075 } as const;
 export const PACK_SIZE = { width: 0.058, height: 0.088 } as const;
@@ -147,8 +150,15 @@ export const CHAR_BIT = 0.46;
 /** The grain field's seed: the same noise field every reader walks, index by index. */
 export const CHAR_GRAIN_SEED = 1332;
 
-/** How deep the paper gives under a full draw, as a share of the rod's own thickness. */
-export const DIP_SHARE = 0.22;
+/**
+ * How deep the paper gives under a full draw, as a share of the rod's own thickness.
+ *
+ * The waist's radius ends up at `1 − 2 × DIP_SHARE` of nominal, because `paperGive` returns the
+ * dent's depth and the tube is scaled by what is left of the half-width. At the 0.22 this was,
+ * that is a 44 % loss of diameter — the rod visibly thinnens while the finger is held, which is
+ * the opposite of what paper does. 0.06 keeps S7/S15's 吸入时纸面会塌陷 as a softening.
+ */
+export const DIP_SHARE = 0.06;
 
 /** Where the tube pinches: just behind the cherry, which is where the air is actually leaving. */
 export const WAIST = 0.78;
