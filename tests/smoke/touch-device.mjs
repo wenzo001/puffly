@@ -1282,7 +1282,29 @@ const hintCentre = async (page) => {
       const r = btn.getBoundingClientRect();
       const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
       // The button's own glyph span is a hit on the button; anything else is something on top.
-      if (!btn.contains(hit)) blocked.push(name);
+      if (!btn.contains(hit)) {
+        // And when it is something else, name it with the chain rather than with a verdict: this
+        // check has been attributed twice to two different causes (stale aim, an overlay) and both
+        // were disproved by measuring — `probe-covering-layer.mjs` shows the same point answering the
+        // close button itself on a clean page, on either renderer. So the difference must be the
+        // state this block arrives in, and the only way to catch that is to have the red carry the
+        // element that was actually on top, plus what is open at the time.
+        const chain = [];
+        for (let n = hit; n !== null && chain.length < 4; n = n.parentElement) {
+          chain.push(
+            `${n.tagName.toLowerCase()}${
+              n.className && typeof n.className === 'string'
+                ? '.' + n.className.trim().split(/\s+/)[0]
+                : ''
+            }`,
+          );
+        }
+        blocked.push(
+          `${name}=${chain.join('<') || 'nothing'}|open=${String(
+            document.querySelectorAll('.sheet[data-open="true"]').length,
+          )}|card=${String(document.querySelectorAll('.archive').length)}`,
+        );
+      }
     }
     return { missing, blocked };
   });
