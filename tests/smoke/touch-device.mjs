@@ -908,6 +908,15 @@ async function openSheet(page, id, mouse = false) {
             : null;
         return {
           handle: el === null ? 'absent' : r && r.width > 0 ? 'onscreen' : 'zero-box',
+          // The rect and the frame, because `hitTag:"none"` — `elementFromPoint` answering null — only
+          // happens for a point OUTSIDE the viewport: a folded control sitting at the origin still
+          // returns the stack there. So the live question is where the box is, not whether it is zero.
+          rect: r
+            ? [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)]
+            : null,
+          aim: r ? [Math.round(r.x + r.width / 2), Math.round(r.y + r.height / 2)] : null,
+          display: el === null ? null : getComputedStyle(el).display,
+          viewport: [window.innerWidth, window.innerHeight],
           hitIsHandle:
             hit !== null && el !== null && (el === hit || el.contains(hit) || hit.contains(el)),
           hitTag: hit
