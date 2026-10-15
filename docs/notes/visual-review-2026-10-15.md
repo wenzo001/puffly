@@ -350,3 +350,25 @@ player as a decision, not to me as a threshold to tune.
 GitHub's runner is only knowable from a run there, and the local software proxy's red count has rotated
 between 167 and 171 of 172–174 across seven runs, which is why every count above is written with its
 flags and its command.
+
+## 11. §10's candidate mechanism is already dead — measured sixty seconds later
+
+§10 offered a testable hypothesis: the block presses with `mouse.down`/`mouse.up`, the probe that
+ignited used `locator.click()`, and a 30 ms down/up pair might be coalesced away on a 13–19 fps page.
+It is wrong. `tests/smoke/probe-press-route.mjs` runs both routes on fresh contexts under the same
+`--disable-gpu` flags:
+
+```
+{"route":"downup","pressed":"down/up 30ms","before":"lighter","aff":"puff","phase":"puff","frames":188}
+{"route":"click", "pressed":"click",          "before":"lighter","aff":"puff","phase":"puff","frames":190}
+```
+
+Both ignite. So the gesture route is not the cause, and the difference left standing is the one the
+sheet-family reds already pointed at: **the suite's block reaches the pill on a page that has run sixty
+other checks, while every probe that works starts from a clean one.** Whatever the block carries in —
+a phase, an open panel, a pinned archive card, the idle timer's position — is what stops the press from
+igniting, and finding it means running the block's own prefix and stopping at the first state where the
+pill stops answering, not tuning the press.
+
+Recorded this way on purpose: the hypothesis is written down *with* its refutation so nobody (including
+the next me) re-proposes the gesture-coalescing story from §10's text alone.
