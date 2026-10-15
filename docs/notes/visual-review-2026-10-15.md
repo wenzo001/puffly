@@ -446,3 +446,28 @@ The next cut, therefore, is not "wait longer": it is to print the rail's actual 
 size at that moment (one line in the same diagnostic), and to check whether the settings block assumes
 an idle break that the preceding blocks no longer leave it with. Both are cheap; neither is done, and
 nothing in this file claims otherwise.
+
+## 14. Correcting the rate I quoted: it was pooled across trees, and it was optimistic
+
+I told the player "about a third of runs red-line one check" on the strength of six CI-proxy runs. Sorting
+the logs by which tree they ran on — the precondition check's own name is the date stamp, since it only
+exists after that commit — the picture is different, and bimodal:
+
+| log | has the panel precondition | verdict |
+| --- | --- | --- |
+| `pf2-sw` | yes | 174/174 |
+| `wake-sw` | yes | **166/174 — eight or nine reds** |
+| `rect3-sw` | yes | 174/174 |
+| `rate-1` | yes | 174/174 |
+| `rate-2` | yes | 174/175 — one red |
+| `pf3-sw` | yes | truncated by my own `pkill`; **not a sample either way** |
+
+So on trees that carry every fix in this round: three clean runs, one with a single red, **one with
+eight or nine**. It is not "a third of runs lose one check" — it is *usually clean, occasionally the page
+is starved enough that a whole block falls over*, which is a different risk and a different decision.
+The one number I am not entitled to is a rate: five usable samples is too few, and `pf3-sw` was
+destroyed by me rather than by the product.
+
+`wake-sw` is the interesting one and is unexamined: it ran **after** the wake fix and still lost a block,
+which is the same shape as §13's unresolved fold race. Reading its FAIL lines is the next thing to do,
+and it is the honest reason this file does not claim CI will go green.
