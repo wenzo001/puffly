@@ -859,6 +859,30 @@ const clickAt = (locator, withinMs = 2500) =>
 async function openSheet(page, id, mouse = false) {
   const selector = SHEET_HANDLE[id];
   const handle = page.locator(selector);
+  // CI's own report (35a260e, 2026-10-15) narrowed this family to one question. The handle is onscreen
+  // and the hit test agrees (`handle:"onscreen", rect:[14,13,34,34], aim:[31,30], hitIsHandle:true`) and
+  // still `openAny:0` with all three sheet shells present — so the press is aimed correctly and the
+  // panel never attaches. Either the event never reaches the button, or the handler runs and the state
+  // does not move. Those are different products of a different failure, and only a listener on the
+  // button itself can tell them apart, so record what the button saw.
+  await page
+    .evaluate((target) => {
+      const el = document.querySelector(target);
+      if (el === null) return;
+      const w = window;
+      w.__tapLog = w.__tapLog ?? {};
+      w.__tapLog[target] = [];
+      for (const type of ['pointerdown', 'pointerup', 'click', 'touchstart']) {
+        el.addEventListener(
+          type,
+          () => {
+            (w.__tapLog[target] ??= []).push(type);
+          },
+          { capture: true },
+        );
+      }
+    }, selector)
+    .catch(() => {});
   // A pinned archive card left open by the tier blocks covers everything this helper is about to
   // reach. Measured 2026-10-15 (`/tmp/wake-sw.txt`, a page carrying every fix in this round): the
   // sheet's own `.close` centre hit `aside.archive` — `blocked:["close=aside.archive<…|open=1|card=1"]`
@@ -937,6 +961,10 @@ async function openSheet(page, id, mouse = false) {
           aim: r ? [Math.round(r.x + r.width / 2), Math.round(r.y + r.height / 2)] : null,
           display: el === null ? null : getComputedStyle(el).display,
           viewport: [window.innerWidth, window.innerHeight],
+          // The answer to the question CI's report leaves open: did the button see anything at all?
+          // `events:[]` means the press never reached it (a delivery/gesture problem); a populated
+          // list with no sheet means the handler ran and the state did not move (a product problem).
+          events: (window.__tapLog && window.__tapLog[target]) ?? 'no-log',
           hitIsHandle:
             hit !== null && el !== null && (el === hit || el.contains(hit) || hit.contains(el)),
           hitTag: hit
@@ -4042,10 +4070,6 @@ try {
         root?.traverse((o) => {
           if (o.name === 'world') w.__punchScalePeak = Math.max(w.__punchScalePeak, o.scale.x);
         });
-        // The same frames also carry the flame and the cap, so they are recorded here rather than
-        // sampled afterwards: the throw's whole visible life is ~1 s of sim, and on the starved page
-        // that is two or three frames — every sample taken outside them reports a working scene as a
-        // broken one. The widest frame keeps the corners the hinge check needs.
         if (typeof w.__lidProbe === 'function') {
           const q = w.__lidProbe();
           if (q.visible) w.__flameEver = true;
@@ -4054,13 +4078,11 @@ try {
             w.__lidOpen = q.snap;
           }
         }
-        // The flint's sparks are the same shape of claim and were the last sampler left in this block:
-        // the burst lives ~1 s of sim, so on the starved page the poll could sit either side of it and
-        // answer false for a flint that threw sparks (measured 2026-10-15: the flame and the cap came
-        // through the recorder at `lit=true lid=-1.36` while `sparks` still read false).
-        root?.traverse((o) => {
-          if (o.name === 'sparks' && o.count > 0) w.__sparksEver = true;
-        });
+        // The flame and the cap are recorded here because they live ~1 s of sim — two or three frames
+        // on the starved page — and every sample taken outside them reports a working scene as a broken
+        // one. The flint's sparks are *not* read this way: their burst is shorter than the interval
+        // between two painted frames, so even a per-frame sampler misses them; the scene keeps a
+        // high-water mark instead (`SceneStage.vue`, `probe.sparksPeak`).
       } catch {
         // A frame that cannot be read is not a failure of the picture; the assertion below only
         // reports the peaks, so a lost sample shows up as a peak that never rose.
@@ -4135,7 +4157,7 @@ try {
   // with room for the burst's own life — the 4 s version reddened on a loaded machine while the
   // runs either side of it were green (2026-10-11).
   const sparksSeen = await page
-    .waitForFunction(() => window.__sparksEver === true, null, {
+    .waitForFunction(() => (window.__pufflyScene?.sparksPeak ?? 0) > 0, null, {
       timeout: 14_000,
       polling: 120,
     })

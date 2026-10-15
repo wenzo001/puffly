@@ -177,6 +177,12 @@ interface SceneProbe {
    * rest rule, so a check that presses on a timer can report a working game as a broken one — which
    * is what happened on 2026-10-11, seven reds in one run and green in the runs either side of it.
    */
+  /**
+   * Most spark instances drawn in any one frame since the page opened. A high-water mark rather than
+   * a live reading, because the flint's burst is shorter than the gap between two painted frames on a
+   * slow page — a sampler at frame boundaries can miss an event that definitely happened.
+   */
+  sparksPeak: number;
   puffReady: boolean;
   /**
    * The cherry's light as the last frame drew it: the core's own glow radius and flare, the diameter
@@ -223,6 +229,8 @@ const probe: SceneProbe = {
   cherry: null,
   lip: { visible: false, action: '', tier: 'S', columnWidthPx: 0, kind: '' },
   puffReady: false,
+  /** Most spark instances the scene has ever drawn in one frame. See `placeSmoke`'s high-water mark. */
+  sparksPeak: 0,
   lastExhale: null,
   selectCigarette: (id: string) => props.game.select({ cigarette: id }),
 };
@@ -3114,6 +3122,12 @@ function step(deltaMs: number): void {
   const spark = sparksMesh.value;
   if (spark !== null) {
     spark.count = sparkN;
+    // The high-water mark, kept here rather than by a sampler outside: the flint's burst is shorter
+    // than the gap between two painted frames on a starved page (measured on CI's runner and again
+    // under `--disable-gpu`: the flame and the cap are caught by the per-frame recorder while
+    // `sparks` reads false), so any reader that looks at frame boundaries can miss it. This function
+    // runs on every frame the scene draws, and it sees the count whether or not anyone was looking.
+    if (sparkN > 0) probe.sparksPeak = Math.max(probe.sparksPeak, sparkN);
     spark.instanceMatrix.needsUpdate = true;
     if (spark.instanceColor !== null) spark.instanceColor.needsUpdate = true;
   }
