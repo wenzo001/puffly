@@ -290,3 +290,32 @@ its drawer does not), the scene's DOM-mirror mask layer, and the wide-layout sid
 whatever covers the stage is either only present while the page is starved, or it is present always and
 only *moves into the way of a tap* when frames are slow. That distinction is the first thing the grid
 above will settle.
+
+## 9. And the covering-layer hypothesis is dead too — measured, in the same sitting
+
+§8 named a suspect. The grid probe (`tests/smoke/probe-covering-layer.mjs`) disproves it, so §8's
+hypothesis is withdrawn and the file ends on the measurement rather than on the story:
+
+```
+state  {"open":true,"sheetTop":204,"closeBox":[321,221,54],"canvases":["scene3d:0h852"]}
+ 197,180 => div.hit < main.stage < div#app < body < html.scene3d-text
+ 197,120 => div.hit < main.stage < ...
+ 348,229 => button.icon-button < header.head < section.sheet < main.stage < div#app
+```
+
+Identical on the software-rendered page and on the healthy one, with the sheet open: the dismissal aim
+lands on the stage's own hit surface, and the close button's centre lands on the close button. Hiding
+`.sheet` / `.hud` / `.rail` / `.cta` / `canvas` one at a time changes nothing, because nothing is
+covering anything. So there is **no overlay**, and §8's "one layer, two points" was a story the numbers
+did not require.
+
+What is left standing: those two checks red on a starved page but green on a healthy one, and the
+geometry is provably fine when the sheet is open. The remaining difference must therefore be *state* —
+the block reaches those checks after other checks have run (a pinned archive card, a scrolled sheet, a
+language switch), and something in that state moves the panel or the fold timer. Naming it needs the
+same grid probe run **at the moment of the failure**, i.e. inside the suite rather than in a clean page
+— which is a next-round job, not a conclusion I am entitled to draw now.
+
+Recorded so the next session does not re-invent the overlay theory: the two candidate causes that
+*are* dead are (a) stale aim geometry (the aim is computed from the live panel top and lands correctly)
+and (b) a covering layer (nothing covers anything).
