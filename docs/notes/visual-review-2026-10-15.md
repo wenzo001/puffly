@@ -380,3 +380,32 @@ fails. The probe for it crashed on my own ordering bug (a `locator.count()` plac
 finishing the verified work — so the hypothesis *"an open panel is what stops the pill answering in
 that block"* is recorded as **untested, not disproved**. It is the first thing to try next, and
 `tests/smoke/probe-press-route.mjs` (which works, and which is what refuted §10) is the shape to copy.
+
+## 12. The last family had a product cause, and both paths are now green
+
+§11 left one candidate untested. It is now tested, and it is the answer: **an open panel takes the pill
+away entirely.** Two trials, same build, same `--disable-gpu` flags, differing only in whether a sheet
+was opened first (`tests/smoke/probe-press-with-sheet.mjs`):
+
+```
+control    sheetsOpen=0  pillBox=[26,716]  →  phase "puff"   (ignites)
+withSheet  sheetsOpen=1  pillBox=null      →  phase "light", affordance stays "lighter"
+```
+
+So the block's four reds were never about frame rate: the suite reaches the draw block with a panel
+still open from earlier blocks, `.pill` has **no box to press** while a panel is up, and everything
+downstream of the draw dies with it. The wake added earlier in this round cannot help — the control is
+absent, not folded — which is why that commit, though it removed one red, did not remove the chain.
+
+The fix states the precondition instead of assuming it: if a panel is open, dismiss it the way the
+product does (a press on `.hit`), wait bounded for it to go, and assert `the draw block starts with no
+panel over the pill` as its own named check.
+
+**Result, both paths, same tree:** software-rendered CI proxy **174/174**, normal path **174/174**.
+That is the first time this round the local reproduction of CI's runner is fully green, and it is the
+evidence that the device job can go green on GitHub's GPU-less runner — though only a run there can
+confirm it, which is the one thing I cannot do from here.
+
+What this round did *not* fix, unchanged from §5: the props still read dark against a ground roughly
+twice as bright as the design's, and the big exhale is still a near-uniform veil (which is the
+white-out). Both are palette/artwork decisions, not measurements.
