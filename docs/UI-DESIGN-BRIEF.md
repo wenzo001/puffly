@@ -413,3 +413,21 @@ runner 是 13fps，差的那一截正是"面板一族"红不红的关键。8 倍
   环境变量），因为这一路只在被拒绝时才进。
 
 **CI 仍是这一族唯一有效判决**：本地在 20× 下量不到可信的分母，只能量到"总红数会自己换人"。
+
+**11）那条 `tile 9.0 vs 10.0分钟` 是判据自己撒谎，不是应用把同一个数写成两个数。**
+
+上一段里 20× 那趟有一条看着最像产品缺陷的红：『the tile and the card say the same number of minutes for
+the same rod — silver: tile 9.0 vs ["10.0分钟",…]`。两个数不可能来自两处口径——现读：柜子里那颗
+（`CollectionSheet.vue:287`）和卡上那一格（`archiveModel.ts:90`）**调的是同一个函数**
+`archiveModel.rodMinutes`（复跑：`grep -rn rodMinutes apps/web/src packages/*/src`，除定义与测试只剩这两处）。
+⇒ 唯一的可能是卡和tile说的不是同一支烟：全页只有一个 `[data-hook="archive"]`（`App.vue` 的 `archiveFacts` 是单值），
+饥饿下那一按没换成这支烟的卡，卡上还是上一支。而旧判据三条断言（`cells===3`、`chosen` 不变、`name.length>0`）
+**没有一条钉住"是谁的卡"**——错的那张卡同样满足，所以它一边把状态问题报成应用问题，一边在正常速度下绿着。
+
+改法是就地补同一句话：卡的 `.name` 必须等于那颗 tile 的 `.name`（`heldLocked.tileName` 新增读数），
+两条判据都加上（`holding a card you have not met opens its archive…` 那条的标题里就写着 "its archive"）。
+反证在页面里现量（`node tests/smoke/probe-card-identity.mjs`，正常速度）：
+`lockedRod=silver / lockedName=Menthol / 卡名=Menthol / tile 9.0 / 卡 ["9.0分钟","11","690–780°C"]`
+⇒ `sameRod:true`、`minutesAgree:true`，而 `lieAgainstOtherTile:false`（拿柜子里另一颗 Hookah 的名字比就不成立）
+⇒ 这一条加得下去、也红得起来。真机套件加完两条判据后正常路径 **174/174、RUN=0**（`/tmp/dev-id2.txt`；
+复跑＝`node tests/smoke/touch-device.mjs http://localhost:5175/`，先 `npm run dev`）。

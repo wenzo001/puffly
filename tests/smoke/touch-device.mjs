@@ -2974,6 +2974,15 @@ try {
         tile: (
           document.querySelector(`.tile[data-rod="${rod}"] .length .digits`)?.textContent ?? ''
         ).trim(),
+        // And the card's own name against that tile's, because there is only ONE archive card on
+        // the page (`App.vue`: `archiveFacts` is a single value). A run at 20x CPU throttle read
+        // `silver: tile 9.0 vs ["10.0分钟",…]`, and since both figures come from the same
+        // `archiveModel.rodMinutes` (CollectionSheet:287 for the tile, archiveModel:90 for the card),
+        // they cannot disagree about one rod — so the card was showing a different rod than the tile
+        // the press was aimed at, and the check was comparing two rods and blaming the app.
+        tileName: (
+          document.querySelector(`.tile[data-rod="${rod}"] .name`)?.textContent ?? ''
+        ).trim(),
         cellsText: [...(card?.querySelectorAll('.cells dd') ?? [])].map((el) =>
           (el.textContent ?? '').trim(),
         ),
@@ -2983,14 +2992,22 @@ try {
   );
   check(
     'holding a card you have not met opens its archive without putting it in the hand',
-    heldLocked.cells === 3 && heldLocked.chosen === before && heldLocked.name.length > 0,
+    heldLocked.cells === 3 &&
+      heldLocked.chosen === before &&
+      // "its archive" is the claim here, and until now nothing in this check proved whose card it
+      // was: there is one archive element on the page, so a card left over from the previous rod
+      // satisfied `name.length > 0` just as well as the right one.
+      heldLocked.name === heldLocked.tileName &&
+      heldLocked.name.length > 0,
     `${lockedRod} → ${JSON.stringify({ ...heldLocked, before })}`,
   );
   check(
     'the tile and the card say the same number of minutes for the same rod',
-    /^\d+\.\d$/.test(heldLocked.tile) &&
+    heldLocked.name === heldLocked.tileName &&
+      heldLocked.name.length > 0 &&
+      /^\d+\.\d$/.test(heldLocked.tile) &&
       heldLocked.cellsText.some((text) => text.includes(heldLocked.tile)),
-    `${lockedRod}: tile ${heldLocked.tile} vs ${JSON.stringify(heldLocked.cellsText)}`,
+    `${lockedRod}: card="${heldLocked.name}" tile="${heldLocked.tileName}" tile ${heldLocked.tile} vs ${JSON.stringify(heldLocked.cellsText)}`,
   );
 
   // S18: the skins row is four bars per card, one of them is worn, and a locked one is inert.
