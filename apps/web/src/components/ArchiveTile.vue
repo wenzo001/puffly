@@ -175,9 +175,16 @@ const label = computed(() =>
   opacity: 0.42;
 }
 
-.tile[data-locked='false']:hover,
 .tile[data-locked='false']:active {
   background: color-mix(in oklab, var(--soft-white) 9%, transparent);
+}
+
+/* The hover half is gated: a lift that leaves `:hover` behind would otherwise keep an unselected
+   tile looking pressed. */
+@media (hover: hover) {
+  .tile[data-locked='false']:hover {
+    background: color-mix(in oklab, var(--soft-white) 9%, transparent);
+  }
 }
 
 .tile[data-selected='true'] {

@@ -3515,7 +3515,7 @@ function placeCat(): void {
   badge.position.set(where.centre[0], where.centre[1], 0.062);
   badgeMaterial.color.set(
     getComputedStyle(document.documentElement).getPropertyValue('--ember-orange').trim() ||
-      '#e2604a',
+      '#ff8a3d',
   );
 }
 

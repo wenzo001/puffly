@@ -144,6 +144,12 @@ export function createPointerAdapter(
 ): InputAdapter {
   let press: PressState | null = null;
   /**
+   * The one armed hold timer, for the one live press. A mouse keeps the same `pointerId` for every
+   * click, so an old timer cannot be told apart by id alone: without clearing it, a second press
+   * that lands inside the first one's threshold is read as a hold the player never made.
+   */
+  let holdTimer = 0;
+  /**
    * Fingers currently down, by pointer id. Consulted for one thing only: recognising the
    * close of two fingers on the cherry (§9 of the mobile brief). A single finger is
    * already `press` above, and nothing else in the game cares how many hands there are.
@@ -196,7 +202,8 @@ export function createPointerAdapter(
       /* uncaptured, and still playing */
     }
     // Long-press threshold: past it, the press *is* a hold and the app reacts while held.
-    window.setTimeout(() => {
+    window.clearTimeout(holdTimer);
+    holdTimer = window.setTimeout(() => {
       if (press && press.id === event.pointerId && !press.holdSent) {
         press.holdSent = true;
         send({
@@ -273,6 +280,7 @@ export function createPointerAdapter(
 
   const onUp = (event: PointerEvent): void => {
     if (!press || press.id !== event.pointerId) return;
+    window.clearTimeout(holdTimer);
     const heldMs = performance.now() - press.startedAtMs;
     const point = toStagePoint(
       event.clientX,
@@ -329,6 +337,7 @@ export function createPointerAdapter(
 
   const onCancel = (event: PointerEvent): void => {
     if (!press || press.id !== event.pointerId) return;
+    window.clearTimeout(holdTimer);
     send({
       type: 'release',
       x: clampUnit(press.last.x),
@@ -355,6 +364,7 @@ export function createPointerAdapter(
       surface.removeEventListener('pointercancel', onCancel);
       fingers.clear();
       spreadAt = 0;
+      window.clearTimeout(holdTimer);
       press = null;
     },
   };

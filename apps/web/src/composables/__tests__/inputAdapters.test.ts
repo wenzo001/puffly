@@ -9,6 +9,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { TIMING } from '@puffly/game-core';
 import type { GameEngine, GameInput } from '@puffly/game-core';
 import {
   createKeyboardAdapter,
@@ -157,6 +158,34 @@ describe('pointer → GameInput (§49)', () => {
     clock += 900;
     rig.up();
     expect(rig.sent.map((input) => input.type)).toEqual(['hold', 'release']);
+    rig.dispose();
+  });
+
+  it('a second mouse press does not inherit the first press hold timer', () => {
+    // A mouse reports the same `pointerId` for every click, so the timer's own id check cannot tell
+    // this press from the previous one: lifted and re-pressed inside the first press's threshold, the
+    // second click used to be read as a hold the player never made.
+    const rig = pointerRig();
+    rig.downAt(100, 300, 1, 'mouse');
+    vi.advanceTimersByTime(10);
+    rig.upAt(100, 300, 1);
+    rig.downAt(100, 300, 1, 'mouse');
+    // 140 ms into this press: the *previous* press's deadline has passed, this one's has not.
+    vi.advanceTimersByTime(TIMING.tapMaxMs - 10);
+    expect(rig.sent.map((input) => input.type)).toEqual(['tap']);
+    rig.upAt(100, 300, 1);
+    expect(rig.sent.map((input) => input.type)).toEqual(['tap', 'tap']);
+    rig.dispose();
+  });
+
+  it('a cancelled press does not stay armed over the next one', () => {
+    const rig = pointerRig();
+    rig.downAt(100, 300, 1, 'mouse');
+    vi.advanceTimersByTime(10);
+    rig.cancel();
+    rig.downAt(100, 300, 1, 'mouse');
+    vi.advanceTimersByTime(TIMING.tapMaxMs - 10);
+    expect(rig.sent.map((input) => input.type)).toEqual(['release']);
     rig.dispose();
   });
 

@@ -132,9 +132,17 @@ const on = (id: Phase): boolean => !props.settingsOpen && phase.value === id;
   line-height: 1;
 }
 
-button.tab[data-on='false']:hover,
 button.tab[data-on='false']:active {
   color: var(--soft-white);
   border-color: var(--chrome-line);
+}
+
+/* A finger keeps `:hover` set after it lifts, so the hover half stays gated on hardware that can
+   actually hover — otherwise the tab stays lit once the tap is over. */
+@media (hover: hover) {
+  button.tab[data-on='false']:hover {
+    color: var(--soft-white);
+    border-color: var(--chrome-line);
+  }
 }
 </style>

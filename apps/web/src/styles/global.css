@@ -162,6 +162,21 @@ body {
   outline-offset: 2px;
 }
 
+/*
+ * The keyboard path is an official input route (SPEC.md §65), yet only three selectors had a focus
+ * state — the rail tabs, the pills, the sheet closes and the archive tiles inherited the browser's
+ * default, which on a dark chrome is invisible. One ring for everything interactive, and the more
+ * specific rules above still win where they exist.
+ */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--ember-core);
+  outline-offset: 2px;
+}
+
 .icon-button.dim {
   opacity: 0.42;
 }
@@ -394,6 +409,13 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  /*
+   * The four named classes used to be the whole promise, which left every per-component transition
+   * — the rail tabs, the pill, the sheet rows — outside it. Cover the property rather than a list
+   * that has to be remembered; `animation` stays untouched because the scene's DOM mirrors are read
+   * by name.
+   */
+  *,
   .chrome,
   .sheet,
   .swatch,

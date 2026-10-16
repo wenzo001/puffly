@@ -271,7 +271,15 @@ function dismissOnScene(event: PointerEvent): void {
 .hit {
   position: absolute;
   inset: 0;
+}
+
+/*
+ * The stage is tabbable, so keyboard focus has to be *seen* — but a ring drawn outside the element
+ * is a frame on top of the scene's own paint. The marker stays inside the stage edge instead.
+ */
+.hit:focus-visible {
   outline: none;
+  box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--ember-orange) 55%, transparent);
 }
 
 /*

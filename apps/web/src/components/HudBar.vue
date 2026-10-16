@@ -320,8 +320,8 @@ const desk = computed((): Array<{ key: CopyKey; value: string; press: boolean }>
 }
 
 .cat {
-  width: 34px;
-  height: 34px;
+  width: max(34px, var(--tap-target));
+  height: max(34px, var(--tap-target));
   display: grid;
   place-items: center;
   border: 1px solid var(--chrome-line);
