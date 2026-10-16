@@ -3742,8 +3742,11 @@ try {
 // The scene is the default landing now (2026-10-10) — a plain URL mounts it — and the acceptance
 // is "两条后端出帧": the default faces whatever the machine has, `?scene=3d` names the same path,
 // and `&gl=1` must land on the WebGL2 backend rather than silently using WebGPU anyway. The
-// `?scene=2d` escape must still find the painted layer, with no scene object at all — that is what
-// keeps the old blocks' URL explicit and the flip honest. The digits' check is the atlas's own —
+// `?scene=2d` no longer finds a painted layer — that layer retired with it — and the suite asserts
+// rather than assumes it: the block near the end loads that query and requires the scene to mount
+// with no painted canvas behind it (`?scene=2d is inert — the scene mounts and no painted canvas
+// comes back`). The URLs stay explicit here so the flip between backends is the thing under test
+// rather than a side effect of a stale query. The digits' check is the atlas's own —
 // the DOM's ink is transparent under the flag, so a bright pixel inside the clock's box is the
 // scene's text and nothing else.
 {

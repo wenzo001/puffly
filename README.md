@@ -469,6 +469,29 @@ dimple while drawing. The slider paint is the one place the mirror reaches throu
 global.css declares it as `--slider-*` custom properties, so the browser resolves the cascade and
 the media queries and the scene reads the values (see §12 of the spec).
 
+## Tooling in this repository
+
+Two things live alongside the code, and both are re-runnable rather than remembered.
+
+**UI skills.** Seven playbooks from [agentic-awesome-skills](https://github.com/sickn33/agentic-awesome-skills)
+are vendored into `.qoder/skills/` (`baseline-ui`, `build-ui`, `frontend-ui-engineering`,
+`design-taste-frontend`, `web-design-guidelines`, `3d-web-experience`, `browser-automation`) and the
+selection itself is recorded in `.qoder/aas-stack.json`. They reach the agent as project skills; the
+MCP that catalogues them (`aas`) is configured on the machine, not in the repository, because its
+command names a local path. Re-install or re-verify either half:
+
+```bash
+node ~/.aas-runtime/node_modules/agentic-awesome-skills/tools/bin/install.js --path .qoder/skills --release 19.7.0 --skills baseline-ui,build-ui,frontend-ui-engineering,design-taste-frontend,web-design-guidelines,3d-web-experience,browser-automation
+node ~/.aas-runtime/node_modules/agentic-awesome-skills/tools/bin/aas.js \
+  stack validate --manifest .qoder/aas-stack.json   # -> "status":"valid"
+```
+
+**The handoff page for UI work.** [`docs/UI-DESIGN-BRIEF.md`](docs/UI-DESIGN-BRIEF.md) is the input a
+design pass should start from: every surface and what it answers for, the 11-state loop, the settings
+with their ranges, the state matrix (including what deliberately has no offline UI), the design
+language's current values, the ten decisions that belong to the owner rather than to an agent, and the
+run ledger — the numbers each claim was measured with, so a stale one is visible as stale.
+
 ## Product boundaries
 
 Puffly is an entertainment and stress-relief object: a substitute ritual. It does not claim to treat
