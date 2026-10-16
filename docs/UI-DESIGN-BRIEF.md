@@ -109,6 +109,7 @@
 | 图集／CSSOM 读不到时，场景里徽标的兜底色 `#e2604a` 与 token `#ff8a3d` 不是一个颜色 | `SceneStage.vue` | — |
 | 在设置里打字／选日期时，空格、回车、方向键、Esc 被游戏抢走；Tab 到药丸后按回车也不激活按钮，而是去点烟 | `useInputAdapters.ts` 的 `yieldsToFocus` | `inputAdapters.test.ts` 的 `yields space, Enter and the arrows…` + `keeps Space as the draw even when a button holds the focus` |
 | 拖动途中另一根手指碰到屏幕会抢走烟杆；抬起的那根还会在指位表里留鬼 | `useInputAdapters.ts` 的 `onDown`／`onUp`／`onCancel` | 同一文件三条用例，各自只为自己红 |
+| **建议是"磕灰"或"收烟"时，空格键按下去毫无反应**（键盘对所有动词都发 hold，而引擎的 hold 没有 `ash` 那一行、也不管收走已熄灭的烟） | `useInputAdapters.ts` 里空格改按 `isSustained` 分流 | `inputAdapters.test.ts` 的 `answers the decisive verbs with Space too…` + `keeps the sustained verbs as a hold and one release` |
 
 ### 6.2 结构性原因（比单点 bug 更值得新 UI 处理）
 

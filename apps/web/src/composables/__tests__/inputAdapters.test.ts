@@ -395,6 +395,38 @@ describe('keyboard → GameInput (§65)', () => {
     rig.adapter.detach();
   });
 
+  /**
+   * §65's keys have to answer without a manual to read, and `phase.ts` says the pill and the keyboard
+   * use the same sustained/tap split. They did not: Space always sent `hold`, and `handleHold` has no
+   * row for the ash or for putting an out rod away — so at the 磕灰 step and at the 收烟 step the
+   * keyboard's main key produced nothing at all, while the same press on the pill worked.
+   */
+  it('answers the decisive verbs with Space too, not only the sustained ones', () => {
+    for (const affordance of ['flick', 'discard', 'pick', 'lighter'] as const) {
+      const rig = keyRig(affordance);
+      keyOver(rig, ' ', null);
+      rig.target.dispatchEvent(new KeyboardEvent('keyup', { key: ' ' }));
+      expect(
+        rig.sent.map((input) => input.type),
+        `"${affordance}" is not a sustained verb, so Space acts once and its release buys nothing`,
+      ).toEqual(['tap']);
+      rig.adapter.detach();
+    }
+  });
+
+  it('keeps the sustained verbs as a hold and one release', () => {
+    for (const affordance of ['puff', 'extinguish'] as const) {
+      const rig = keyRig(affordance);
+      keyOver(rig, ' ', null);
+      rig.target.dispatchEvent(new KeyboardEvent('keyup', { key: ' ' }));
+      expect(
+        rig.sent.map((input) => input.type),
+        `"${affordance}" is held while the key is down`,
+      ).toEqual(['hold', 'release']);
+      rig.adapter.detach();
+    }
+  });
+
   it('auto-repeat from a held key does not stack into extra puffs', () => {
     const rig = keyRig('puff');
     rig.target.dispatchEvent(new KeyboardEvent('keydown', { key: ' ' }));

@@ -7,6 +7,7 @@
  * That discrimination is what stops a tap from meaning "a sip and then another sip".
  */
 
+import { isSustained } from '../phase';
 import {
   TIMING,
   type GameEngine,
@@ -387,6 +388,8 @@ export function createKeyboardAdapter(
   affordanceTarget: () => InputTarget,
 ): InputAdapter {
   const keysDown = new Set<string>();
+  /** Which keys are currently holding something, so their `keyup` releases and nothing else does. */
+  const heldKeys = new Set<string>();
 
   const send = (
     type: GameInput['type'],
@@ -415,10 +418,14 @@ export function createKeyboardAdapter(
       case 'Enter': {
         event.preventDefault();
         keysDown.add(event.key);
-        // Space is the sustained action, Enter the decisive tap; both aim at what the
-        // engine says the player is most likely about to do (§28).
-        if (event.key === ' ') send('hold', affordanceTarget());
-        else send('tap', affordanceTarget());
+        // Space is the sustained action and Enter the decisive tap, both aimed at what the engine
+        // says the player is most likely about to do (§28). "Sustained" is not the keyboard's own
+        // list to keep: `phase.ts` promises the pill and the keyboard never disagree about what
+        // pressing means, and Game Core's hold has no row for the ash or for putting an out rod
+        // away — so sending a hold at 磕灰 or 收烟 used to make the main key answer with nothing.
+        const sustained = event.key === ' ' && isSustained(state.ui.affordance ?? 'none');
+        if (sustained) heldKeys.add(event.key);
+        send(sustained ? 'hold' : 'tap', affordanceTarget());
         break;
       }
       case 'Escape': {
@@ -458,7 +465,8 @@ export function createKeyboardAdapter(
 
   const onKeyUp = (event: KeyboardEvent): void => {
     if (!keysDown.delete(event.key)) return;
-    if (event.key === ' ') send('release', affordanceTarget());
+    // Only a key that actually started a hold may end one.
+    if (event.key === ' ' && heldKeys.delete(' ')) send('release', affordanceTarget());
     if (event.key === 'Escape') send('release', 'ashtray');
   };
 
@@ -472,6 +480,7 @@ export function createKeyboardAdapter(
       node.removeEventListener('keydown', onKeyDown as EventListener);
       node.removeEventListener('keyup', onKeyUp as EventListener);
       keysDown.clear();
+      heldKeys.clear();
     },
   };
 }
