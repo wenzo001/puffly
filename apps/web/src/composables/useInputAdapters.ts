@@ -186,6 +186,11 @@ export function createPointerAdapter(
       // Two digits already touching are not a deliberate close on anything.
       spreadAt = start > PINCH_MIN_SPREAD_PX ? start : 0;
     }
+    // A second finger does not take the rod away from the first. Without this the stray lands,
+    // `press` is replaced, and the burning end jumps to whatever brushed the glass — while the
+    // first finger's own lift is then swallowed by the id guard below. Fingers still records the
+    // newcomer, because the pinch above has to see two digits to know about them.
+    if (press !== null) return;
     press = {
       id: event.pointerId,
       startedAtMs: performance.now(),
@@ -279,6 +284,10 @@ export function createPointerAdapter(
   };
 
   const onUp = (event: PointerEvent): void => {
+    // Lifted fingers leave the map whether or not one of them owned the rod: a stale entry would
+    // make the next two-finger gesture read as a third finger still resting on the glass.
+    fingers.delete(event.pointerId);
+    if (fingers.size < 2) spreadAt = 0;
     if (!press || press.id !== event.pointerId) return;
     window.clearTimeout(holdTimer);
     const heldMs = performance.now() - press.startedAtMs;
@@ -330,12 +339,12 @@ export function createPointerAdapter(
     } catch {
       /* nothing to give back */
     }
-    fingers.delete(event.pointerId);
-    if (fingers.size < 2) spreadAt = 0;
     press = null;
   };
 
   const onCancel = (event: PointerEvent): void => {
+    fingers.delete(event.pointerId);
+    spreadAt = 0;
     if (!press || press.id !== event.pointerId) return;
     window.clearTimeout(holdTimer);
     send({
@@ -345,8 +354,6 @@ export function createPointerAdapter(
       timestamp: engine.getState().nowMs,
       source: sourceOf(event),
     });
-    fingers.delete(event.pointerId);
-    spreadAt = 0;
     press = null;
   };
 

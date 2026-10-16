@@ -216,3 +216,17 @@
 - 「`dt = Math.min(raw, 250)` 让饥饿页面的模拟时间恒定慢于墙钟」——**不是这一层的事**。后台那段时间另有
   记账（`:737` 把 `raw` 累进 `simulatedWhileHiddenMs`），跨后台的续燃按系统时钟补（`openBreakSnapshot`／
   `restoreOpenBreak`，§81(4)）。动这个上限之前要先证明补烧那条链没接住同一个洞。
+
+**4）一条名字比内容大的判据——它承诺的守卫根本没在测。**
+
+`inputAdapters.test.ts` 里 `ignores a second pointer, so two fingers cannot fight over the rod`
+原来只是按了一次 id 1、数一个 tap（它甚至建了个空的 handlers 又 `void` 掉）。而代码里
+`onDown` 是**无条件替换**当前按压的，所以那句话说的是不存在的行为。写成真驱动之后当场红了：
+发出去的方向是 `[0.25, 0.75, 0.8]`——**烟杆跳到那根多余的手指上并跟着它走**。
+玩家手感就是"拖着拖着，另一根手指碰一下屏幕，烧的那头跑过去了"。
+
+现在：一根手指在按住时，后来的手指只记账不抢杆；抬起／取消的那根无论是不是主控都从指位表里划掉
+（少划一次就会让下一个双指动作数到三根手指、捏合永不触发）。三处修改各有一条只为自己红的用例
+（`ignores a second pointer…`、`a thumb resting beside a finger…`、`a cancelled stray finger…`）。
+
+⇒ 给下一位读者的通例：**看一条判据时先读它真正驱动了什么事件，别信它的名字。**

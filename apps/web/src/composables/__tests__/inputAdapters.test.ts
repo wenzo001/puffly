@@ -33,6 +33,7 @@ interface PointerRig {
   moveAt(x: number, y: number, id: number, type?: string): void;
   upAt(x: number, y: number, id: number): void;
   cancel(): void;
+  fireCancel(event: Event): void;
   dispose(): void;
 }
 
@@ -75,6 +76,7 @@ function pointerRig(nowMs = 1000): PointerRig {
     moveAt: (x, y, id, pointerType = 'touch') => fire('pointermove', x, y, id, pointerType),
     upAt: (x, y, id) => fire('pointerup', x, y, id),
     cancel: () => fire('pointercancel', 200, 300),
+    fireCancel: (event: Event) => handlers.get('pointercancel')?.(event as never),
     dispose: () => adapter.detach(),
   };
 }
@@ -134,6 +136,32 @@ describe('pointer → GameInput (§49)', () => {
 
     // Lift the stray finger. A real close afterwards still counts: disarming is not a lockout.
     rig.upAt(160, 305, 2);
+    rig.downAt(260, 300, 3);
+    rig.moveAt(200, 300, 3);
+    expect(rig.sent.filter((input) => input.type === 'pinch')).toHaveLength(1);
+    rig.dispose();
+  });
+
+  it('a cancelled stray finger leaves no ghost on the glass', () => {
+    // The mirror of the thumb case, arrived at by `pointercancel` instead of `pointerup`: the
+    // interrupted finger is not the one holding the rod, and a bookkeeping skip there would make
+    // every later pinch count three digits and never fire.
+    const rig = pointerRig();
+    rig.downAt(150, 300, 1);
+    rig.downAt(160, 305, 2);
+    rig.moveAt(152, 301, 2);
+    expect(rig.sent.filter((input) => input.type === 'pinch')).toHaveLength(0);
+
+    const stray = new Event('pointercancel') as Event & Record<string, unknown>;
+    Object.assign(stray, {
+      pointerId: 2,
+      button: 0,
+      pointerType: 'touch',
+      clientX: 160,
+      clientY: 305,
+    });
+    rig.fireCancel(stray);
+
     rig.downAt(260, 300, 3);
     rig.moveAt(200, 300, 3);
     expect(rig.sent.filter((input) => input.type === 'pinch')).toHaveLength(1);
@@ -213,14 +241,31 @@ describe('pointer → GameInput (§49)', () => {
   });
 
   it('ignores a second pointer, so two fingers cannot fight over the rod', () => {
+    // The name of this case used to promise more than it measured: it fired one pointer and counted
+    // a tap, which also passes on a code base where a stray finger steals the rod. What the player
+    // would feel is that — a thumb brushing the glass mid-drag makes the burning end jump to it.
     const rig = pointerRig();
-    const handlers = new Map<string, EventListener>();
-    // The rig only ever uses pointerId 1; fire a foreign id through the same path.
-    void handlers;
-    rig.down();
-    clock += 60;
-    rig.up();
-    expect(rig.sent.filter((input) => input.type === 'tap').length).toBe(1);
+    rig.downAt(100, 300, 1);
+    vi.advanceTimersByTime(200);
+    expect(rig.sent.map((input) => input.type)).toEqual(['hold']);
+
+    rig.downAt(300, 300, 2);
+    vi.advanceTimersByTime(200);
+    rig.moveAt(320, 300, 2);
+
+    // Every movement the scene was told about is still finger 1's: x 100 of 400 is 0.25, and the
+    // stray sits at 0.75. A takeover shows up here as a drag nobody aimed.
+    const aimed = rig.sent.filter((input) => input.type === 'hold' || input.type === 'drag');
+    expect(aimed.map((input) => Number(input.x.toFixed(2)))).toEqual(aimed.map(() => 0.25));
+
+    // The stray lifting is not the draw ending: finger 1 still owns the rod and still gets released.
+    rig.upAt(300, 300, 2);
+    expect(rig.sent.map((input) => input.type)).toEqual(['hold']);
+    rig.moveAt(140, 300, 1);
+    expect(rig.sent.at(-1)?.type).toBe('drag');
+    expect(Number(rig.sent.at(-1)?.x.toFixed(2))).toBe(0.35);
+    rig.upAt(100, 300, 1);
+    expect(rig.sent.at(-1)?.type).toBe('release');
     rig.dispose();
   });
 
