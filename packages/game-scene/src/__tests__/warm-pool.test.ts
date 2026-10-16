@@ -16,6 +16,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_CONTENT } from '@puffly/game-content';
+import { CIGARETTE_STATES } from '@puffly/game-core';
 import {
   backgroundStructure,
   bloomAlpha,
@@ -120,6 +121,32 @@ describe('a live break walks the rows the Demo drew', () => {
 
     h.until(() => h.state().cigarette.state === 'ASH_READY', 120_000);
     expect(lightsOf(h).pool).toMatchObject(asGlow(WARM_POOL.tray));
+  });
+
+  it('puts each screen\u2019s pool inside the frame, portrait and wide alike', () => {
+    // The bug this family exists for was a unit mix — a centre taken as a fraction of the box's width
+    // and a radius as a fraction of its height — and that only *shows* on a frame that is not square.
+    // The old case measured one screen (idle) on one frame; a unit slip in the other four rows, or in
+    // the landscape layout, stayed invisible. `asGlow` equality cannot catch it either: both sides
+    // would read the same wrong number.
+    const frames = [
+      ['phone', PHONE.w, PHONE.h],
+      ['wide', 1280, 800],
+    ] as const;
+    const base = breakHarness().state();
+    for (const [name, w, h] of frames) {
+      for (const state of CIGARETTE_STATES) {
+        const cloned = structuredClone(base) as typeof base;
+        cloned.cigarette.state = state;
+        const { pool } = lightsOf({ state: () => cloned } as never);
+        expect(
+          pool.x > 0 && pool.x < 1 && pool.y > 0 && pool.y < 1 && pool.rx <= 1 && pool.ry <= 1,
+          `${name} frame, ${state}: pool at ${pool.x},${pool.y} r${pool.rx}×${pool.ry} left the frame`,
+        ).toBe(true);
+        // And it is the screen's own strength, not a leftover from the unit mix.
+        expect(pool.alpha).toBe(WARM_POOL[warmPoolScreen(state)].alpha);
+      }
+    }
   });
 
   it('hands the scene a pool that is inside the frame it will be drawn in', () => {
