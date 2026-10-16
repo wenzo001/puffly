@@ -31,14 +31,49 @@ function ringBlock(): string {
   return HUD.slice(start, end);
 }
 
+/**
+ * The body of the branch that starts at `start` — braces counted, so a nested `if`'s own body ends
+ * where it ends. Reading the whole file instead is what let a phase wear the wrong symbol in silence.
+ */
+function armOf(text: string, start: RegExp): string {
+  const found = start.exec(text);
+  if (!found) throw new Error(`no branch matching ${start}`);
+  const open = text.indexOf('{', found.index + found[0].length - 1);
+  if (open < 0) throw new Error(`branch matching ${start} has no body`);
+  let depth = 0;
+  for (let index = open; index < text.length; index += 1) {
+    if (text[index] === '{') depth += 1;
+    else if (text[index] === '}' && --depth === 0) return text.slice(open, index + 1);
+  }
+  throw new Error(`unbalanced braces after ${start}`);
+}
+
 describe('each of the five screens names its Demo symbol', () => {
-  it('maps the phases to the five glyph names', () => {
-    // In source order inside the reading computed: LIGHTING, 待机， 吐烟 force, 吸入， 磕灰.
-    expect(HUD).toMatch(/glyph: 'flame'/);
-    expect(HUD).toMatch(/glyph: 'rod'/);
-    expect(HUD).toMatch(/glyph: 'swirl-dot'/);
-    expect(HUD).toMatch(/glyph: 'airflow'/);
-    expect(HUD).toMatch(/glyph: 'tray-lines'/);
+  it('binds each glyph to the branch that wears it, not to the file', () => {
+    // Five independent `toMatch` over the whole component could not tell which phase wears which
+    // symbol: moving 火苗 onto the tray row and 灰线 onto the ignition keeps all five literals and
+    // stayed green. Measured, not assumed — the swap below reddens exactly this case.
+    //
+    // The contract the five screens actually set: LIGHTING burns a flame, the waiting rod wears the
+    // rod, a finished draw wears the swirl of the exhale, an open draw wears the airflow, and the
+    // tray row wears the ash lines.
+    const lighting = armOf(HUD, /case 'light':/);
+    const lightingArm = armOf(lighting, /if \(rod\.state === 'LIGHTING'\)/);
+    expect(lightingArm).toContain("glyph: 'flame'");
+    expect(lighting).toContain("glyph: 'rod'");
+    expect(lightingArm).not.toContain("glyph: 'rod'");
+
+    const puff = armOf(HUD, /case 'puff':/);
+    const exhale = armOf(puff, /if \(exhale !== null\)/);
+    expect(exhale).toContain("glyph: 'swirl-dot'");
+    expect(puff).toContain("glyph: 'airflow'");
+    expect(exhale).not.toContain("glyph: 'airflow'");
+
+    expect(armOf(HUD, /case 'tray':/)).toContain("glyph: 'tray-lines'");
+    // `out` has no case of its own; it is the default, and it reads the clock.
+    const last = HUD.slice(HUD.lastIndexOf('default:'));
+    expect(last).toContain("glyph: 'rod'");
+    expect(last).toContain("label: 'a11y.hud.clock'");
   });
 
   it('renders the glyph component inside the ring at 26px and keeps the diamond as the only text', () => {
