@@ -922,6 +922,10 @@ async function openSheet(page, id, mouse = false) {
   // The attach bound used to be 4 s, which was a second bet about frame rate: on CI's software page
   // the tap lands and the sheet arrives a beat later, so every open failed and cascaded into ~15
   // checks that read a sheet (`missing:["close"]` in the #159 report). Bounded, not open-ended.
+  // The last lap's route and its refusal, kept outside the loop because that is the press the
+  // diagnostic below is describing.
+  let viaMouse = false;
+  let pressError = null;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     if (!(await awake(selector).catch(() => false))) {
       await wakeChrome(page, selector).catch(() => {});
@@ -934,7 +938,19 @@ async function openSheet(page, id, mouse = false) {
     const tappable = await page
       .evaluate(() => window.navigator.maxTouchPoints > 0)
       .catch(() => false);
-    const pressed = mouse || !tappable ? await clickAt(handle) : await tapAt(handle);
+    // The route's own refusal used to be invisible: `tapAt`/`clickAt` catch and answer false, so a
+    // press Playwright never made reads the same as a press the button ignored. Both end in
+    // `events:[]`, and they are different products — one is this file's problem, one is the app's.
+    viaMouse = mouse || !tappable;
+    pressError = null;
+    const pressed = await (
+      viaMouse ? handle.click({ timeout: 2500 }) : handle.tap({ timeout: 2500 })
+    )
+      .then(() => true)
+      .catch((error) => {
+        pressError = String(error.message).split('\n')[0].slice(0, 140);
+        return false;
+      });
     const opened = await page
       .waitForSelector('.sheet[data-open="true"]', {
         state: 'attached',
@@ -983,6 +999,9 @@ async function openSheet(page, id, mouse = false) {
           openAny: document.querySelectorAll('.sheet[data-open="true"]').length,
         };
       }, selector)
+      // The route and the refusal are known on this side only (the press was made from here), so they
+      // ride in after the page-side reading instead of being mirrored into the window.
+      .then((reading) => ({ ...reading, route: viaMouse ? 'click' : 'tap', pressError }))
       .catch(() => null);
     console.log(`FAIL  openSheet(${id}) never opened — ${JSON.stringify(why)}`);
   }

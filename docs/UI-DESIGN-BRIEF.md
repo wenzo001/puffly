@@ -259,3 +259,13 @@
 所以最终形状是**按钥匙分**：输入框全让（那是文字入口），按钮只让回车（那是键盘用户按它的方式），
 空格无论如何归游戏。判据两头都配了：摘掉按钮那半 → `yields …` 红；把按钮改成全让 →
 `keeps Space as the draw even when a button holds the focus` 红。
+
+**4）CI 那 22 条面板红的形状，在这台机器上复现不出来，所以改的是观测通道。**
+
+同一条旗标（`--use-angle=swiftshader --enable-unsafe-swiftshader --disable-gpu`）在这台 Mac 上跑整套是
+**173/174**，面板一族一条没红，唯一的红是 `the ignition's flame, open cap and sparks`（`sparks=false
+strikes=2`，属于已登记的逐帧记录器轮换族）。而 GitHub 的 runner 上同一棵树是 22 条 FAIL、
+`openSheet(...) never opened` 带 `hitIsHandle:true` 与 `events:[]`——那个 runner 慢到 13fps，这台是 26fps。
+⇒ 不要再从本地绿推 CI 绿。`openSheet` 现在把**走的是哪条路线**（click／tap）与**被吞掉的抛错原因**
+一起印进 FAIL 诊断（`tapAt`/`clickAt` 之前 `.catch(()=>false)`，"Playwright 根本没按下"与"按下了而状态没动"
+都读作 `events:[]`）。下一次 CI 会自己说是哪一半。改动只是读数，判据一条没动。
