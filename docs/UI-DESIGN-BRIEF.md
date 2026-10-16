@@ -15,7 +15,7 @@
 
 外加一条设计原则（SPEC §85）：**任何需要超过一句话才能解释的功能，优先重新设计交互，而不是加提示文案。**
 
-还有一条产品决定（README「Not built」）：**不做价格**。稿子里给每个烟种写的参考零售价被明确判为不做（SPEC.md:1151），新 UI 不要把它加回来。
+还有一条产品决定：**不做价格**。稿子里给每个烟种写的参考零售价被明确判为不做（`docs/SPEC.md:1151`，同一条在 `:2228` 落成了字段决定：`PackContent` 上不再有金额字段——现读 `packages/game-core/src/types/content.ts` 那个类型里只有 `tier: PackTier`，没有任何钱）。README 里那句"never a price comparison"在内容走查段 `README.md:361`，**不在**「Not built」（`:512` 起那一节没有价格字样——复跑 `sed -n '512,563p' README.md | grep -ic price`＝0，阳性对照 `grep -in price README.md`＝命中 361）。新 UI 不要把它加回来。
 
 ---
 
@@ -73,24 +73,28 @@
 
 ## 5. 可调项（设计需要为它们留位置）
 
-设置对象实测 21 个字段。界面上带范围的东西：
+设置对象实测 21 个字段。界面上带范围的东西（2026-10-17 逐个 `grep -n 'type="range"' -A6 apps/web/src/components/SettingsSheet.vue` 现读，
+min/max/step 都取自己那一行的属性，别抄这张表）：
 
-| 项 | 范围／步长 |
-| --- | --- |
-| 音量 | 0–100 |
-| 环境声 | 0–100，step 20 |
-| 写实度 | 1–30，6 个定位档 |
-| 单口时长 | 1–4 秒，step 0.5（**故意没有默认值**：缺省由烟种决定） |
-| 文字缩放 | 90–150%，step 5 |
-| 休息长度 | 0–100，step 5 |
-| 触感 | 0–40，滑块侧带波形，波形条数＝档位 |
-| 每日上限 | 整数，`—` 表示不设 |
-| 画质 | auto／high／balanced／light（预算 1400/800/380/160） |
-| 语言 | en／zh-CN／ar／**icons（无字层）** |
-| 自定义房色 | 4 层（天空上／天空下／地平线／剪影）或关闭 |
-| 数据 | 导出／导入／清空（清空是两段式：变橙 → `again` → 6 秒失效） |
+| 项 | 范围／步长 | 控件 |
+| --- | --- | --- |
+| 音量 | **没有滑块**：三档循环按钮 🔊0.7／🔉0.25／🔇muted（`SettingsSheet.vue:130-132`，`cycleSound` 在 `:143`） | `button.choice[data-setting="sound"]` |
+| 环境声 | 0–100，**无 step**（`:239-240`；`v-if="!settings.muted"`，静音时整条消失） | range |
+| 写实度 | 0–100，step 20 ⇒ **6 个定位档**（`:281-283`） | range |
+| 单口时长 | 1–4 秒，step 0.5（`:352-354`；**故意没有默认值**：缺省由烟种决定） | range |
+| 文字缩放 | 90–150%，step 5（`:470-472`） | range |
+| 休息长度 | **1–30**（分钟），step 1（`:316-318`） | range |
+| 触感 | **0–100**，step 5（`:508-510`），滑块侧带波形，波形条数＝档位 | range |
+| 每日上限 | **0–40 支**，step 1（`:542-544`），0＝不设、写成 `—` | range |
+| 画质 | 三档 light／balanced／high（`:150-152`），预算分别 380／800／1400（`constants.ts:118`）；`auto` 不是画质档，是**语言**的默认值（`:156`）；第四个预算 160 挂在 `reducedMotion` 上，界面上没有这一档 | `button.choice` ×3 |
+| 语言 | en／zh-CN／ar／**icons（无字层）**，`auto`＝跟系统 | `button.choice` |
+| 自定义房色 | 4 层（天空上／天空下／地平线／剪影），每层一个**原生取色器** `input type="color"`（`SettingsSheet.vue:381-384`，只在开关打开后出现），不是滑块 | swatch ×4 |
+| 数据 | 导出／导入／清空（清空是两段式：变橙 → `again` → 6 秒失效） | button |
 
-语言表实测：en 420 条、zh 210 条、**ar 只有 4 条**，其余回落英文／中文；`icons` 是纯图标层。阿语补齐被记为**"不做也不错"**（见第 7 节）。
+语言表实测：en **210** 条、zh **210** 条、**ar 只有 4 条**（全文件 424 个键行）。复跑＝先锚三张表的起点再数区间，别抄行号：
+`grep -n 'export const EN\|^const ZH\|^const AR\|^export const LOCALES' apps/web/src/i18n/copy.ts` ⇒ 今天落在 11／293／522／532，
+然后 `awk 'NR>=12 && NR<=288' … | grep -cE "^  '[^']+':"`（同法 294-521、523-535）。
+⇒ 之前这里写的"en 420"是把中英两块加在一起数的。其余回落英文／中文（`LOCALES` 第四个是 `icons` 纯图标层）。阿语补齐被记为**"不做也不错"**（见第 7 节）。
 
 ---
 
@@ -114,7 +118,13 @@
 ### 6.2 结构性原因（比单点 bug 更值得新 UI 处理）
 
 - **界面语言有三层翻译**（引擎状态 → UI 相位 → DOM 镜像 → 3D 场景）。一次"点了没反应"可能是任意一层的读值时机问题，而不是渲染问题。新 UI 应当减少层数，或在层之间放**统一的机器值镜像**（项目已经有 `.stage` 镜像的约定）。
-- **验证装置非常重，但大量是一次性脚本**：45 个单测里 33 个用 `readFileSync` 断言源码文本；`tests/smoke/` 下约 36 个 `probe-*/scan-*` 脚本只有 4 个进 CI。绿不等于能用——新 UI 每引入一种交互，请同时留下一条**会在它坏掉时变红**的判据，而不是一张截图。
+- **验证装置非常重，但绝大多数是一次性脚本**（2026-10-17 现算，别抄这行）：单测文件 **143** 个
+  （`find . -name '*.test.ts' -not -path '*/node_modules/*' | wc -l`），其中 **45** 个用 `readFileSync`
+  断言源码文本（`grep -rl readFileSync --include='*.test.ts' . | grep -v node_modules | wc -l`）；
+  `tests/smoke/` 下 `probe-*`／`scan-*` 脚本 **34** 个（`ls tests/smoke | grep -cE '^(probe|scan)-'`），
+  而 CI 只跑四样：`served-build.sh`、`serve.mjs`、`ci-runtime-probe.mjs`、`touch-device.mjs`
+  （`grep -rn 'tests/smoke' .github/workflows/`）⇒ **34 个一次性量具 0 个进门禁**。
+  绿不等于能用——新 UI 每引入一种交互，请同时留下一条**会在它坏掉时变红**的判据，而不是一张截图。
 
 ---
 
@@ -147,18 +157,19 @@
 | 11 | **钉住的档案卡和面板的关闭键互相压在对方身上**（实测、正常速度、393×852：`.sheet .close` 那颗 54×54 完全落在卡内，中心点命中 `p.scenes` ⇒ 面板的 × 点不动；把卡沉到面板之下则卡的钉住键（y 409–441，也在面板顶边之下）先死）。量具 `tests/smoke/probe-card-overlap.mjs`。三条路：① 面板打开时把钉住的卡一并收掉（最省事，但"钉住就是为了不被划走"这条契约要改口径）；② 面板打开时把卡锚到另一边（两张键都活，但 S19 的稿子指定档案区在右栏）；③ 面板高度给卡让出上部（等于重写这块的版式）。 | 未动，三条都得你挑 |
 | 10 | **键盘滚不动打开的面板**：三个 sheet 都没有 `tabindex`（现读：SettingsSheet:203 / SessionSheet:243 / CollectionSheet:227 只有 `class="sheet"`），而方向键在 `useInputAdapters.ts` 里被全局 `preventDefault` 收去 nudge 烟杆 ⇒ 键盘用户只能 Tab 到逐个控件、由浏览器把它滚进视野，PageDown/Home/End 全无作用。修法两半：给打开的面板 `tabindex="0"`（无害、纯加法），**并**规定『面板开着时方向键归面板』（这一半会拿走烟杆的一个既有键位）。§65 只说方向键『可以作为辅助输入』，没规定它永远属于杆——这条能设计得比现在好，但它动的是键位契约。 | 未动，等取向 |
 | 8 | **盲人听状态这条通道目前没有实现，而且两种实现互相打架。** `App.vue` 的注释写着"a blind user hears the state"，但那个句子只绑在舞台一层静态 `<div>` 的 `aria-label` 上——**改 `aria-label` 屏幕阅读器不会播报**，播报需要 live region 里的内容变化。试着加了一个裁剪掉的 `<p aria-live="polite">`，真机两趟都是 **167/174**，7 条红同一个因 `offenders:["said"]`：有一族判据钉着"无字层屏面上不得有成句文字"，而它扫的是整篇文档，不是 `.stage`。⇒ 要么给那族判据加一条"排除只供播报的裁剪节点"（＝改判据，得你点头），要么换一条不产生文字的通道（例如焦点真正落到带状态的元素上）。我没有自行放宽判据。 | 未动，等取向 |
-| 7 | **阿拉伯语下界面只镜像了一处**：`copy.ts` 认 ar/he/fa/ur、`App.vue` 会设 `dir=rtl`，但 CSS 里物理属性有 23 行、逻辑属性 19 行（口径：`grep -rn -E 'left:|right:|text-align|padding-left|border-left' --include=*.css --include=*.vue apps/web/src` 的命中行数，逻辑属性同法），专门写给 rtl 的规则全仓只有 1 条。⇒ 现在既不是"完整镜像"也不是"不镜像"，而是半镜像。要么把物理属性收成逻辑属性（会动到按 x 坐标写的像素判据，需要重定基线），要么在阿语补齐之前不设 `dir=rtl`。**选哪边取决于你对"4/420 条阿语翻译的界面该不该镜像"的判断**，我没有替你定。 | 未动，等一句话 |
+| 7 | **阿拉伯语下界面只镜像了一处**：`copy.ts` 认 ar/he/fa/ur、`App.vue` 会设 `dir=rtl`，但 CSS 里物理属性有 23 行、逻辑属性 19 行（口径：`grep -rn -E 'left:|right:|text-align|padding-left|border-left' --include=*.css --include=*.vue apps/web/src` 的命中行数，逻辑属性同法），专门写给 rtl 的规则全仓只有 1 条。⇒ 现在既不是"完整镜像"也不是"不镜像"，而是半镜像。要么把物理属性收成逻辑属性（会动到按 x 坐标写的像素判据，需要重定基线），要么在阿语补齐之前不设 `dir=rtl`。**选哪边取决于你对"4/210 条阿语翻译的界面该不该镜像"的判断**，我没有替你定。 | 未动，等一句话 |
 
 ---
 
 ## 9. 设计语言可复用的现值
 
-`:root` 实测 19 个自定义属性（`apps/web/src/styles/global.css`）：
+`:root` 实测 **20** 个自定义属性（`apps/web/src/styles/global.css`；复跑 `awk '/^:root/,/^}/' apps/web/src/styles/global.css | grep -cE '^\s+--'`）：
 
 ```
 --deep-charcoal #0b0a09   --warm-gray #7e746a   --soft-white #f2ede6
---ember-orange #ff8a3d    --ember-core #ffb273  --cool-blue #a8d4e0
---smoke-gray #c4c6cd      --text-2 #8a8078      --ash-gray #7e7e82
+--alert-ember #e2604a     --ember-orange #ff8a3d --ember-core #ffb273
+--cool-blue #a8d4e0       --smoke-gray #c4c6cd   --text-2 #8a8078
+--ash-gray #7e7e82
 --chrome-bg / --chrome-line（均由上面两色 color-mix 而来）
 --tap-target 44px（粗指针 54px）  --chrome-height calc(tap-target + 20px)
 --sheet-lift calc(chrome-height + env(safe-area-inset-bottom))
@@ -166,7 +177,15 @@
 --ease-out cubic-bezier(.16,.84,.3,1)  --ease-in cubic-bezier(.5,0,.75,.4)
 ```
 
-媒体查询只有 3 条：`prefers-reduced-motion`、`pointer: coarse`、`landscape and max-height 520px`。
+`--alert-ember` 是这一轮加的第 20 个：它不是"更红的 ember"，是**唯一一条错误色**
+（复跑 `grep -rn e2604a apps/web/src` ⇒ 源码里只有 `global.css:15` 这一处定义，没有第二个家）。
+现读它只有**一处规则**在用——`SettingsSheet.vue:776` 的坏值读数 `.state.bad`——外加一条对比度判据
+（`styles/__tests__/text-contrast.test.ts:82/84` 直接读这个 token）。3D 那边的兜底走的是 `--ember-orange`
+那条线的字面量 `#ff8a3d`（`SceneStage.vue:3518`），不是这条红。
+
+媒体查询 6 种条件（`grep -rhoE '@media[^{]*' apps/web/src | sort | uniq -c` 现读，2026-10-17）：
+`prefers-reduced-motion` ×4、`min-width: 860px` ×3、`hover: hover` ×2（这一轮加的：`:hover` 只给真有指针的设备）、
+`pointer: coarse` ×1、`landscape and max-height: 520px` ×1、`max-width: 859px` ×1。
 
 **外部设计源**：`Smoke Ritual`（pptx 抽出的纯文本，**24 屏**），逐屏对账表在 `docs/SPEC.md:4098`，口径三态"落／偏／欠"。另有浏览器抄出的 Demo 抽取件，五屏的页头／按钮／环 dasharray 实测在 `docs/SPEC.md:6114`：S1 83.31→0.780、S2 83.31→0.780、S3 53.41→0.500、S4 66.22→0.620、S5 80.11→0.750。3D 契约在 `docs/superpowers/specs/2026-10-09-scene3d-rewrite-design.md`。
 
@@ -312,7 +331,7 @@ runner 是 13fps，差的那一截正是"面板一族"红不红的关键。8 倍
 
 | 状态 | 今天怎么处理（出处） | 缺什么 |
 | --- | --- | --- |
-| 今日还没有一支（`sessionCount` 无值） | 直接算 0：`SessionSheet.vue:83` `?? 0`，读数行 `:252-256` 全部 `today?.x ?? 0` | 没有"今天还没有"的空态语汇；成就/收集侧用 `'还没有'`（`copy.ts:515` `ach.unit.locked`），两套口径不同 |
+| 今日还没有一支（`sessionCount` 无值） | 直接算 0：`SessionSheet.vue:83` `?? 0`，读数行 `:252-256` 里三条用 `today?.x ?? 0`（`:253` ☀、`:254` 🌙、`:256` 🌫️），另外两条不是：`:252` 是 `today?.puffs ?? summary.puffs`（没有今天就用整场），`:255` 🔥 干脆只读 `summary.puffs` | 没有"今天还没有"的空态语汇；成就/收集侧用 `'还没有'`（`copy.ts:515` `ach.unit.locked`），两套口径不同 |
 | 货架里未解锁的格子 | 用**色块**压住（`CollectionSheet.vue:645` 注释写明"压的是色块不是字"），格子本身是可聚焦按钮带 `aria-pressed`；档案格 `ArchiveTile.vue:24` 空档 = 空字符串 | 视觉语言已定，但"空"这件事只有色块、没有读数的位置约定 |
 | 存档降级（IndexedDB 不可用，落到内存） | 有露出：`SettingsSheet.vue:216` 的 `◍` + `aria-label`；标志位由 `usePuffly.ts:665/668/852/960` 维护 | **可见面只有一个半透明记号**（第 8 节第 9 条） |
 | 音频不可用（静音/自动播放策略/无 Web Audio） | `SettingsSheet.vue:211` 的 🔇 + `aria-label`；§63 规定此时**画面接管提示**（cue 通道 `data-cues`） | 记号同上；画面接管这条有真机判据 |
@@ -431,3 +450,27 @@ the same rod — silver: tile 9.0 vs ["10.0分钟",…]`。两个数不可能来
 ⇒ `sameRod:true`、`minutesAgree:true`，而 `lieAgainstOtherTile:false`（拿柜子里另一颗 Hookah 的名字比就不成立）
 ⇒ 这一条加得下去、也红得起来。真机套件加完两条判据后正常路径 **174/174、RUN=0**（`/tmp/dev-id2.txt`；
 复跑＝`node tests/smoke/touch-device.mjs http://localhost:5175/`，先 `npm run dev`）。
+
+**12）这份文档自己也漂了：一次独立复核抓到 7 处，逐条现量后全部改掉。**
+
+派了一个不带上下文的 agent 把全文的可机械核对数字／行号重算一遍（口径：文件行号要看那一行确实写着这件事；
+数数要挂命令；zsh 会把未加引号的 `--include=*.vue` 吞成"no matches found"，所以空结果不算证据）。
+它报回 7 处，我**逐条自己复跑**才动手（其中一条它说错的其实是它自己数法不同：AR 表它数 4 条＝我数 4 条，一致）：
+
+1. 语言表 `en 420` → **210**（420 是中英两块相加；见 §5 那条复跑命令）。
+2. §8-7 里 `4/420` → **4/210**。
+3. `:root` 自定义属性 `19` → **20**——多出来那个正是我这轮自己加的 `--alert-ember`（写文档的人不会主动想起来数自己刚加的东西）。
+4. **§5 那张控件表整块错位**（对交付物最坏的一条）：音量根本不是滑块（三档循环按钮）、环境声没有 step、
+   写实度是 0–100 step 20 而不是 1–30、休息长度是 1–30 step 1 而不是 0–100 step 5、
+   触感是 0–100 step 5 而不是 0–40、每日上限 0–40 step 1 漏了范围、`auto` 是**语言**默认值不是画质档、
+   预算 160 挂在 `reducedMotion` 上而不是第四个画质档。⇒ 表里每一行都补了 `SettingsSheet.vue` 的行号，
+   让下一个人不必信我。
+5. §12 说读数行 `:252-256`"全部 `today?.x ?? 0`"→ 只有三条是；`:252` 回落到 `summary.puffs`，`:255` 只读 `summary.puffs`。
+6. §1 把"不做价格"挂在 README「Not built」上 → 那一节没有价格字样（`sed -n '512,563p' README.md | grep -ic price`＝0，
+   阳性对照命中 `:361`）；真正的出处是 `SPEC.md:1151` 与落成字段的 `:2228`（现读 `PackContent` 只有 `tier`，没有金额）。
+7. §9 说媒体查询"只有 3 条"→ **6 种条件**（`prefers-reduced-motion`×4、`min-width:860px`×3、`hover:hover`×2、
+   `pointer:coarse`、`landscape and max-height:520px`、`max-width:859px`）——`hover: hover` 那两条也是我加的。
+
+它另外点了四处"树内查不到静态根据"的数（§8-1 的 2.3–2.6 倍、§8-2 的 spread 0.264/0.190、§8-3 的逐屏对账、
+§10 的"约 357s"）：那四条都是探针现读的，**只在跑对应量具的那一刻成立**，引用时要重跑，不要当常数。
+⇒ 结论写在这里给下一个改这份文档的人：**它是数出来的，不是抄来的**；每节的复跑命令就是它的有效期。
