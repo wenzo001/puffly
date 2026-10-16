@@ -2079,6 +2079,12 @@ try {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 800 },
     deviceScaleFactor: 1,
+    // Touch stays on even at this width. Without it, every coordinate tap below the block is
+    // silently dropped by the browser — the same family `openSheet` hit in 8d526ce — and the checks
+    // read whatever the previous block left behind instead of whatever they pressed. A desk user
+    // still gets mouse semantics: the adapter reports the pointer's own type, so §66's wider targets
+    // follow the finger and not this flag.
+    hasTouch: true,
   });
   const page = await context.newPage();
   const errors = [];
@@ -3672,7 +3678,12 @@ try {
 // the DOM's ink is transparent under the flag, so a bright pixel inside the clock's box is the
 // scene's text and nothing else.
 {
-  const context = await browser.newContext({ viewport: { width: 393, height: 852 } });
+  const context = await browser.newContext({
+    viewport: { width: 393, height: 852 },
+    // Same reason as the wide block: the taps below are coordinate taps, and a context built
+    // without touch answers none of them.
+    hasTouch: true,
+  });
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', (event) => errors.push(String(event).slice(0, 120)));
