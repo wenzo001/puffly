@@ -28,12 +28,28 @@ describe('the chrome the core clears is the chrome the shell draws', () => {
   });
 
   it('is handed the height by every resize, or the line stays decorative', () => {
-    const calls = [...SHELL.matchAll(/setStageAspect\(([^)]*)\)/g)];
-    expect(calls.length).toBeGreaterThanOrEqual(2);
-    for (const call of calls) {
-      expect(call[1], 'each call tells the engine how tall the stage is').toContain(
-        'viewport.stage.height',
-      );
+    // The old form counted occurrences in the file, so moving the call out of `resize` and into the
+    // frame loop — which is exactly how a rotation would leave the letterbox on yesterday's height —
+    // stayed green. Bound to the bodies instead: the wake-up hands it once, and *resize itself* hands
+    // it on every pass, because every entry point (ResizeObserver, `window resize`,
+    // `orientationchange`, `visualViewport` shift) funnels through this one function.
+    const resizeBody = blockAfter(SHELL, /const resize = \(surface: HTMLElement\): void => \{/);
+    const wakeBody = blockAfter(SHELL, /const attach = async \(surface: HTMLElement\)/);
+    expect(resizeBody).toContain('setStageAspect');
+    expect(wakeBody).toContain('setStageAspect');
+    for (const body of [resizeBody, wakeBody]) {
+      const call = /setStageAspect\(([^)]*)\)/.exec(body);
+      expect(call, 'each hand-off tells the engine how tall the stage is').not.toBeNull();
+      expect(call?.[1]).toContain('viewport.stage.height');
+    }
+    // And the entry points still all run through `resize`; a listener that recomputes something else
+    // would put the height back out of reach.
+    for (const driver of [
+      'ResizeObserver(() => resize(surface)',
+      "addEventListener('resize', () => resize(surface))",
+      'onViewportShift',
+    ]) {
+      expect(SHELL, `resize is still driven by ${driver}`).toContain(driver);
     }
   });
 });

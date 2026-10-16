@@ -295,6 +295,7 @@ runner 是 13fps，差的那一截正是"面板一族"红不红的关键。8 倍
 | --- | --- |
 | `reduction.test.ts` 减量行的命中面 | 窗口从 `.alt {` 一路开到文件尾：**删掉 `.alt` 自己的 `min-height`、在后面任意规则补一条同名的**，旧写法仍答 True |
 | `hud-glyphs.test.ts` 环内符号 | 五个字面量各自存在：**把火苗与灰线在两个分支间互换**（点火戴灰线、烟灰缸戴火苗），五个字全在 ⇒ 旧判据 True |
+| `chrome-furniture.test.ts` 舞台高度交给 core | 只在数文件里 `setStageAspect(` 出现几次：**把这次交递从 `resize()` 搬进 `frame()`**（转屏后信框仍用昨天的高度），调用数与参数串都没变 ⇒ 旧写法 True |
 | `cta-anatomy.test.ts` 药丸两态 | 只查声明是否出现在文件里：**删掉暗态选择器、把它的两条声明搬进 `.pill`**（药丸在任何动词下都是同一个橙），或把 `data-held` 的值写错（按住不再缩放）⇒ 旧判据两次都 True |
 
 统一形状：**按花括号 depth 切出规则体/分支体，再在里面判**（`sourceProbe.ts` 的 `blockAfter` 早就有了，
