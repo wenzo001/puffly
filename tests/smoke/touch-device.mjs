@@ -76,6 +76,20 @@ const EXTRA_ARGS = (process.env['PUFFLY_CHROME_ARGS'] ?? '').split(' ').filter(B
 if (EXTRA_ARGS.length > 0) Object.assign(launchOptions, { args: EXTRA_ARGS });
 
 /**
+ * `PUFFLY_CPU_THROTTLE` slows the page on purpose, and it exists to make CI's shape reachable from a
+ * desk machine. The flags above remove the GPU (this Mac then measures ~26 fps where the runner reads
+ * 13); the sheet family's failures are the ones the runner reports and a clean, fast page does not
+ * reproduce — so the speed has to be added back to look at them. Default 0 changes nothing at all,
+ * and nothing about a criterion changes with it: only the machine gets slower.
+ */
+const CPU_RATE = Number(process.env['PUFFLY_CPU_THROTTLE'] ?? 0);
+async function throttlePage(context, page) {
+  if (!(CPU_RATE > 0)) return;
+  const session = await context.newCDPSession(page);
+  await session.send('Emulation.setCPUThrottlingRate', { rate: CPU_RATE });
+}
+
+/**
  * Ask the app under test whether it answers at all, before driving anything at it.
  *
  * A missing or half-started server used to come back as an uncaught `page.goto:
@@ -221,6 +235,7 @@ async function openPhone({ width, height, dpr, locale }) {
     ...(locale === undefined ? {} : { locale }),
   });
   const page = await context.newPage();
+  await throttlePage(context, page);
   const errors = [];
   page.on('pageerror', (error) => errors.push(String(error)));
   page.on('console', (message) => {
@@ -235,6 +250,7 @@ async function openPhone({ width, height, dpr, locale }) {
 async function openWindow({ width, height }) {
   const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1 });
   const page = await context.newPage();
+  await throttlePage(context, page);
   const errors = [];
   page.on('pageerror', (error) => errors.push(String(error)));
   page.on('console', (message) => {
@@ -2106,6 +2122,7 @@ try {
     hasTouch: true,
   });
   const page = await context.newPage();
+  await throttlePage(context, page);
   const errors = [];
   page.on('pageerror', (event) => errors.push(String(event).slice(0, 120)));
   await page.goto(`${URL_ARG}?scene=3d`, { waitUntil: 'load' });
@@ -3704,6 +3721,7 @@ try {
     hasTouch: true,
   });
   const page = await context.newPage();
+  await throttlePage(context, page);
   const errors = [];
   page.on('pageerror', (event) => errors.push(String(event).slice(0, 120)));
   // Which claim each path below can carry is judged from the backend that path reports, not from a

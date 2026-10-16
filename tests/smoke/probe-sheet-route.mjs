@@ -28,6 +28,16 @@ const context = await browser.newContext({
   hasTouch: true,
 });
 const page = await context.newPage();
+/**
+ * CI's runner has no GPU and runs the page at ~13 fps; this Mac reaches ~26 under the same flags,
+ * which is fast enough to hide the whole family. `PUFFLY_CPU_THROTTLE` closes the gap on purpose so
+ * the refusal can be seen locally instead of guessed at.
+ */
+const THROTTLE = Number(process.env.PUFFLY_CPU_THROTTLE ?? 0);
+if (THROTTLE > 0) {
+  const cdp = await context.newCDPSession(page);
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: THROTTLE });
+}
 await page.goto(URL_ARG, { waitUntil: 'load' });
 await page
   .waitForFunction(() => (window.__pufflyScene?.frames ?? 0) > 5, null, { timeout: 30000 })
@@ -92,6 +102,21 @@ const control = await page.evaluate((sel) => {
   return window.__probeLog.slice();
 }, SEL);
 console.log(JSON.stringify({ route: 'control: synthetic dispatch', log: control }));
+
+const fps = await page.evaluate(
+  () =>
+    new Promise((resolve) => {
+      const at = window.performance.now();
+      let n = 0;
+      const tick = () => {
+        n += 1;
+        if (performance.now() - at < 1000) window.requestAnimationFrame(tick);
+        else resolve(n);
+      };
+      window.requestAnimationFrame(tick);
+    }),
+);
+console.log(JSON.stringify({ measuredFps: fps, throttle: THROTTLE }));
 
 // A. the route openSheet actually uses on a touch context.
 await reset();
