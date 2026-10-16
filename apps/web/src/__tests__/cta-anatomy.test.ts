@@ -18,6 +18,20 @@ function artTag(cls: string): string {
   return PILL.slice(open, close);
 }
 
+/** The body of one CSS rule, braces included, chosen by its selector. */
+function cssRule(text: string, selector: RegExp): string {
+  const found = selector.exec(text);
+  if (!found) throw new Error(`no rule matching ${selector}`);
+  const open = text.indexOf('{', found.index);
+  if (open < 0) throw new Error(`rule matching ${selector} has no body`);
+  let depth = 0;
+  for (let index = open; index < text.length; index += 1) {
+    if (text[index] === '{') depth += 1;
+    else if (text[index] === '}' && --depth === 0) return text.slice(open, index + 1);
+  }
+  throw new Error(`unbalanced braces after ${selector}`);
+}
+
 describe('the pill is the Demo button and nothing more', () => {
   it('wears no ring: not an arc element, a progress circle or an .arc rule', () => {
     expect(PILL).not.toContain('class="arc"');
@@ -26,15 +40,32 @@ describe('the pill is the Demo button and nothing more', () => {
     expect(PILL).not.toMatch(/\.arc\s*\{/);
   });
 
-  it('keeps the 62 / 31 / two-state anatomy', () => {
-    expect(PILL).toMatch(/min-height: 62px/);
-    expect(PILL).toMatch(/border-radius: 31px/);
-    expect(PILL).toContain('linear-gradient(90deg, #ff8533, #de5719)');
-    expect(PILL).toContain('linear-gradient(180deg, #3d3b38, #1f1d1c)');
-    expect(PILL).toContain('rgba(255, 153, 71, 0.42)');
-    expect(PILL).toMatch(/scale\(0\.98\)/);
-    // The Demo's own press curve, scoped to the button.
-    expect(PILL).toContain('cubic-bezier(0.22, 0.61, 0.36, 1)');
+  it('keeps the 62 / 31 / two-state anatomy, bound to the rules that carry it', () => {
+    // Reading the whole file made this blind to the one thing that matters: the dark half of §2's two
+    // states is a **selector**, not a colour. Deleting the `:not(...)` rule and pasting its two
+    // declarations into `.pill` keeps every literal and makes the pill stop changing for
+    // 吐烟／收烟／磕灰 — measured below as the decoy that only the bound form catches.
+    const base = cssRule(PILL, /^\.pill \{/m);
+    expect(base).toMatch(/min-height: 62px/);
+    expect(base).toMatch(/border-radius: 31px/);
+    expect(base).toContain('linear-gradient(90deg, #ff8533, #de5719)');
+    // The Demo's own press curve, scoped to this button rather than to the app's global ease.
+    expect(base).toContain('cubic-bezier(0.22, 0.61, 0.36, 1)');
+
+    // Pressed: both the mouse's `:active` and the app's own held flag have to reach the shrink.
+    // Located by the first selector of the pair; the body is the same one either half brings.
+    const pressed = cssRule(PILL, /^\.pill:active,/m);
+    expect(PILL).toContain(".cta[data-held='true'] .pill");
+    expect(pressed).toMatch(/transform: *scale\(0\.98\)/);
+
+    // And the inside-a-break state has to be the *rule that matches then*, not just a colour nearby.
+    const dark = cssRule(
+      PILL,
+      /^\.cta:not\(\[data-affordance='pick'\]\):not\(\[data-affordance='lighter'\]\) \.pill \{/m,
+    );
+    expect(dark).toContain('linear-gradient(180deg, #3d3b38, #1f1d1c)');
+    expect(dark).toContain('rgba(255, 153, 71, 0.42)');
+    expect(base).not.toContain('linear-gradient(180deg, #3d3b38, #1f1d1c)');
   });
 
   it('puts the 26 px Demo icon next to the word at a 12 px gap', () => {
