@@ -107,6 +107,8 @@
 | "减弱动态效果"只覆盖 4 个类名，各组件自己的 transition 全在外面 | `global.css` 的 reduce 块 | 同上 |
 | HUD 品类标是按钮但只有 34×34，低于自家 `--tap-target`（**脸必须留在 34**，撑大它会顶开整行——见 §11 的实测表） | `HudBar.vue` | `interaction-states.test.ts` 的 `keeps the category face … widens only its reach` |
 | 图集／CSSOM 读不到时，场景里徽标的兜底色 `#e2604a` 与 token `#ff8a3d` 不是一个颜色 | `SceneStage.vue` | — |
+| 在设置里打字／选日期时，空格、回车、方向键、Esc 被游戏抢走；Tab 到药丸后按回车也不激活按钮，而是去点烟 | `useInputAdapters.ts` 的 `yieldsToFocus` | `inputAdapters.test.ts` 的 `yields space, Enter and the arrows…` + `keeps Space as the draw even when a button holds the focus` |
+| 拖动途中另一根手指碰到屏幕会抢走烟杆；抬起的那根还会在指位表里留鬼 | `useInputAdapters.ts` 的 `onDown`／`onUp`／`onCancel` | 同一文件三条用例，各自只为自己红 |
 
 ### 6.2 结构性原因（比单点 bug 更值得新 UI 处理）
 
@@ -246,3 +248,12 @@
 ⇒ 这一条**不能写成"修好了"，也不能写成"那笔改坏的"**；它是本仓已知的骑线判据族（同族历史：`wakeChrome`、
 `pillBox=null`、逐帧记录器那几拍）。复跑命令：`PUBLIC_BASE=/puffly/ npm run build` → `node tests/smoke/serve.mjs apps/web/dist 4173 127.0.0.1 /puffly/` → `node tests/smoke/touch-device.mjs http://127.0.0.1:4173/puffly/`。
 
+第三行之后又跑了一棵树（键盘让路那次），三趟：174/174、172/174、174/174。
+中间那趟的两条红分别是取向题 #2（烟羽成均匀薄纱，实测 spread 0.340 对下限 0.66）与"抽取上限"那族
+的下游读数异常——都与那笔改动无关，也没有在第三趟复现。
+
+**一处值得记下的取舍**：键盘让路这件事，写成"焦点在控件上就一律让路"最省事，但它会把 §65 承诺的
+"空格＝吸一口"吃掉——鼠标点过药丸之后焦点就在那个 `<button>` 上，此后的空格就不再是吸气了。
+所以最终形状是**按钥匙分**：输入框全让（那是文字入口），按钮只让回车（那是键盘用户按它的方式），
+空格无论如何归游戏。判据两头都配了：摘掉按钮那半 → `yields …` 红；把按钮改成全让 →
+`keeps Space as the draw even when a button holds the focus` 红。

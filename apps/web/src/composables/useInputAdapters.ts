@@ -406,6 +406,9 @@ export function createKeyboardAdapter(
 
   const onKeyDown = (event: KeyboardEvent): void => {
     if (event.repeat) return;
+    // A field or a button with the caret in it answers first; the game only hears the keys nobody
+    // else is holding.
+    if (yieldsToFocus(event)) return;
     const state: GameStateView = engine.getState();
     switch (event.key) {
       case ' ':
@@ -471,6 +474,42 @@ export function createKeyboardAdapter(
       keysDown.clear();
     },
   };
+}
+
+/**
+ * The keys are heard on `window`, so every one of them is borrowed unless the focus says otherwise.
+ *
+ * Without this the game swallows what a form field needs: space and Enter in the anchor's date input,
+ * the arrows that move a date or a `select`, and — the one no test could see — Enter and Space on a
+ * chrome button, which the keyboard user has just tabbed to. The button lights its own focus ring and
+ * then does nothing, while the rod takes the draw instead.
+ */
+/** The focused node, when the event carries one. `window` and `document` own no keystroke. */
+function elementOf(event: KeyboardEvent): Element | null {
+  const { target } = event;
+  return target instanceof Element ? target : null;
+}
+
+/**
+ * True when the focused element owns this keystroke, so the game must not answer it — per key, not
+ * per control, because the two things a focused element can be want different keys:
+ *
+ * - An `input` is a text entry (the anchor's date, a range slider), so it keeps every key the switch
+ *   below handles: space and Enter would submit, the arrows are how a date and a slider move.
+ * - A `button` keeps only Enter, which is how a keyboard user presses the thing they just tabbed to.
+ *   Space stays the game's: §65 promises it means "breathe in", and a click has just focused a
+ *   button, so yielding it would take the draw away from the player who is not looking at the chrome.
+ *
+ * The two tags are the whole set the app renders (measured: 33 `<button>`, 11 `<input>`, no textarea,
+ * select or content surface). A third kind belongs here only once it exists.
+ */
+function yieldsToFocus(event: KeyboardEvent): boolean {
+  const el = elementOf(event);
+  if (el === null) return false;
+  const tag = el.tagName.toUpperCase();
+  if (tag === 'INPUT') return true;
+  if (tag === 'BUTTON') return event.key === 'Enter';
+  return false;
 }
 
 /** Where each suggested affordance lives, so keyboard and touch hit the same thing (§66). */

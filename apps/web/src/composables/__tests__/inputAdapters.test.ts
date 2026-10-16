@@ -328,6 +328,73 @@ describe('keyboard → GameInput (§65)', () => {
     rig.adapter.detach();
   });
 
+  /**
+   * The keys are heard on `window`, so "who is focused" is the whole question. This fires a real
+   * KeyboardEvent whose `target` is a stand-in control, which is exactly what the browser does when
+   * the caret or the focus ring is inside a form field.
+   */
+  function keyOver(
+    rig: { target: EventTarget; sent: GameInput[] },
+    key: string,
+    control: Element | null,
+  ) {
+    const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+    if (control !== null) {
+      Object.defineProperty(event, 'target', { value: control, configurable: true });
+    }
+    const spy = vi.spyOn(event, 'preventDefault');
+    rig.target.dispatchEvent(event);
+    return spy;
+  }
+
+  // Real nodes, not stand-ins: the question is what the browser actually has focused. These two are
+  // the whole list of controls the app renders.
+  const dateField = document.createElement('input');
+  dateField.type = 'date';
+  const pill = document.createElement('button');
+  const stage = document.createElement('div');
+  stage.className = 'hit';
+  stage.setAttribute('tabindex', '0');
+
+  it('yields space, Enter and the arrows to the control that actually has focus', () => {
+    const cases: readonly [string, Element][] = [
+      [' ', dateField],
+      ['Enter', dateField],
+      ['Enter', pill],
+      ['ArrowLeft', dateField],
+      ['Escape', dateField],
+    ];
+    for (const [key, control] of cases) {
+      const rig = keyRig('puff');
+      const prevented = keyOver(rig, key, control);
+      expect(
+        rig.sent,
+        `focus was in <${control.tagName.toLowerCase()}>, so "${key}" is that control's key`,
+      ).toEqual([]);
+      expect(prevented, `"${key}" belongs to the focused control`).not.toHaveBeenCalled();
+      rig.adapter.detach();
+    }
+  });
+
+  it('keeps Space as the draw even when a button holds the focus', () => {
+    // A click focuses the button it pressed, so this is the ordinary desktop state after touching
+    // the pill. §65's sustained action cannot be handed to the chrome for the rest of the session.
+    const rig = keyRig('puff');
+    const prevented = keyOver(rig, ' ', pill);
+    expect(rig.sent.map((input) => input.type)).toEqual(['hold']);
+    expect(prevented).toHaveBeenCalled();
+    rig.adapter.detach();
+  });
+
+  it('still owns the same keys while focus is the stage or nothing', () => {
+    const rig = keyRig('puff');
+    keyOver(rig, ' ', stage);
+    expect(rig.sent.map((input2) => input2.type)).toEqual(['hold']);
+    keyOver(rig, 'Enter', null);
+    expect(rig.sent.map((input2) => input2.type)).toEqual(['hold', 'tap']);
+    rig.adapter.detach();
+  });
+
   it('auto-repeat from a held key does not stack into extra puffs', () => {
     const rig = keyRig('puff');
     rig.target.dispatchEvent(new KeyboardEvent('keydown', { key: ' ' }));
