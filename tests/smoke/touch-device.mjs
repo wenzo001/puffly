@@ -942,6 +942,7 @@ async function openSheet(page, id, mouse = false) {
   // diagnostic below is describing.
   let viaMouse = false;
   let pressError = null;
+  let pressHow = '';
   for (let attempt = 0; attempt < 3; attempt += 1) {
     if (!(await awake(selector).catch(() => false))) {
       await wakeChrome(page, selector).catch(() => {});
@@ -959,14 +960,33 @@ async function openSheet(page, id, mouse = false) {
     // `events:[]`, and they are different products — one is this file's problem, one is the app's.
     viaMouse = mouse || !tappable;
     pressError = null;
-    const pressed = await (
+    pressHow = viaMouse ? 'locator.click' : 'locator.tap';
+    const refused = await (
       viaMouse ? handle.click({ timeout: 2500 }) : handle.tap({ timeout: 2500 })
     )
-      .then(() => true)
-      .catch((error) => {
-        pressError = String(error.message).split('\n')[0].slice(0, 140);
-        return false;
-      });
+      .then(() => null)
+      .catch((error) => String(error.message).split('\n')[0].slice(0, 140));
+    let pressed = refused === null;
+    if (refused !== null) {
+      // Playwright's actionability wait can refuse to press at all: on a slow page the box never
+      // stops moving inside the timeout, so no event is ever sent. `events:[]` with
+      // `hitIsHandle:true` is exactly that, and the sheet family used to blame the app for it.
+      // Measured locally at 20x CPU throttle: `locator.click: Timeout 2500ms exceeded.`
+      //
+      // So press the same centre with the same pointer type, without the stability bet. The criterion
+      // does not move — a panel that will not open under a delivered press is still red — but
+      // "did a press happen at all" stops being a guess, and the button's own log below says so.
+      pressError = refused;
+      const box = await handle.boundingBox().catch(() => null);
+      if (box !== null) {
+        const cx = box.x + box.width / 2;
+        const cy = box.y + box.height / 2;
+        if (viaMouse) await page.mouse.click(cx, cy);
+        else await page.touchscreen.tap(cx, cy);
+        pressHow = viaMouse ? 'mouse.click@box' : 'touchscreen.tap@box';
+        pressed = true;
+      }
+    }
     const opened = await page
       .waitForSelector('.sheet[data-open="true"]', {
         state: 'attached',
@@ -1017,7 +1037,7 @@ async function openSheet(page, id, mouse = false) {
       }, selector)
       // The route and the refusal are known on this side only (the press was made from here), so they
       // ride in after the page-side reading instead of being mirrored into the window.
-      .then((reading) => ({ ...reading, route: viaMouse ? 'click' : 'tap', pressError }))
+      .then((reading) => ({ ...reading, route: pressHow, pressError }))
       .catch(() => null);
     console.log(`FAIL  openSheet(${id}) never opened — ${JSON.stringify(why)}`);
   }

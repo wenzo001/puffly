@@ -319,3 +319,17 @@ runner 是 13fps，差的那一截正是"面板一族"红不红的关键。8 倍
 | 离线 | **运行时没有任何 `onLine`/`offline` 处理**（现读：`grep -rn "onLine|offline" apps/web/src --include=*.vue --include=*.ts` 得 **1**，且那一处是测试文件里的注释；离线缓存只出现在 `apps/web/vite.config.ts` 的 PWA 配置）⇒ 这是对的：SPEC §52 零网络代码、§53 PWA 全本地 | ⇒ 新 UI **不要发明离线横幅/重试态**，那会凭空造出一个产品没有的失败面 |
 | 没有 GPU／帧率极低 | 画质四档（`auto/high/balanced/light`，预算 1400/800/380/160）；DPR 上限按档位；15fps 的静置降频（§71 计数不受影响）；后台续燃按系统时钟补 | 玩家看不见"我现在在降档跑"——这是个取向，不是 bug |
 | 触觉不可用（无 `navigator.vibrate`） | 整行隐藏：`SettingsSheet.vue:483/521` `v-if="game.canVibrate.value"`（标志位 `usePuffly.ts:394`） | 隐藏即无声；与"降级记号"是同一族问题（少了这件事 vs 没有这件事） |
+
+**7）面板一族的三种形状，现在能被读出来了（这是本地能做到的极限，不是结论）。**
+
+`openSheet` 原来只报 `events:[]`，而三种成因要三种修法：
+
+| 现场 | 含义 | 现在的读数 |
+| --- | --- | --- |
+| `handle:"onscreen"`＋`hitIsHandle:true`＋`events:[]` | **Playwright 拒绝按压**（动作性等待超时，事件根本没送出）＝仪器的问题 | `pressError` 直接印出抛错原文（本地实测：`locator.click: Timeout 2500ms exceeded.`）；同中心的原始坐标按压会补上，`route` 变成 `mouse.click@box`／`touchscreen.tap@box` |
+| `handle:"zero-box"`＋`hitIsHandle:false`＋`events:[]` | 界面被折走了（§10 的 2.6 秒），**没有盒可按**＝唤醒那一步的边界问题 | `route` 保持 `locator.tap`（回退正确地没触发），`rect:[0,0,0,0]` |
+| `events` 非空＋`openAny:0` | 送达了而面板没挂上＝**应用的问题** | `events` 数组自己说话 |
+
+安全边界：这套改动在**正常路径两趟都是 174/174**（回退只在被拒绝时走），所以它不是"为了让红消失"。
+20× 节流那一趟剩下的面板红全是第二种形状（折走），而 CI 那 22 条是第一种形状——
+⇒ 这一笔**推上去有可能让 CI 那族掉下来**；掉不掉以 CI 自己报的 `route`/`pressError` 为准，不拿它当承诺。
