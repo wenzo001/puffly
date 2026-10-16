@@ -320,8 +320,8 @@ const desk = computed((): Array<{ key: CopyKey; value: string; press: boolean }>
 }
 
 .cat {
-  width: max(34px, var(--tap-target));
-  height: max(34px, var(--tap-target));
+  width: 34px;
+  height: 34px;
   display: grid;
   place-items: center;
   border: 1px solid var(--chrome-line);
@@ -333,6 +333,23 @@ const desk = computed((): Array<{ key: CopyKey; value: string; press: boolean }>
 
 .cat {
   position: relative;
+}
+
+/*
+ * The face stays the 34 px the design draws — pushing the button itself to `--tap-target` measured
+ * 54 px on a phone and reflowed the whole row (the ring moved 20 px right, the clock with it). The
+ * reach a thumb needs is added here instead: an invisible square, centred, that belongs to the same
+ * button. It paints no ink, so the scene's own readouts are untouched, and at 44 px it stops 7 px
+ * short of the ring rather than reaching over it.
+ */
+.cat::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
 }
 
 .badge {

@@ -120,6 +120,22 @@ describe('interaction states that ship in CSS', () => {
     }
   });
 
+  it('keeps the category face at the drawn size and widens only its reach', () => {
+    // Measured, not assumed: pushing the button itself to `--tap-target` made it 54 px on a phone,
+    // reflowed the whole row (ring and clock 20 px right) and moved a hard-coded pixel ruler out of
+    // its own window. So the 44 px belongs to a transparent pseudo-element, not to the box.
+    const hud = stripComments(readFileSync(`${SRC}/components/HudBar.vue`, 'utf8'));
+    const face = /\.cat\s*\{([^}]*)\}/.exec(hud);
+    expect(face, '.cat needs its own rule').not.toBeNull();
+    expect(face?.[1]).toMatch(/width: *34px/);
+    expect(face?.[1]).toMatch(/height: *34px/);
+    expect(face?.[1]).not.toMatch(/var\(--tap-target\)/);
+    const reach = /\.cat::after\s*\{([^}]*)\}/.exec(hud);
+    expect(reach, 'the thumb reach has to exist as a pseudo-element').not.toBeNull();
+    expect(reach?.[1]).toMatch(/width: *44px/);
+    expect(reach?.[1]).toMatch(/height: *44px/);
+  });
+
   it('applies the reduced-motion promise to the property, not to a list of classes', () => {
     const global = stripComments(stylesOnly(readFileSync(`${SRC}/styles/global.css`, 'utf8')));
     const reduce = mediaBodies(global, /prefers-reduced-motion:\s*reduce/).join('\n');
