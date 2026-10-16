@@ -79,9 +79,9 @@ const PAIRS: readonly { colour: string; on: string; text: Rgb; surface: Rgb }[] 
     surface: token('--deep-charcoal'),
   },
   {
-    colour: '#e2604a',
+    colour: 'var(--alert-ember)',
     on: 'the sheet floor',
-    text: hexToRgb('#e2604a'),
+    text: token('--alert-ember'),
     surface: token('--deep-charcoal'),
   },
   /**

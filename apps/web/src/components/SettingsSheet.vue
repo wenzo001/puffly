@@ -773,6 +773,6 @@ watch(
 }
 
 .state.bad {
-  color: #e2604a;
+  color: var(--alert-ember);
 }
 </style>

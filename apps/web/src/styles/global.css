@@ -9,6 +9,10 @@
   --deep-charcoal: #0b0a09;
   --warm-gray: #7e746a;
   --soft-white: #f2ede6;
+  /* The warning tone: one state the chrome turns when something is wrong (a degraded store).
+     It is not an ember — the embers light the rod, this one only speaks — so it keeps its own name
+     instead of borrowing a value into a rule. */
+  --alert-ember: #e2604a;
   --ember-orange: #ff8a3d;
   /* The Demo calls this one `--ember-soft`: 次级强调, the highlighted figure and the hint text. */
   --ember-core: #ffb273;

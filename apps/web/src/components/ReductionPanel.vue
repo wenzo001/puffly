@@ -191,7 +191,7 @@ const altCount = (id: string): number =>
 
 .ring .run {
   fill: none;
-  stroke: var(--cool-blue, #a8d4e0);
+  stroke: var(--cool-blue);
   stroke-width: 2.4;
   stroke-linecap: round;
 }
@@ -231,7 +231,7 @@ const altCount = (id: string): number =>
 }
 
 .trend rect.today {
-  fill: #a8d4e0;
+  fill: var(--cool-blue);
 }
 
 .delta {
