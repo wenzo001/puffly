@@ -40,8 +40,8 @@ function asGlow(row: { cx: number; cy: number; rx: number; ry: number; alpha: nu
 }
 
 /** The two lights the scene is handed: the bloom first, then the pool of the current screen. */
-function lightsOf(h: Harness) {
-  const { glows } = backgroundStructure(h.state(), PHONE.w, PHONE.h);
+function lightsOf(h: Harness, frame: { w: number; h: number } = PHONE) {
+  const { glows } = backgroundStructure(h.state(), frame.w, frame.h);
   const bloom = glows[0];
   const pool = glows[1];
   if (bloom === undefined || pool === undefined) throw new Error('the backdrop drew no lights');
@@ -130,15 +130,16 @@ describe('a live break walks the rows the Demo drew', () => {
     // the landscape layout, stayed invisible. `asGlow` equality cannot catch it either: both sides
     // would read the same wrong number.
     const frames = [
-      ['phone', PHONE.w, PHONE.h],
-      ['wide', 1280, 800],
+      ['phone', { w: PHONE.w, h: PHONE.h }],
+      ['wide', { w: 1280, h: 800 }],
     ] as const;
-    const base = breakHarness().state();
-    for (const [name, w, h] of frames) {
+    const base = structuredClone(breakHarness().state());
+    for (const [name, frame] of frames) {
       for (const state of CIGARETTE_STATES) {
-        const cloned = structuredClone(base) as typeof base;
-        cloned.cigarette.state = state;
-        const { pool } = lightsOf({ state: () => cloned } as never);
+        // Rebuilt rather than mutated: the state type is read-only, and a cast that quiets the
+        // compiler here would also hide a wrong field.
+        const probe = { ...base, cigarette: { ...base.cigarette, state } } as typeof base;
+        const { pool } = lightsOf({ state: () => probe } as never, frame);
         expect(
           pool.x > 0 && pool.x < 1 && pool.y > 0 && pool.y < 1 && pool.rx <= 1 && pool.ry <= 1,
           `${name} frame, ${state}: pool at ${pool.x},${pool.y} r${pool.rx}×${pool.ry} left the frame`,
