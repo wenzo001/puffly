@@ -230,3 +230,18 @@
 （`ignores a second pointer…`、`a thumb resting beside a finger…`、`a cancelled stray finger…`）。
 
 ⇒ 给下一位读者的通例：**看一条判据时先读它真正驱动了什么事件，别信它的名字。**
+
+**5）四趟真机读数（同一棵树上，正常路径），留给下一位把这行当基线的人。**
+
+| 树 | 两趟 |
+| --- | --- |
+| `.cat` 撑到 54（错的那版） | 173/174、173/174（同一项红，写死框里 22 行墨） |
+| 脸回到 34 + 可达面 44 | 174/174、174/174 |
+| 再加第二根手指不抢杆 | 173/174、174/174 |
+| 再把警示红与冷色收成 token | 174/174、174/174 |
+
+第三行第一趟红的是 `right-to-left: the burning end stays on the same side` 的**漂移预算项**
+（x 走了 4.9px，上限是它自己按"同一支烟在同一时窗测出的漂移"推出来的 3.9），后三趟没再出现。
+⇒ 这一条**不能写成"修好了"，也不能写成"那笔改坏的"**；它是本仓已知的骑线判据族（同族历史：`wakeChrome`、
+`pillBox=null`、逐帧记录器那几拍）。复跑命令：`PUBLIC_BASE=/puffly/ npm run build` → `node tests/smoke/serve.mjs apps/web/dist 4173 127.0.0.1 /puffly/` → `node tests/smoke/touch-device.mjs http://127.0.0.1:4173/puffly/`。
+
