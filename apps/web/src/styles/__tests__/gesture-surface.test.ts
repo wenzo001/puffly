@@ -110,8 +110,17 @@ describe('the page refuses the browser’s own gestures (§66)', () => {
       }
     }
     for (const rule of rules) {
+      // Two shapes matter, and the closed-state default is deliberately neither.
+      //
+      // `scene3d` — the scene masking the DOM chrome behind its own paint: that may take a surface's
+      // background and border, but not its hits (#162).
+      // `[data-open` — a panel that is *open* and still hidden is the same bug wearing a different
+      // selector, and the old form was blind to it because that selector carries no `scene3d`.
+      // `.sheet { visibility: hidden }` on its own is the closed state (restored by
+      // `.sheet[data-open='true']`), so it stays out of the scan on purpose.
+      const gated = rule.selector.includes('scene3d') || /\[data-open(?:=|\])/.test(rule.selector);
       if (
-        rule.selector.includes('scene3d') &&
+        gated &&
         /(?:^|;)\s*visibility\s*:\s*hidden/.test(rule.body) &&
         scrollers.has(subjectOf(rule.selector))
       ) {
