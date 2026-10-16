@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 2,
+  "name": "Puffly UI and interaction polish",
+  "catalog": {
+    "package": "agentic-awesome-skills",
+    "version": "19.7.0",
+    "integrity": "sha256-7aa9ad5bdb2af82a69e8677ac1ecee19ca3123c027e8ff7bcdb59aa5fb4f9ad5"
+  },
+  "targets": [{ "host": "claude", "scope": "project" }],
+  "profile": {
+    "goals": [
+      "Fix silent interaction failures in the pointer and keyboard adapters",
+      "Complete focus-visible, hover and reduced-motion state coverage",
+      "Raise tap targets and remove colour-token drift",
+      "Keep UI verification honest instead of source-text assertions",
+      "Keep the 3D scene legible against the stage wall"
+    ],
+    "projectType": "single-page habit-break app with a 3D scene (Puffly)",
+    "languages": ["TypeScript", "CSS", "Vue SFC"],
+    "frameworks": ["Vue 3", "TresJS / three.js", "Vite PWA", "Vitest", "Playwright"],
+    "constraints": [
+      "no new runtime dependencies",
+      "Vue 3 SFC + scoped CSS, no Tailwind",
+      "existing tests pin some literal CSS values as design contracts"
+    ]
+  },
+  "skills": [
+    { "id": "baseline-ui" },
+    { "id": "build-ui" },
+    { "id": "frontend-ui-engineering" },
+    { "id": "design-taste-frontend" },
+    { "id": "web-design-guidelines" },
+    { "id": "3d-web-experience" },
+    { "id": "browser-automation" }
+  ]
+}

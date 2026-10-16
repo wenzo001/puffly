@@ -12,3 +12,7 @@ tests/smoke/*.mjs
 # Generated glyph atlas JSON is rasterizer output, not hand-authored source.
 apps/web/public/atlas/glyphs.json
 
+# Vendored skill playbooks are written and maintained upstream; reformatting them here would
+# rewrite someone else's document on every install.
+.qoder/skills/
+
