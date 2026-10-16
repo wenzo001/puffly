@@ -252,7 +252,7 @@ const altCount = (id: string): number =>
   gap: 5px;
   /* It is a control now, so it takes a finger: the pill grows to the target floor rather than the
      mark it carries shrinking to fit the old label's height. */
-  min-height: var(--tap-target, 44px);
+  min-height: var(--tap-target);
   padding: 3px 12px;
   border: 1px solid var(--chrome-line);
   border-radius: 999px;

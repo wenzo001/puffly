@@ -6,6 +6,8 @@
 
 import { readFileSync } from 'node:fs';
 
+import { blockAfter, stripComments } from './sourceProbe';
+
 import { describe, expect, it } from 'vitest';
 import { COPY, translate } from '../i18n';
 import { EN, type CopyKey } from '../i18n/copy';
@@ -169,19 +171,25 @@ describe('the reduction page says nothing but the player log (S20, §10)', () =>
     // Three rows that a finger can act on, wired to the ledger rather than to a caption, each showing
     // the day's own count. A "row of advice" and a "row you can do" are the same markup until you
     // look for the handler, so that is what this looks for.
-    expect(panel).toContain('@click="game.takeSubstitute(alt.id)"');
-    expect(panel).toContain(':data-alt="alt.id"');
-    expect(panel).toContain(':data-count="altCount(alt.id)"');
     const alts = panel.slice(
       panel.indexOf('<div class="alts">'),
       panel.indexOf('</div>', panel.indexOf('<div class="alts">')),
     );
+    // Scoped to the rows themselves: the handler and the two data hooks are the whole difference
+    // between a row you can act on and a caption that describes one, so they have to be *on* it.
     expect(alts).toContain('<button');
+    expect(alts).toContain('@click="game.takeSubstitute(alt.id)"');
+    expect(alts).toContain(':data-alt="alt.id"');
+    expect(alts).toContain(':data-count="altCount(alt.id)"');
     expect(alts).not.toContain('<span v-for');
     // Named for a screen reader with both the action and the count, since the count is the part that
     // changes under a finger and the digits are `aria-hidden` decoration next to it.
     expect(panel).toContain("copy.say('a11y.alternative'");
     // And a control takes a finger: the pill was sized for a label, and that is no longer enough.
-    expect(panel.slice(panel.indexOf('.alt {'))).toContain('min-height: var(--tap-target');
+    // Read off `.alt`'s own rule body, not from the selector to the end of the file — the old window
+    // was open-ended, so any later rule that declares a min-height would keep this green after the
+    // row's own floor was deleted. `hud-anatomy.test.ts` documents the same defect from the other end.
+    const altRule = blockAfter(stripComments(panel), /^\.alt \{/m);
+    expect(altRule).toMatch(/min-height: *var\(--tap-target\)/);
   });
 });
