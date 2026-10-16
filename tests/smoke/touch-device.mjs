@@ -977,13 +977,26 @@ async function openSheet(page, id, mouse = false) {
       // does not move — a panel that will not open under a delivered press is still red — but
       // "did a press happen at all" stops being a guess, and the button's own log below says so.
       pressError = refused;
-      const box = await handle.boundingBox().catch(() => null);
+      // Refusing to press costs the whole stability budget, and on a slow page that budget
+      // (2500 ms) is the same length as the chrome's own unfold window (2.6 s of wall clock at
+      // either speed — measured: 61 fps wakes in 1 ms and refolds at 2697 ms; 8 fps wakes in
+      // 113 ms and refolds at 2590 ms). So the box is routinely gone by the time the wait gives
+      // up. Wake again and press inside the fresh window rather than reporting yesterday's box.
+      if (!(await awake(selector).catch(() => false))) {
+        await wakeChrome(page, selector).catch(() => {});
+      }
+      let box = null;
+      for (let lap = 0; lap < 8 && box === null; lap += 1) {
+        box = await handle.boundingBox().catch(() => null);
+        if (box !== null && box.width < 1) box = null;
+        if (box === null) await page.waitForTimeout(150);
+      }
       if (box !== null) {
         const cx = box.x + box.width / 2;
         const cy = box.y + box.height / 2;
         if (viaMouse) await page.mouse.click(cx, cy);
         else await page.touchscreen.tap(cx, cy);
-        pressHow = viaMouse ? 'mouse.click@box' : 'touchscreen.tap@box';
+        pressHow = viaMouse ? 'wake+mouse.click@box' : 'wake+touchscreen.tap@box';
         pressed = true;
       }
     }
