@@ -113,7 +113,7 @@ min/max/step 都取自己那一行的属性，别抄这张表）：
 | **HUD 的读数格是 18 px 高的按钮**（`.num` 49×18、宽屏 `desk` 的 `.read` 47/46/23×18）——它们不是 `.icon-button`，所以 `global.css:134-135` 那条"自家控件 44/54"的下限从来没管到它们；实测可命中方块 **0**（连 24×24 都凑不出） | `HudBar.vue` 三个按钮挂 `data-reach` | 同上（计数按属性行，不按文本——第一版把注释里那句 `data-reach` 也数进去了，读出 4） |
 | **档案卡的关闭键 28×28、钉住键 198×32**：`.close` 在 `ArchiveCard.vue:209-215` 用 `min-width/min-height: 28px` **主动压掉了**那条 44/54 下限 | `ArchiveCard.vue` 两处 `data-reach` | 同上 |
 | 图集／CSSOM 读不到时，场景里徽标的兜底色 `#e2604a` 与 token `#ff8a3d` 不是一个颜色 | `SceneStage.vue` | — |
-| **导入的结果只有眼睛能看见**：那条 ✓／! 是 `aria-hidden`，而它左边两格的清空流程早就用 `aria-live` 播报了——同一个面板里两种标准。屏幕阅读器用户选完文件，成功还是失败**什么都收不到** | `SettingsSheet.vue` 数据行：常驻 `role="status"` 区 + `a11y.importOk`／`a11y.importBad` 两条新文案 | 真机套件第 176 条 `an import that cannot be read says out loud, then goes quiet` |
+| **导入的结果只有眼睛能看见**：那条 ✓／! 是 `aria-hidden`，而它左边两格的清空流程早就用 `aria-live` 播报了——同一个面板里两种标准。屏幕阅读器用户选完文件，成功还是失败**什么都收不到** | `SettingsSheet.vue` 数据行：常驻 `role="status"` 区 + `a11y.importOk`／`a11y.importBad` 两条新文案 | 真机套件里那条 `an import that cannot be read says so out loud, then goes quiet again`（分母会动，现数＝`node tests/smoke/touch-device.mjs <url>` 末行） |
 | **开屏那一跳是真的**：脚本跑起来之前页面涂 `#121317`，跑起来之后涂 `--deep-charcoal #0b0a09`——实测相对亮度差 **2.13 倍**；而 `theme-color`（浏览器自己的那条栏）也停在旧的 `#121317`，与运行中的页面永远不一致（manifest 早就是 `#0b0a09`） | `apps/web/index.html:6/21` 与 `vite.config.ts:37-38` 收成同一个数 | `__tests__/boot-colour.test.ts`（把开屏色改回 `#121317` ⇒ 两条都红，现场跑过） |
 | 在设置里打字／选日期时，空格、回车、方向键、Esc 被游戏抢走；Tab 到药丸后按回车也不激活按钮，而是去点烟 | `useInputAdapters.ts` 的 `yieldsToFocus` | `inputAdapters.test.ts` 的 `yields space, Enter and the arrows…` + `keeps Space as the draw even when a button holds the focus` |
 | 拖动途中另一根手指碰到屏幕会抢走烟杆；抬起的那根还会在指位表里留鬼 | `useInputAdapters.ts` 的 `onDown`／`onUp`／`onCancel` | 同一文件三条用例，各自只为自己红 |
@@ -166,6 +166,7 @@ min/max/step 都取自己那一行的属性，别抄这张表）：
 | 10 | **键盘滚不动打开的面板**：三个 sheet 都没有 `tabindex`（现读：SettingsSheet:203 / SessionSheet:243 / CollectionSheet:227 只有 `class="sheet"`），而方向键在 `useInputAdapters.ts` 里被全局 `preventDefault` 收去 nudge 烟杆 ⇒ 键盘用户只能 Tab 到逐个控件、由浏览器把它滚进视野，PageDown/Home/End 全无作用。修法两半：给打开的面板 `tabindex="0"`（无害、纯加法），**并**规定『面板开着时方向键归面板』（这一半会拿走烟杆的一个既有键位）。§65 只说方向键『可以作为辅助输入』，没规定它永远属于杆——这条能设计得比现在好，但它动的是键位契约。 | 未动，等取向 |
 | 8 | **盲人听状态这条通道目前没有实现，而且两种实现互相打架。** `App.vue` 的注释写着"a blind user hears the state"，但那个句子只绑在舞台一层静态 `<div>` 的 `aria-label` 上——**改 `aria-label` 屏幕阅读器不会播报**，播报需要 live region 里的内容变化。试着加了一个裁剪掉的 `<p aria-live="polite">`，真机两趟都是 **167/174**，7 条红同一个因 `offenders:["said"]`：有一族判据钉着"无字层屏面上不得有成句文字"，而它扫的是整篇文档，不是 `.stage`。⇒ 要么给那族判据加一条"排除只供播报的裁剪节点"（＝改判据，得你点头），要么换一条不产生文字的通道（例如焦点真正落到带状态的元素上）。我没有自行放宽判据。 | 未动，等取向 |
 | 7 | **阿拉伯语下界面只镜像了一处**：`copy.ts` 认 ar/he/fa/ur、`App.vue` 会设 `dir=rtl`，但 CSS 里物理属性有 23 行、逻辑属性 19 行（口径：`grep -rn -E 'left:|right:|text-align|padding-left|border-left' --include=*.css --include=*.vue apps/web/src` 的命中行数，逻辑属性同法），专门写给 rtl 的规则全仓只有 1 条。⇒ 现在既不是"完整镜像"也不是"不镜像"，而是半镜像。要么把物理属性收成逻辑属性（会动到按 x 坐标写的像素判据，需要重定基线），要么在阿语补齐之前不设 `dir=rtl`。**选哪边取决于你对"4/210 条阿语翻译的界面该不该镜像"的判断**，我没有替你定。 | 未动，等一句话 |
+| 16 | **"燃烧端没有被镜像"这件事，今天没法在像素上证明**：三种读数都现量否掉了——① 判据原来那把尺（锚点框内色键带质心）量的是房间（框内平均红 55.2 对色键下限 55；删掉 5 个 `rod*` mesh 只动 2.8 px，而什么都不按连读八次自己摆 11–16 px）；② 按截图找最热的墨，信号真（空闲 r=71／warm 0 对点燃 r=138–224／warm 7,508–14,015）但窗口只有一次按压那么宽，同一棵树连红两趟、且都红在正确的产品上；③ 投影火头 mesh——`rod-cherry`/`rod-char`/`rod-tip-ash` 全坐在各自 group 的原点（local `[0,0,~0.007]`），"两头"在几何里不在 position 里，镜像注入都不换边。⇒ **要落这一格，需要应用把"燃烧端画在屏幕哪儿"露成一个把手**（`data-aim` 给的是状态锚点，不是画出来的位置）。新 UI 若换渲染方式，这一格可顺手落；本仓现在落不了，只能靠状态那格＋样式层那格（`sceneFlip`）兜着。量具：`tests/smoke/probe-rtl-plume.mjs`、`probe-fire-window.mjs`、`probe-cherry-side.mjs`；经过见 §11-22。 | 判据已撤，等把手 |
 
 ---
 
@@ -710,7 +711,7 @@ live-region 冲突是同一族：有一族判据钉着"无字层不得有成句�
 （`copy-tiers.test.ts` 本来就要求两边键集相等，少一边就红），ar 仍按既有回退设计不动。
 两条都写成"发生了什么＋下一步"，不是只说"失败"。
 
-判据进真机套件（第 176 条），跑的是真文件通道：`setInputFiles` 喂一个不是存档的 JSON，
+判据进真机套件（那条的名字是 `an import that cannot be read says so out loud, then goes quiet again`；**"第 N 条"是序号不是分母，本趟它在第 30 格，分母 182**），跑的是真文件通道：`setInputFiles` 喂一个不是存档的 JSON，
 读 `role`／`aria-label`／class，再等 `mark()` 自己那 2400 ms 过窗、确认它安静下来。
 现读：`{"importQuiet":{"role":"status","label":"","cls":"state idle"},
 "importRefused":{"role":"status","label":"导入失败——请选这个应用导出的文件","cls":"state bad"}, ...}`，
@@ -747,9 +748,66 @@ Apple 的 `STHeiti Light.ttc`——脚本自己印着"This atlas is for developm
   羽量差 5 % 足以把质心推走十几像素。⇒ 现在还不能断定"切阿语把画面平移了"，
   要先做一次**把烟羽排除**的复量（只在没有呼出的窗口里读，或按烟杆自己的色带取列），
   才能把这条红分给"应用镜像错了"还是"判据量法含噪"。**这一条留给下一轮，不在这笔里下结论。**
+  ⇒ **下一轮跑完了，结论在 §11-22：那条红是判据自己的量法，不是镜像。我也没有放宽预算——它被换掉了。**
 - 另两条（`the screen carries no prose…` 的 `hint:"弹"` 与 `3D: the ignition's flame…`）落在本仓已知的
   时机读数族里：同一棵树四趟之间会换人，见 §10 基线行那句"分母会动、红会换族"。
 
+
+**22）§11-21 那条 RTL 红归因完了：那条像素判据量的是房间，不是烟杆。判据已换成"火"，反证在同一次跑里。**
+
+量具是 `node tests/smoke/probe-rtl-plume.mjs http://localhost:5175/`（本轮新增，不进门禁；下面每一个数都是它印出来的）。三个可能，前两个当场死：
+
+| 假设 | 现量 | 结论 |
+| --- | --- | --- |
+| 框里那圈墨有烟羽（就是 §11-21 要我做的"把烟羽排除的复量"） | 同一瞬间把 `smoke` 节点藏／显各读一次：框内墨数只差**个位到几十 px**，质心被推拉 **0.05–1.4 px** | **否证**。烟羽不在那 140×34 里 |
+| 框里有场景自己画的那个词（`scene3d-text` 把 DOM 字的墨搬进场景，这个搬法是真的） | hint 的框在 CSS `y≈561`，判据的框是 device `[276,1792,420,102]` ⇒ **不相交**；四次读数里落进键集的"词墨"＝ **0 px** | **否证**。这条是我自己提的，死在自己手里 |
+| 那框里到底是什么 | 框内平均红 **54.7–55.3**，而色键的下限正是 **55**；带下还压着 **约 15,000 px** 暖色 | **整个框压在阈值上**：它量的是背景的亮暗呼吸 |
+
+判据会不会"没改也红"——把烟杆整个从场景删掉，成对交替读五次（`rod`／`rod-cherry`／`rod-char`／`rod-burn-line`／`rod-tip-ash` 五个 mesh）：
+键集差 **389 px（1.4 %）**、质心差 **2.8 px**；而**同一趟里一页什么都不按**、120 ms 一次连读八次，质心自己摆 **11–16 px**
+（两个离散态 ≈25,600 @ x 224.7 与 ≈26,900 @ x 214.6，250 ms 内就会翻面，最左那个桶在 496 与 1961 之间跳）。
+⇒ **"删掉烟杆"造成的差 < "时间过一会儿"造成的差** ⇒ 这条像素判据在任何语言下都决定不了镜像与否。
+
+于是那条红被**不切语言**地复现了：同树三趟，同语种两连读的控制差分别是 **10.16 / 0.27 / 0.45 px**，切语言的差是 **0.26 / 0.80 / 10.68 px**。
+红不红取决于那一趟有没有正好落在两个态的两头，跟阿语无关。`docs/SPEC.md` 里早就给它记过 `测量伪差`、`记下，不动` 两行——现在那句有归因了。
+**我没有去放宽它的预算**：那条像素判据被换掉了，见下。
+
+新的读法：**找最热的墨，不取阈值带的质心**。空闲帧 **r=71、>120 的像素 0**；点燃的帧 **r=188–224、>120 的像素 8,000–14,015**，
+位置正落在状态自己公布的 ember 锚点上。途中踩实了两个坑，都写进注释：
+① `data-phase` 在**全新的空闲页**上就是 `light`（现量 `{"phase":"light","affordance":"pick"}`）⇒ 拿它当"点着了"的门等于没有门；页面上"点着了"的词是 `affordance === 'puff'`。
+② **按烟杆是"拿起来"，不是"点着"**（`affordance` 走 `pick → lighter`）；要点着得走药丸，S2 那条火焰判据本来就是这么走的。
+
+反证（"判据不是空转"的证据）在同一次跑里做：给 `canvas` 注入 `scaleX(-1)`，火被翻到状态锚点描述的那扇窗口之外 ⇒ `warmPx` **10,632 → 0**，撤掉注入 ⇒ **8,215**。
+⇒ 谓词是三条一起判（最热 `r ≥ 140`、`>120 的像素 > 200`、落在状态的燃烧端那一侧），**不是那个符号位**：镜像那次 `agree` 仍为 true，因为窗口里已经没有火可指——只判符号就会在这里假绿。
+
+那把尺子上过门禁，又被我自己撤了——**红回来的两次都是它先红，而且都是在正确的产品上红的**：
+
+- 第一趟 **182/182**（那六条判据全绿，`/tmp/rtl-run2.log`）。
+- 第二趟同一棵树：`fire={"brightestR":138,"warmPx":7508}` 落在我写死的下限 **140** 之下 ⇒ 判红。138 对空闲那帧的 71，火明明在。
+  ⇒ 我把常数改成"本页空闲帧 + 30"（**单颗最热像素会随截图落点动，暖墨的质量不动**——0 对 7,508–14,015）。
+- 第三趟：`fire={"brightestR":108,"warmPx":0,"sideState":"left"}`，`presses=3`。这一次不是阈值——**那一秒火已经灭了，姿态也换了，状态自己都说燃烧端在左侧**。
+  ⇒ 截图是一次瞬间，要它同时撞上火焰、姿态与手臂；判据不该靠运气。
+
+第三条路（不看像素、看渲染器要画哪儿）也现量否掉了：`rod-cherry`、`rod-char`、`rod-tip-ash` **全都坐在各自 group 的原点**
+（local `[0, 0, ~0.007]`，只有 z 分开），烟杆的"两头"在**几何里**不在 position 里；把 group 镜像或把 cherry 的 local x 取反，
+投影读数**都不换边**，而在没被打扰的页面上它报 `left`、状态报 `right`（`node tests/smoke/probe-cherry-side.mjs http://localhost:5175/`）。
+
+⇒ **那六条判据已从套件删除，三个读数都留作量具**（`probe-rtl-plume.mjs`／`probe-fire-window.mjs`／`probe-cherry-side.mjs`）。
+这条契约今天剩下的可见面只有两格确定性的：状态那一格（`ember.x − body.x` 的符号与预算，红过、#161 那轮已校准）
+与样式那一格（`sceneFlip`，从 canvas 到 `<html>` 任何一层的 `scaleX(-1)` 都会被点名，反证早就写在它注释里）。
+
+**缺的是把手，不是判据。** 要在像素上确定性地证明"燃烧端没被镜像"，需要应用自己把**燃烧端画在屏幕哪儿**露出来——
+`data-aim` 现在那六个键是**状态**的锚点，不是**画出来**的位置，两者不相遇，就没有一把尺子能既确定性又真读到那团火。
+已登记为 **§8-16**（新 UI 若换渲染方式，这一格顺手就能落；本仓现在落不了）。
+
+真机（删掉那六条之后**分母回到 176**；现数口径＝`node tests/smoke/touch-device.mjs http://localhost:5175/` 的末行，别抄这里的数）：
+两趟都是 **175/176**，而**两趟红的不是同一条**——第一趟 `a draw held past its ceiling ends itself…`（`presses 1 → 2`、
+`released` 那格 2/12 变 3/12，同一段代码在本轮前四趟都是绿的），第二趟 `S10: closing the sheet brings the scene back to the
+same pixels`（读数 `sheetScroll:null`＝那一趟面板根本没开成）。两条都属 SPEC 里 #148 那一族"预算按墙钟／前置缺席"的轮换红，
+**不归给这笔，也不许顺手放宽**。
+**RTL 这一条两趟都绿**：`lean 0.1859→0.1860`／`0.1860→0.1860`，budget 0.0002（`/tmp/trim-run.log`、`/tmp/trim-run2.log` 第 97 行）——
+换成只剩状态格＋样式格之后，它不再靠运气。 旧的 176 分母里那 4 条轮换红，本轮只有 RTL 这一条换了性质（判据被撤 + 登记把手），
+其余三条（`tappable together`、`no prose` 的 `hint:"弹"`、`3D: the ignition's flame`）仍是轮换族，不许写成"修好了"。
 ---
 
 ## 12. 状态矩阵（新 UI 必须为这些留位置；每行都是现读代码得到的）

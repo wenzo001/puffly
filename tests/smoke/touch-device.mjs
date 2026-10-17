@@ -552,76 +552,6 @@ const sceneFlip = (page) =>
   });
 
 /**
- * A tight pixel box around the rod's own body anchor (the resting cigarette on the pack), read as
- * a centroid, a tilt and a digest. The RTL check compares two locales' boxes: the engine's own
- * geometry must not mirror, so two identical states paint identical pixels. A full-band colour key
- * was the old approach; it quietly ended up counting a pill glyph and is gone with the Demo icons.
- */
-const rodBox = async (page) => {
-  const props = await propsOf(page);
-  const shot = (await page.screenshot()).toString('base64');
-  return page.evaluate(
-    async ({ b64, anchor }) => {
-      const img = new Image();
-      img.src = 'data:image/png;base64,' + b64;
-      await img.decode();
-      const c = document.createElement('canvas');
-      c.width = img.width;
-      c.height = img.height;
-      const ctx = c.getContext('2d', { willReadFrequently: true });
-      ctx.drawImage(img, 0, 0);
-      // A 140 × 34 CSS box centred on the body anchor, in device pixels.
-      const bw = 140 * (img.width / window.innerWidth);
-      const bh = 34 * (img.height / window.innerHeight);
-      const cx = anchor.x * img.width;
-      const cy = anchor.y * img.height;
-      const x0 = Math.max(0, Math.round(cx - bw / 2));
-      const y0 = Math.max(0, Math.round(cy - bh / 2));
-      const w = Math.min(Math.round(bw), img.width - x0);
-      const h = Math.min(Math.round(bh), img.height - y0);
-      const image = ctx.getImageData(x0, y0, w, h).data;
-      // Local background = the pack's own dark plate (#191612-ish); the rod is the warm grey thing
-      // in the box that stands clear of it.
-      let n = 0;
-      let sumX = 0;
-      let sumY = 0;
-      let sumXY = 0;
-      // Hash only the keyed rod pixels (not the whole box): drifting dust in the background differs
-      // between two page loads and must not be able to turn an identical rod into a failed digest.
-      let hash = 2166136261;
-      for (let y = 0; y < h; y += 1) {
-        for (let x = 0; x < w; x += 1) {
-          const i = (y * w + x) * 4;
-          const r = image[i];
-          const g = image[i + 1];
-          const b = image[i + 2];
-          if (r >= 55 && r <= 150 && r - b >= 8) {
-            n += 1;
-            sumX += x;
-            sumY += y;
-            sumXY += x * y;
-            hash = Math.imul(hash ^ r, 16777619);
-            hash = Math.imul(hash ^ g, 16777619);
-            hash = Math.imul(hash ^ b, 16777619);
-            hash = Math.imul(hash ^ x, 16777619);
-            hash = Math.imul(hash ^ y, 16777619);
-          }
-        }
-      }
-      return {
-        n,
-        meanX: n ? sumX / n : 0,
-        meanY: n ? sumY / n : 0,
-        tilt: n ? sumXY / n - (sumX / n) * (sumY / n) : 0,
-        hash: hash >>> 0,
-        box: [x0, y0, w, h],
-      };
-    },
-    { b64: shot, anchor: props.body },
-  );
-};
-
-/**
  * How the breath in the air is *shaped*, measured on the cloud's own contribution to the frame.
  *
  * Two frames taken one `visible` toggle apart: the room, the chrome and the lighting are identical
@@ -3158,7 +3088,6 @@ try {
     JSON.stringify(zh),
   );
   const zhHint = await hintCentre(page);
-  const zhScene = await rodBox(page);
   const zhAim = await propsOf(page);
   const zhAimAt = Date.now();
 
@@ -3225,9 +3154,20 @@ try {
   );
 
   // S24's own 反例验证: 「烟本身可以镜像，但『燃烧推进方向』建议保持物理正确，不做镜像，避免用户误判」.
-  // Two halves, because a mirror can come from either side of the seam: the state's geometry (which
-  // the page publishes) and the pixels (which the web layer is free to restyle).
-  const arScene = await rodBox(page);
+  // Two halves were here, from either side of the seam: the state's geometry (which the page publishes)
+  // and the pixels. Only the state's half and the stylesheet's half survive, because no pixel reading of
+  // this claim has held. The retired centroid averaged ~27,000 pixels of the *room*: the box's mean red is
+  // 55.2 against a colour key whose floor is 55, an untouched page swings its centroid 11-16 px between two
+  // consecutive reads, and deleting all five `rod*` meshes moved it 2.8 px — so two reads reproduced this
+  // file's own 10.3 px red with no language switch at all (`tests/smoke/probe-rtl-plume.mjs`).
+  // A screenshot of the flame was built and measured second: the ink is real (r 138-224 with 7,508-14,015
+  // px above the floor, against an idle frame's 71 and 0 — `probe-fire-window.mjs`) but it lives in a window
+  // one press wide, and that reading reddened the correct product on two consecutive runs of one tree.
+  // Projecting the cherry mesh was tried third and is also dead: `rod-cherry`, `rod-char` and `rod-tip-ash`
+  // all sit at their group's origin (local [0, 0, ~0.007]), so the tube's ends live in its geometry rather
+  // than in any position, and it reported "left" against a state saying "right" on an undisturbed page
+  // (`probe-cherry-side.mjs`). All three are instruments, not gates. What the claim needs is a handle — the
+  // app publishing where it drew the burning end — and that is registered for the owner in the brief.
   const arAim = await propsOf(page);
   const arAimAt = Date.now();
   const zhLean = zhAim.ember.x - zhAim.body.x;
@@ -3240,19 +3180,8 @@ try {
   // states still have to agree, just not better than time itself lets them.
   await page.waitForTimeout(520);
   const arAimAgain = await propsOf(page);
-  // The canvas half needs the same treatment the state half already got. The rod is burning between
-  // the two language reads, so its drawn centroid moves by whatever the burn moves it — measured
-  // 2026-10-15 on the *normal* path (WebGPU, 61 fps): `x 225.7 → 214.4` across the switch, 11.3 px
-  // against a hand-picked ±3, with `tilt` drifting −1423 → −1366 over the same span. That red is not
-  // the mirror and not the machine: it is a fixed number standing in for a quantity the page measures
-  // better than I did. So the control is the same rod in the same language over one more window, and
-  // the tolerance is ±3 plus that drift scaled by the span the switch took. The claim is unchanged —
-  // switching language must not move the rod beyond what time alone moves it.
-  const arSceneAgain = await rodBox(page);
-  const sceneDrift = Math.abs(arSceneAgain.meanX - arScene.meanX);
   const perWindow = Math.abs(arAimAgain.ember.x - arAimAgain.body.x - arLean);
   const windows = Math.max(1, Math.ceil((arAimAt - zhAimAt) / 520));
-  const xBudget = 3 + sceneDrift * windows;
   // And below that sits the instrument itself: the aim is published as decimal text, so two reads can
   // differ by one quantum of the mirror's own precision with nothing having moved at all (this is
   // what the run measured — the burn had drifted 0.0000 while the two reads differed by 0.0001). The
@@ -3265,33 +3194,23 @@ try {
   }, 0);
   const quantum = 10 ** -Math.max(decimals, 1);
   const leanBudget = 2 * quantum + perWindow * windows;
+  const flip = await sceneFlip(page);
   console.log(
-    `RTL zh n=${String(zhScene.n)} x=${zhScene.meanX.toFixed(1)} tilt=${zhScene.tilt.toFixed(0)} | ` +
-      `ar n=${String(arScene.n)} x=${arScene.meanX.toFixed(1)} tilt=${arScene.tilt.toFixed(0)} | ` +
-      `lean zh=${zhLean.toFixed(4)} ar=${arLean.toFixed(4)}`,
+    `RTL lean zh=${zhLean.toFixed(4)} ar=${arLean.toFixed(4)} budget ${leanBudget.toFixed(4)}`,
   );
   check(
-    'right-to-left: the burning end stays on the same side, in the state and on the canvas',
-    // The state's own numbers — within the drift the burning rod produces on its own over the span
-    // the switch took, which is the tightest statement two reads of a moving thing can support.
+    'right-to-left: the burning end stays on the same side in the state, and nothing turns the frame around',
+    // The state's own numbers — within the drift the burning rod produces on its own over the span the
+    // switch took, which is the tightest statement two reads of a moving thing can support.
     Math.abs(zhLean - arLean) <= leanBudget &&
       zhLean > 0 &&
-      // The drawn rod, read from the tight box around its own anchor: the same centroid, the same
-      // lean sign and the same pixels rather than a mirrored picture.
-      arScene.n > 200 &&
-      Math.abs(arScene.n - zhScene.n) / zhScene.n < 0.1 &&
-      Math.abs(arScene.meanX - zhScene.meanX) <= xBudget &&
-      Math.abs(arScene.meanY - zhScene.meanY) <= 3 &&
-      arScene.tilt !== 0 &&
-      Math.sign(arScene.tilt) === Math.sign(zhScene.tilt) &&
-      // The half the buffer cannot see: a stylesheet is allowed to turn the composited picture
-      // around, and this is the check that says it may not.
-      (await sceneFlip(page)).length === 0,
+      // The half no state read can see: a stylesheet is allowed to turn the composited picture around
+      // while every number in the mirror stays put, and this is the check that says it may not.
+      flip.length === 0,
     `lean ${zhLean.toFixed(4)}→${arLean.toFixed(4)} budget ${leanBudget.toFixed(4)} ` +
       `(the burn moves ${perWindow.toFixed(4)} per 520ms × ${String(windows)} windows, ` +
-      `mirror quantum ${quantum.toExponential(0)}), ` +
-      `n ${zhScene.n}→${arScene.n}, x ${zhScene.meanX.toFixed(1)}/${String(Math.round(zhScene.box[2] / 2))}→${arScene.meanX.toFixed(1)}/${String(Math.round(arScene.box[2] / 2))} (budget ${xBudget.toFixed(1)} = 3 + burn drift ${sceneDrift.toFixed(1)}px/window × ${String(windows)}), tilt ${zhScene.tilt.toFixed(0)}→${arScene.tilt.toFixed(0)}, ` +
-      `flipped=${JSON.stringify(await sceneFlip(page))}`,
+      `mirror quantum ${quantum.toExponential(0)}), flipped=${JSON.stringify(flip)} — ` +
+      'the canvas half is retired: the box it averaged was the room, not the rod',
   );
 
   // Tier three is a whole interface, not a colour: the same controls, the same positions, no
