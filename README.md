@@ -489,8 +489,18 @@ node ~/.aas-runtime/node_modules/agentic-awesome-skills/tools/bin/aas.js \
 **The handoff page for UI work.** [`docs/UI-DESIGN-BRIEF.md`](docs/UI-DESIGN-BRIEF.md) is the input a
 design pass should start from: every surface and what it answers for, the 11-state loop, the settings
 with their ranges, the state matrix (including what deliberately has no offline UI), the design
-language's current values, the ten decisions that belong to the owner rather than to an agent, and the
-run ledger — the numbers each claim was measured with, so a stale one is visible as stale.
+language's current values, the decisions that belong to the owner rather than to an agent (count them
+with `grep -c '^| [0-9]' docs/UI-DESIGN-BRIEF.md` under §8 — do not trust a number quoted here), and
+the run ledger — the numbers each claim was measured with, so a stale one is visible as stale.
+
+**One command for the UI/interaction measurements.** `node tests/smoke/ui-sweep.mjs` runs the four
+sweeps and prints one table: which control is covered by which layer and how large a square a finger
+actually gets, the keyboard path (tab stops, focus handoff, whether a panel scrolls as it goes),
+whether `prefers-reduced-motion` still lets anything travel, and whether any control is left with
+nothing to aim at once the words are gone in the `icons` layer. It starts a dev server if nothing is
+answering and shuts it down after; `--strict` exits 1 while anything is listed, which is a red today
+because the pinned archive card still overlaps a sheet's controls (a registered design decision,
+not an unnoticed bug). Each sweep also runs alone, with the command quoted beside its finding.
 
 ## Product boundaries
 
