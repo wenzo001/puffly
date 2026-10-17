@@ -805,9 +805,49 @@ Apple 的 `STHeiti Light.ttc`——脚本自己印着"This atlas is for developm
 `released` 那格 2/12 变 3/12，同一段代码在本轮前四趟都是绿的），第二趟 `S10: closing the sheet brings the scene back to the
 same pixels`（读数 `sheetScroll:null`＝那一趟面板根本没开成）。两条都属 SPEC 里 #148 那一族"预算按墙钟／前置缺席"的轮换红，
 **不归给这笔，也不许顺手放宽**。
+
 **RTL 这一条两趟都绿**：`lean 0.1859→0.1860`／`0.1860→0.1860`，budget 0.0002（`/tmp/trim-run.log`、`/tmp/trim-run2.log` 第 97 行）——
-换成只剩状态格＋样式格之后，它不再靠运气。 旧的 176 分母里那 4 条轮换红，本轮只有 RTL 这一条换了性质（判据被撤 + 登记把手），
+换成只剩状态格＋样式格之后，它不再靠运气。
+
+旧的 176 分母里那 4 条轮换红，本轮只有 RTL 这一条换了性质（判据被撤 + 登记把手），
 其余三条（`tappable together`、`no prose` 的 `hint:"弹"`、`3D: the ignition's flame`）仍是轮换族，不许写成"修好了"。
+
+**23）"抬手之后不多出一口"改成直接量抬手；顺带补上"没有可磕的灰"被误报成"碗没有重量"的那个洞。**
+
+起因是上一格删掉六条判据之后的那一趟：**175/176**，红的正是 `a draw held past its ceiling ends itself, and the release afterwards buys nothing`，
+读数 `presses 2`、`1/12 → 3/12`。旧断言 `after === before + 1` 是**对套件自己的手势做算术**：那句"只发生了一口"成立的前提是"恰好按了一次"，
+而按下确认回路走第二枪时，第一枪往往只是**报到晚了**——于是套件自己造出口，再把产品判红。
+
+量具 `node tests/smoke/probe-ceiling-release.mjs http://localhost:5175/`（三趟。脚本注释里写清了为什么必须先"拿起来＋点着"再按住：
+在全新页面上按住药丸只是把杆拿起来，行读数会一动不动地停在 `1|00:00|100%`——我第一版就是这么空跑了三趟）：
+
+| 量到的 | 数值 |
+| --- | --- |
+| press → 行里出现秒数 | **76–79 ms**（确认窗是 1500 ms，所以"没接上"多半是误判） |
+| 秒数 → 顶自己结束（行里换成力的裸数字） | **2.7–4.0 s** |
+| 顶之后，计数在**手指还按着时**回到行里 | **774 / 774 / 1093 ms**，各落在 +1 |
+| 抬手之后 6 秒内，行计数与场景自己的 `lastExhale` | **一次都没动**（三趟都是） |
+
+⇒ 这句契约可以直接观测，不必再从"我按了几下"倒推。断言改成：**先读抬手那一瞬的计数**（必须大于抬手前）→ 抬手 → 盯 2 秒
+（新起一口会在 ~1 s 内动这两个读数）→ 计数与 `lastExhale` 都不许动。判据的字没说松，只是不再依赖套件的按键次数；
+`held`／`released`／`countMoved`／`exhaleMoved` 都打进读数。
+
+**它红过的那一支现在不红了，而且是在"最该红"的条件下验的**：软件渲染旗标（CI 那台没 GPU 的 runner 的形状，实测 `25.1 fps`）那一趟，
+这条判据带着 `presses 2` 仍然 ok（`count while held=2 (was 1) at 750ms … countMoved=false, exhaleMoved=false`）——
+`presses 2` 正是让它红过的那个条件。复跑：
+`PUFFLY_CHROME_ARGS="--use-angle=swiftshader --enable-unsafe-swiftshader --disable-gpu" node tests/smoke/touch-device.mjs http://localhost:5175/`。
+
+途中有一趟 **173/176** 连带红了三条（`the bowl has weight`／`each falling flake…`／`char front`），暴露的是**另一个自家洞**——
+不是我这两笔造成的，但被我撞见：建灰柱那个循环有两条出口（`draws < 6` 与 `LIT.test(phase)`），那趟走的是后一条，读数
+`draws 1, taps 0, column=false, phase=light` ⇒ 磕灰的循环**一次都没跑**，`peakRock` 停在 **−1 哨兵**，
+判据于是报"碗没有重量"，而真话是"这一趟根本没给它可磕的灰"。⇒ 补了一条**有界重擦火**（`relights ≤ 2`，用块里本来就有的 `lightRod`——
+它自己的注释就写着"别继承上一块的残局"，这是 2026-10-11 那次教训的**块内变体**），并把 `relights=` 打进读数，红的时候说得出是哪一半。
+**这条分支是被"强制走一遍"证明活的**：把条件临时改成必定重擦一次火，同一棵树 **176/176** 且读数 `relights=1, column=true`；
+改回来之后正常两趟都是 `relights=0` ⇒ 那一支今天仍要靠慢页才会自己走到，这一点如实记着。
+
+真机现在数（口径＝套件末行，别抄这里的数）：**全速连续三趟 176/176**；软件渲染那趟 **174/176**，两条红都是本仓已登记的两族
+（`the pill picks the rod up…` 的按压被慢页吞掉、`3D: the ignition's flame…` 的 `sparks=false strikes=1` 到达预算），
+**改之前这两条在同一旗标下也红过**，不归给这两笔。
 ---
 
 ## 12. 状态矩阵（新 UI 必须为这些留位置；每行都是现读代码得到的）

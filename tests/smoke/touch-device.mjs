@@ -2746,25 +2746,65 @@ try {
   }
   const framesEnd = await page.evaluate(() => window.__pufflyScene?.frames ?? 0);
   const heldFps = ((framesEnd - framesAt) / Math.max(1, Date.now() - clockAt)) * 1000;
+  // The release must be judged against the release itself. The count comes back into the row **while the
+  // finger is still down** (measured 2026-10-17, three trials on one tree: 774, 774 and 1093 ms after the
+  // ceiling's force figure appeared, each of them landing the draw at +1), so the row is read at the
+  // moment of release and then required not to move afterwards — and the scene's own `lastExhale` record
+  // is read with it, because a release that started a draw would write that record even if the row had
+  // not repainted.
+  //
+  // The old form was arithmetic over the check's own gestures: `after === before + 1` states "exactly one
+  // draw happened" only if exactly one press started one. When the press-confirmation loop needed its
+  // second try, the press that looked swallowed still landed later, and a full-speed run read
+  // `presses 2, 1/12 → 3/12` on a game that had done nothing wrong while the run beside it read +1.
+  // Measured apart (`tests/smoke/probe-ceiling-release.mjs`): press→first seconds is 76-79 ms, the
+  // ceiling fires 2.7-4.0 s later, and in every trial both the count and `lastExhale` were unchanged
+  // through the full six seconds after the release. So this is directly observable, and it is now
+  // observed instead of inferred from how many presses the check itself decided to make.
+  const countBefore = drawCount(beforeCeiling);
+  let heldSettled = await chrome();
+  let heldMs = 0;
+  // Bounded at what the page actually takes (measured 750-1093 ms for the figure to come back), with
+  // room for a slow page. A longer bound only borrows wall clock from the blocks that follow.
+  while (heldMs < 4000 && drawCount(heldSettled) < 0) {
+    await page.waitForTimeout(150);
+    heldMs += 150;
+    heldSettled = await chrome();
+  }
+  const countAtRelease = drawCount(heldSettled);
+  const exhaleOf = () =>
+    page.evaluate(() => JSON.stringify(window.__pufflyScene?.lastExhale ?? null));
+  const exhaleAtRelease = await exhaleOf();
   await page.mouse.up();
-  // The release after the self-end must buy nothing: still exactly one draw. The count is back
-  // in the row only once the exhale has cleared, so wait for the figure rather than for a delay.
-  let afterRelease = await chrome();
+  let afterRelease = heldSettled;
+  let countMoved = false;
+  let exhaleMoved = false;
   let settledMs = 0;
-  while (settledMs < 4000 && drawCount(afterRelease) < 0) {
+  // Two seconds of watching is enough to catch a release that starts a draw: the engine answers a press
+  // within ~80 ms (measured) and writes `lastExhale` on the same beat, so a spurious draw would move one
+  // of these two readings long before the window closes.
+  while (settledMs < 2000) {
     await page.waitForTimeout(150);
     settledMs += 150;
     afterRelease = await chrome();
+    countMoved = countMoved || drawCount(afterRelease) !== countAtRelease;
+    exhaleMoved = exhaleMoved || (await exhaleOf()) !== exhaleAtRelease;
   }
   check(
     'a draw held past its ceiling ends itself, and the release afterwards buys nothing',
+    // The hold has to have landed a draw — more than the row read before the hold — and neither the count
+    // nor the scene's own exhale record may move in the four seconds after the release.
     selfEnded &&
       heldRead.phase === 'puff' &&
-      drawCount(afterRelease) === drawCount(beforeCeiling) + 1,
+      countAtRelease > countBefore &&
+      !countMoved &&
+      !exhaleMoved,
     `held=${JSON.stringify(beforeCeiling.figures)} → ${JSON.stringify(heldRead.figures)} ` +
       `after ${String(waitedMs)}ms with the finger still down at ${heldFps.toFixed(1)} fps ` +
-      `(presses ${String(pressTries)}, draw began ${String(drawBegan)}) released=` +
-      `${JSON.stringify(afterRelease.figures)} after ${String(settledMs)}ms more`,
+      `(presses ${String(pressTries)}, draw began ${String(drawBegan)}) count while held=` +
+      `${String(countAtRelease)} (was ${String(countBefore)}) at ${String(heldMs)}ms, released=` +
+      `${JSON.stringify(afterRelease.figures)} after ${String(settledMs)}ms more ` +
+      `(countMoved=${String(countMoved)}, exhaleMoved=${String(exhaleMoved)})`,
   );
 
   // S17 and S19 read together: 按住 0.6 秒 opens the card, 松手只收卡片 closes it again, and the
@@ -4764,7 +4804,23 @@ try {
   let rockAim = await propsOf(page);
   let rockPhase = await scenePhase(page);
   let draws = 0;
-  while (draws < 6 && !standingAsh(rockAim) && LIT.test(rockPhase)) {
+  // The LIT gate is not a guard on the budget, it is a second way out of the loop, and measured
+  // 2026-10-17 it was the way that fired: a run left here with `draws 1, taps 0, column=false,
+  // phase=light` — the break had ended before the fifth ceiling draw could stand a column up, so the
+  // taps loop below never ran, `peakRock` stayed at its −1 sentinel, and the check reported 「the bowl
+  // has no weight」 about a gesture that had never been offered anything to knock. 「没有可磕的灰」and
+  // 「灰落了而碗不动」are different faults, and this is where the first one used to be mistaken for the
+  // second: strike again (bounded) and keep building, instead of handing the check an empty window.
+  let relights = 0;
+  while (draws < 6 && !standingAsh(rockAim)) {
+    if (!LIT.test(rockPhase)) {
+      if (relights >= 2) break;
+      relights += 1;
+      await lightRod(page);
+      rockAim = await propsOf(page);
+      rockPhase = await scenePhase(page);
+      continue;
+    }
     await holdDraw(page, 1.2);
     draws += 1;
     rockAim = await propsOf(page);
@@ -4852,7 +4908,7 @@ try {
   check(
     '3D: ash landing tips the tray and it settles back — the bowl has weight (§20)',
     peakRock > 0.005,
-    `peak |rotation.z| ${String(peakRock)} rad after ${String(draws)} draw(s) and ${String(taps)} tap(s), column=${String(hadColumn)} phase=${rockPhase}, against a full-tilt amplitude of 0.05`,
+    `peak |rotation.z| ${String(peakRock)} rad after ${String(draws)} draw(s) and ${String(taps)} tap(s), relights=${String(relights)}, column=${String(hadColumn)} phase=${rockPhase}, against a full-tilt amplitude of 0.05`,
   );
   // Where a flake is drawn is the core's own `fragment.origin`, and how long it is drawn is the
   // core's own `fragment.length` — neither is a point or a size this layer picks. `ash-flake.test.ts`
