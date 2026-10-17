@@ -427,6 +427,19 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
     transition-duration: 1ms;
   }
 
+  /*
+   * The `*` above does not reach the open panel: `.sheet[data-open='true']` declares its transition
+   * with a shorthand, and a two-class selector outranks the universal one — measured, the panel still
+   * slid up over 380 ms under reduce. Reduced motion is about movement, not about the fade, so the
+   * fix drops `transform` from what animates and keeps §61's fade: the panel arrives in place
+   * instead of travelling to it.
+   */
+  .sheet,
+  .sheet[data-open='true'] {
+    transition-property: opacity, visibility;
+    transition-duration: 300ms, 0s;
+  }
+
   .swatch.fresh::after {
     animation: none;
   }

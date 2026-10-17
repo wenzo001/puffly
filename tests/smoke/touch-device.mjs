@@ -5367,7 +5367,19 @@ try {
   // seconds, read while held, release, wait for the exhale.
   const tierDraw = (seconds) => holdDraw(page, seconds);
 
-  const short = await tierDraw(0.3);
+  /*
+   * The driver holds until the engine has SEEN `seconds`, and on a loaded machine one poll is a few
+   * hundred milliseconds, so a 0.3 s ask can arrive as 1.2 s — which is tier M by the table
+   * (`puffTier.ts:44-52`, `maxSeconds: 2`, 24 ml / 52 px / 1.2 s) and says nothing about the S
+   * recipe under test. Measured on 2026-10-17: one run read `tier M, volumeMl 24` for this very
+   * check. So retry the draw rather than accuse the engine, and print the seconds actually held so a
+   * red that survives the retries names its own cause.
+   */
+  let short = await tierDraw(0.3);
+  for (let lap = 0; lap < 2 && Number(short.mid?.stageRing?.seconds ?? 0) >= 1; lap += 1) {
+    short = await tierDraw(0.3);
+  }
+  const heldS = Number(short.mid?.stageRing?.seconds ?? 0);
   check(
     'S: while held the abstract mouth shows and the 104 px stage ring tracks it',
     short.mid?.lip?.visible === true &&
@@ -5380,7 +5392,7 @@ try {
       short.mid?.stageRing?.visible === true &&
       short.mid.stageRing.frac > 0.04 &&
       Number(short.mid.stageRing.seconds) >= 0.25,
-    JSON.stringify({ lip: short.mid?.lip, ring: short.mid?.stageRing }),
+    JSON.stringify({ heldSeconds: heldS, lip: short.mid?.lip, ring: short.mid?.stageRing }),
   );
   check(
     'S: the released breath is the 8 ml / 24 px / 0.6 s recipe',
@@ -5388,7 +5400,7 @@ try {
       short.exhale.volumeMl === 8 &&
       short.exhale.spreadRadiusPx === 24 &&
       short.exhale.riseSeconds === 0.6,
-    JSON.stringify(short.exhale),
+    `held ${String(heldS)}s (S ends at 1s) -> ${JSON.stringify(short.exhale)}`,
   );
 
   const middle = await tierDraw(1.15);
@@ -5510,6 +5522,85 @@ try {
 
   check('tier phone: nothing threw', errors.length === 0, errors.slice(0, 2).join(' | '));
   await context.close();
+}
+
+/*
+ * Reduced motion, measured rather than declared. A source-text guard cannot see this one: the
+ * browser is what knows that `.sheet[data-open='true']` names its transition with a shorthand and so
+ * outranks the universal `transition-duration: 1ms` in the reduce block — which is how the settings
+ * panel kept sliding up over 380 ms under reduce until it was measured on 2026-10-17. Colour fades
+ * are deliberately NOT part of this claim: reduced motion is about travelling, not about dimming.
+ * The un-reduced run is the control, so a scan that could not see a slide at all goes red too.
+ */
+{
+  const MOVEMENT = 'transform|translate|scale|rotate|inset|top|left|right|bottom|margin|padding';
+  const scanUnder = async (reduced) => {
+    const context = await browser.newContext({
+      viewport: { width: 393, height: 852 },
+      hasTouch: true,
+      isMobile: true,
+      reducedMotion: reduced ? 'reduce' : 'no-preference',
+    });
+    const page = await context.newPage();
+    await throttlePage(context, page);
+    await page.goto(URL_2D, { waitUntil: 'load' });
+    await page
+      .waitForFunction(() => (window.__pufflyScene?.frames ?? 0) > 5, null, { timeout: 40000 })
+      .catch(() => {});
+    // The suite's own route in, not a hand-rolled tap: a press Playwright refuses is swallowed by a
+    // `.catch()` and reads as "the panel is not open", which is how the first version of this check
+    // failed on its own control rather than on the app.
+    await openSheet(page, 'settings');
+    const moving = await page.evaluate(`(() => {
+      const pattern = new RegExp('${MOVEMENT}');
+      const seconds = (v) => {
+        const m = /([0-9.]+)(ms|s)/.exec(v ?? '');
+        return m === null ? 0 : m[2] === 'ms' ? Number(m[1]) / 1000 : Number(m[1]);
+      };
+      const out = [];
+      for (const el of document.querySelectorAll('*')) {
+        const r = el.getBoundingClientRect();
+        if (r.width < 1 || r.height < 1) continue;
+        const cs = getComputedStyle(el);
+        if (cs.visibility === 'hidden') continue;
+        const props = cs.transitionProperty + ' ' + cs.animationName;
+        const secs = Math.max(
+          seconds(cs.transitionDuration.split(/[,\\s]+/)[0]),
+          seconds(cs.animationDuration.split(/[,\\s]+/)[0]),
+        );
+        if (pattern.test(props) && secs > 0.02) {
+          out.push(
+            el.tagName.toLowerCase() +
+              '.' +
+              String(el.className).trim().split(/\\s+/)[0] +
+              ' ' +
+              secs +
+              's',
+          );
+        }
+      }
+      return [...new Set(out)];
+    })()`);
+    const openSheets = await page.evaluate(
+      () => document.querySelectorAll('.sheet[data-open="true"]').length,
+    );
+    await context.close();
+    return { moving, openSheets };
+  };
+  const free = await scanUnder(false);
+  const held = await scanUnder(true);
+  check(
+    'reduced motion stops the travelling and keeps the fading',
+    free.openSheets === 1 &&
+      held.openSheets === 1 &&
+      free.moving.length > 0 &&
+      held.moving.length === 0,
+    JSON.stringify({
+      sheetsOpen: { control: free.openSheets, underReduce: held.openSheets },
+      control: free.moving.slice(0, 3),
+      underReduce: held.moving.slice(0, 3),
+    }),
+  );
 }
 
 await browser.close();

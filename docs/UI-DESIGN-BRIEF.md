@@ -197,7 +197,7 @@ min/max/step 都取自己那一行的属性，别抄这张表）：
 
 ## 10. 新 UI 的验收方式（不要另起一套）
 
-- 正常路径基线：真机套件 **174/174**；软件渲染（无 GPU）代理旗标 `PUFFLY_CHROME_ARGS="--use-angle=swiftshader --enable-unsafe-swiftshader --disable-gpu"`，约 357s 跑完整套。**同一棵树同一旗标曾出现 174→5 红→9 红→174 的轮换**，所以"绿过一次"永远不等于"修好了"。
+- 正常路径基线：真机套件 **175 条**（2026-10-17 加了第 175 条 reduced motion，加之前是 174/174）——**分母会动，别抄这个数**，现算＝跑一遍看最后一行。同一棵树一晚连跑四趟是 **174/174 → 174/175 → 171/175 → 170/175，红在三个互不相干的族之间换人**（第 2 趟红在自己新判据的对照上＝套件自己的按压被拒；第 3 趟 `lighting attempts 4` 一根烟没点着、后面三条全是它的下游；第 4 趟整场 3D 没起来：`visibility: missing`、`nameMax 0`、meshes 0）。⇒ 这三族的红都不能归因给某一笔改动；本地要把任何一条写成"修好了"，必须先同树复跑一趟；有效判决仍是 CI。；软件渲染（无 GPU）代理旗标 `PUFFLY_CHROME_ARGS="--use-angle=swiftshader --enable-unsafe-swiftshader --disable-gpu"`，约 357s 跑完整套。**同一棵树同一旗标曾出现 174→5 红→9 红→174 的轮换**，所以"绿过一次"永远不等于"修好了"。
 - 真机套件**没有单条过滤器**：新增一条真机判据＝跑整套，并在页面内就地做反证。
 - 改了画面上看得见的事实，就要用 `tests/smoke/readme-shots.mjs` 重拍 README 四图并入库。
 - 只读 `.stage` 的机器值镜像做断言，不去读被三层语言翻译过的字；道具坐标用 `data-aim`；状态读 computed 值（animationName／color／CSSOM）。
@@ -579,3 +579,30 @@ the same rod — silver: tile 9.0 vs ["10.0分钟",…]`。两个数不可能来
 唯一一条真的、但归你拍的：**用键盘打开面板时，焦点留在底栏那颗 tab 上，没有进面板**
 （`focusMovedInsidePanel: false`）。这不是坏——现在再按一次 Enter 就把面板关了，这是键盘用户当前的
 快速出路；把焦点搬进面板（标准做法、屏幕阅读器会立刻念出面板）会连带拿走这条 toggle 路。⇒ §8 第 13 行。
+
+**16）"减弱动态效果"这一格：源码里写了，浏览器里没做到——面板在 reduce 下还是滑 380 ms。已修，判据进真机套件。**
+
+新量具 `tests/smoke/probe-reduced-motion.mjs`（复跑：`node tests/smoke/probe-reduced-motion.mjs http://localhost:5175/`）。
+它把"还在动的东西"分成 **MOVE（会位移的）** 与 **fade（只是变色／变透明的）**：reduce 该管的是前者，
+把后者也一并列出来，下一个人就会去追十条没病的。现读三态（待机／设置面板开着／宽屏）× 两档：
+
+| | 全速 | reduce |
+| --- | --- | --- |
+| 修之前 | MOVE：`section.sheet transform 0.38s`、`button.icon-button 0.26s` | **MOVE：`section.sheet 0.38s` 还在** |
+| 修之后 | MOVE：同上两条（这是给要动的人的，不该动它） | **MOVE：0 条**（fade 各留 3~4 条，是颜色与透明度） |
+
+根因是层叠，不是漏写：reduce 块里那条 `* { transition-duration: 1ms }` 特异性为 0，而
+`.sheet[data-open='true']` 用 **shorthand** 重新声明了整条 transition（特异性 0-2-0）⇒ 它压过通配，
+面板照旧旅行。修法不是把通配写得更狠，而是就地补一条同特异性的规则，**把 `transform` 从"会动的属性"里摘出去、
+留下 §61 要的那个淡入**（`transition-property: opacity, visibility`）：面板到位不再滑行，淡入还是 300 ms。
+
+判据：真机套件第 175 条，**带正对照**——同一把尺在全速档必须看得见 `section.sheet 0.38s`，看不见就说明扫描是空的。
+现读 `{"sheetsOpen":{"control":1,"underReduce":1},"control":["section.sheet 0.38s","button.icon-button 0.26s"],"underReduce":[]}`。
+它第一版红在自己的对照上：我自己手写了一次 `tap + click().catch()`，被拒的按压被 `catch` 吞掉，读数就成"面板没开"。
+换成套件既有的 `openSheet()` 路由、并把 `sheetsOpen` 印进读数之后，才分得清是谁的问题。
+
+同一轮顺手修掉另一条**会自己撒谎的判据**：`S: the released breath is the 8 ml / 24 px / 0.6 s recipe`
+量到 `tier M / 24 ml / 52 px / 1.2 s`。不在引擎——`holdDraw(0.3)` 的语义是"held 到引擎看见 ≥0.3 s 为止"，
+机器忙时一次轮询几百毫秒，0.3 s 的委托能飘进 M 档（`puffTier.ts` 里 S 的窗口是 `maxSeconds: 1`）。
+⇒ 飘出窗口就重试一次，并把**实际 held 秒数**印进读数（`held 0.3s (S ends at 1s) -> {"tier":"S",…}`）；
+下次再红，它会先回答是驱动飘了还是档位错了。
