@@ -380,6 +380,14 @@ runner 是 13fps，差的那一截正是"面板一族"红不红的关键。8 倍
 输入（每日上限、单口时长、休息长度都是 range 滑块＋读数），只有 `type=date` 与 `type=color` 的原生选择器。
 ⇒ 新 UI 若重排 chrome，请把这五行**一起搬**——它们是一个整体，少一行就是一个具体的手感缺陷。
 
+**同一族的第三条负结果（2026-10-17 现量，无字层）：** 把语言切到 `icons` 之后（页面自报
+`data-cues="audio"`、屏面上 `wordsOnScreen=0`），可见的可交互控件 **31 颗全部仍然有可访问名字， unnamed = 0**
+——名字来自各自的 `aria-label`，不是来自那些消失的字。量法（临时脚本，未入库）：
+`page.locator('[data-language="icons"]').click()` 之后遍历 `button, input, a[href], select, [role=button]`，
+对每颗取 `aria-label` 或 `textContent`，两者皆空才算无名。
+⇒ 这条是**已经做对、重排 chrome 时容易弄坏**的那一类：新 UI 只要有一颗图标按钮靠字面文本当名字，
+无字层一开它就变成"有个能按的东西，但没人知道是什么"。
+
 **10）面板一族：拒绝按压的机制查清了，`never opened` 也确实归零；但"总红数 12 → 2"这句我收回。**
 
 诊断链：先复现出 `pressError:"locator.click: Timeout 2500ms exceeded."`（Playwright 的动作性等待拒绝按压），
