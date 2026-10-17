@@ -227,6 +227,7 @@ const desk = computed((): Array<{ key: CopyKey; value: string; press: boolean }>
   <header class="hud" :data-phase="summary.phase" :data-over="summary.overLimit">
     <button
       class="cat"
+      data-reach
       data-hook="category"
       :aria-label="copy.say('a11y.hud.category')"
       @pointerdown="mark.onPointerDown"
@@ -266,6 +267,7 @@ const desk = computed((): Array<{ key: CopyKey; value: string; press: boolean }>
       <button
         v-if="figure.press"
         class="num"
+        data-reach
         data-hook="break"
         :class="{ alt: figure.accent }"
         :aria-label="copy.say(figure.key)"
@@ -290,6 +292,7 @@ const desk = computed((): Array<{ key: CopyKey; value: string; press: boolean }>
         <button
           v-if="row.press"
           class="read"
+          data-reach
           :aria-label="copy.say(row.key)"
           @click="emit('break')"
         >
@@ -331,26 +334,12 @@ const desk = computed((): Array<{ key: CopyKey; value: string; press: boolean }>
   font-size: calc(15px * var(--text-scale));
 }
 
-.cat {
-  position: relative;
-}
-
 /*
- * The face stays the 34 px the design draws — pushing the button itself to `--tap-target` measured
- * 54 px on a phone and reflowed the whole row (the ring moved 20 px right, the clock with it). The
- * reach a thumb needs is added here instead: an invisible square, centred, that belongs to the same
- * button. It paints no ink, so the scene's own readouts are untouched, and at 44 px it stops 7 px
- * short of the ring rather than reaching over it.
+ * The face stays the 34 px the design draws; the thumb's reach is `data-reach` in `global.css`,
+ * which is now the one home for that square. What it is worth here is measured, not assumed:
+ * `probe-covered-controls.mjs` reads the largest square that still hits this button, and names any
+ * control it would have covered.
  */
-.cat::after {
-  content: '';
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 44px;
-  height: 44px;
-  transform: translate(-50%, -50%);
-}
 
 .badge {
   position: absolute;

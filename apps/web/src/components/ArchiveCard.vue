@@ -85,7 +85,12 @@ const cells = computed(() => {
       <span v-else-if="box" class="zh">{{
         copy.t(`archive.tier.${box.tier}` as 'archive.tier.low')
       }}</span>
-      <button class="icon-button close" :aria-label="copy.say('a11y.close')" @click="emit('close')">
+      <button
+        class="icon-button close"
+        data-reach
+        :aria-label="copy.say('a11y.close')"
+        @click="emit('close')"
+      >
         ×
       </button>
     </header>
@@ -133,6 +138,7 @@ const cells = computed(() => {
     <button
       v-if="copy.t('archive.pin') !== null || !pinned"
       class="pin"
+      data-reach
       data-hook="pin"
       :aria-pressed="pinned"
       :aria-label="copy.say('archive.pin')"

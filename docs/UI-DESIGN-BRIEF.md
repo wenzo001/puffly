@@ -109,7 +109,9 @@ min/max/step 都取自己那一行的属性，别抄这张表）：
 | 除 3 个选择器外没有任何焦点环（底栏、药丸、关闭键、货架格子、档案格全无） | `styles/global.css` | 同上 |
 | 手指抬起后 hover 配色粘住（全仓 `:hover` 没有一处按 `@media (hover: hover)` 收口） | `TabRail.vue`、`ArchiveTile.vue` | 同上 |
 | "减弱动态效果"只覆盖 4 个类名，各组件自己的 transition 全在外面 | `global.css` 的 reduce 块 | 同上 |
-| HUD 品类标是按钮但只有 34×34，低于自家 `--tap-target`（**脸必须留在 34**，撑大它会顶开整行——见 §11 的实测表） | `HudBar.vue` | `interaction-states.test.ts` 的 `keeps the category face … widens only its reach` |
+| HUD 品类标是按钮但只有 34×34，低于自家 `--tap-target`（**脸必须留在 34**，撑大它会顶开整行——见 §11 的实测表） | 脸在 `HudBar.vue`，够到手指的尺寸在 `global.css` 的 `[data-reach]` | `interaction-states.test.ts` 的 `keeps the category face … widens only its reach` + `gives every thumb-sized control one shared reach, and no second copy of it` |
+| **HUD 的读数格是 18 px 高的按钮**（`.num` 49×18、宽屏 `desk` 的 `.read` 47/46/23×18）——它们不是 `.icon-button`，所以 `global.css:134-135` 那条"自家控件 44/54"的下限从来没管到它们；实测可命中方块 **0**（连 24×24 都凑不出） | `HudBar.vue` 三个按钮挂 `data-reach` | 同上（计数按属性行，不按文本——第一版把注释里那句 `data-reach` 也数进去了，读出 4） |
+| **档案卡的关闭键 28×28、钉住键 198×32**：`.close` 在 `ArchiveCard.vue:209-215` 用 `min-width/min-height: 28px` **主动压掉了**那条 44/54 下限 | `ArchiveCard.vue` 两处 `data-reach` | 同上 |
 | 图集／CSSOM 读不到时，场景里徽标的兜底色 `#e2604a` 与 token `#ff8a3d` 不是一个颜色 | `SceneStage.vue` | — |
 | 在设置里打字／选日期时，空格、回车、方向键、Esc 被游戏抢走；Tab 到药丸后按回车也不激活按钮，而是去点烟 | `useInputAdapters.ts` 的 `yieldsToFocus` | `inputAdapters.test.ts` 的 `yields space, Enter and the arrows…` + `keeps Space as the draw even when a button holds the focus` |
 | 拖动途中另一根手指碰到屏幕会抢走烟杆；抬起的那根还会在指位表里留鬼 | `useInputAdapters.ts` 的 `onDown`／`onUp`／`onCancel` | 同一文件三条用例，各自只为自己红 |
@@ -155,7 +157,7 @@ min/max/step 都取自己那一行的属性，别抄这张表）：
 | 6 | 面板打开时药丸整个消失（有实测：控制缺席而不是折叠）。新 UI 如果要保留一个"随时能吸一口"的入口，这是要重新设计的核心冲突。 | 已知事实，未定方向 |
 | 9 | **"记录只存在内存里、关掉就全丢"这件事，可见面只有一个半透明的圆点**：`SettingsSheet.vue:216` 是 `<span class="warn" aria-label="…">◍</span>`，`.warn { opacity: 0.6 }`（`:631`），那句话（`a11y.memoryOnly`：英文 'memory only'、中文『只存在内存里』，`copy.ts:99/373`）**只有屏幕阅读器能拿到**。同一行还有一个同形状的 🔇（音频不可用，`:211`）。SPEC 从未规定这个标记怎么呈现，所以这不是"设计就这么定的"，是当初就这么建的。⇒ 两条路：在带字的行里（数据/导出那排）落一句现成文案，或者接受"记号不配字"的语汇但换一个认得出的记号。**前者会动界面的语言（本应用是记号＋数字，§9.2），该你定。** | 未动，等取向 |
 | 12 | **Sound 那一行的滑块拖的不是音量**：行标签 `settings.sound`，三档循环按钮（🔊够／🔉一点／🔇关）动 `volume+muted`，而同一行那条 0–100 的长滑块绑的是 `settings.ambientVolume`（`SettingsSheet.vue:236-248`）——它管的是环境声底（风／房间），拖它的时候提示音本身不变。截图里两者并排，肉眼分不出归属。要么把这条滑块挪去它自己的行（多一行，但归属清楚），要么把行标签拆成两个词（要新文案），要么接受现状。 | 未动，等一句话 |
-| 11 | **钉住的档案卡和面板的关闭键互相压在对方身上**（实测、正常速度、393×852：`.sheet .close` 那颗 54×54 完全落在卡内，中心点命中 `p.scenes` ⇒ 面板的 × 点不动；把卡沉到面板之下则卡的钉住键（y 409–441，也在面板顶边之下）先死）。量具 `tests/smoke/probe-card-overlap.mjs`。三条路：① 面板打开时把钉住的卡一并收掉（最省事，但"钉住就是为了不被划走"这条契约要改口径）；② 面板打开时把卡锚到另一边（两张键都活，但 S19 的稿子指定档案区在右栏）；③ 面板高度给卡让出上部（等于重写这块的版式）。 | 未动，三条都得你挑 |
+| 11 | **钉住的档案卡和面板的关闭键互相压在对方身上**（实测、正常速度、393×852：`.sheet .close` 那颗 54×54 完全落在卡内，中心点命中 `p.scenes` ⇒ 面板的 × 点不动；把卡沉到面板之下则卡的钉住键（y 409–441，也在面板顶边之下）先死）。量具两件：`tests/smoke/probe-card-overlap.mjs`，以及把整页控件扫一遍的 `probe-covered-controls.mjs`——后者在同一个状态下又量到三颗被压住的：`button.icon-button[data-setting="scene-surface"]`、跳转条的 `jump=jumpskins` 与 `jump=jumpkit`（中心点分别回答 `p.scenes`／`aside.archive`／`p.basis`），所以这不是一颗键的事，是一排。三条路：① 面板打开时把钉住的卡一并收掉（最省事，但"钉住就是为了不被划走"这条契约要改口径）；② 面板打开时把卡锚到另一边（两张键都活，但 S19 的稿子指定档案区在右栏）；③ 面板高度给卡让出上部（等于重写这块的版式）。 | 未动，三条都得你挑 |
 | 10 | **键盘滚不动打开的面板**：三个 sheet 都没有 `tabindex`（现读：SettingsSheet:203 / SessionSheet:243 / CollectionSheet:227 只有 `class="sheet"`），而方向键在 `useInputAdapters.ts` 里被全局 `preventDefault` 收去 nudge 烟杆 ⇒ 键盘用户只能 Tab 到逐个控件、由浏览器把它滚进视野，PageDown/Home/End 全无作用。修法两半：给打开的面板 `tabindex="0"`（无害、纯加法），**并**规定『面板开着时方向键归面板』（这一半会拿走烟杆的一个既有键位）。§65 只说方向键『可以作为辅助输入』，没规定它永远属于杆——这条能设计得比现在好，但它动的是键位契约。 | 未动，等取向 |
 | 8 | **盲人听状态这条通道目前没有实现，而且两种实现互相打架。** `App.vue` 的注释写着"a blind user hears the state"，但那个句子只绑在舞台一层静态 `<div>` 的 `aria-label` 上——**改 `aria-label` 屏幕阅读器不会播报**，播报需要 live region 里的内容变化。试着加了一个裁剪掉的 `<p aria-live="polite">`，真机两趟都是 **167/174**，7 条红同一个因 `offenders:["said"]`：有一族判据钉着"无字层屏面上不得有成句文字"，而它扫的是整篇文档，不是 `.stage`。⇒ 要么给那族判据加一条"排除只供播报的裁剪节点"（＝改判据，得你点头），要么换一条不产生文字的通道（例如焦点真正落到带状态的元素上）。我没有自行放宽判据。 | 未动，等取向 |
 | 7 | **阿拉伯语下界面只镜像了一处**：`copy.ts` 认 ar/he/fa/ur、`App.vue` 会设 `dir=rtl`，但 CSS 里物理属性有 23 行、逻辑属性 19 行（口径：`grep -rn -E 'left:|right:|text-align|padding-left|border-left' --include=*.css --include=*.vue apps/web/src` 的命中行数，逻辑属性同法），专门写给 rtl 的规则全仓只有 1 条。⇒ 现在既不是"完整镜像"也不是"不镜像"，而是半镜像。要么把物理属性收成逻辑属性（会动到按 x 坐标写的像素判据，需要重定基线），要么在阿语补齐之前不设 `dir=rtl`。**选哪边取决于你对"4/210 条阿语翻译的界面该不该镜像"的判断**，我没有替你定。 | 未动，等一句话 |
@@ -494,3 +496,48 @@ the same rod — silver: tile 9.0 vs ["10.0分钟",…]`。两个数不可能来
 - **Sound 那一行拖的其实不是音量**（见 §5 那两行修正）：行标签是 `settings.sound`，可拖的滑块绑的是
   `settings.ambientVolume`（`SettingsSheet.vue:241/245`），三档循环按钮才动 `volume/muted`。
   截图里那一行正好把两件事画在一起，肉眼分不出谁归谁 ⇒ 归 §8 第 12 行等拍板。
+
+**14）把"谁压住谁"和"够不够手指"做成了一次全页扫描，量出 HUD 的读数格只有 18 px 高——已经修掉。**
+
+新量具 `tests/smoke/probe-covered-controls.mjs`（复跑：`npm run dev` 之后
+`node tests/smoke/probe-covered-controls.mjs http://localhost:5175/`）。它走 7 个状态×视口
+（待机／货架／设置／钉卡+货架／宽屏／宽屏+设置／横屏），每个可交互控件报两件事：
+**COVERED**＝中心点的 `elementFromPoint` 回答了一个外来层；**REACH**＝以它为中心、还能整块命中它自己的
+最大正方形（半径按 12/17/22/27/32/40 试探），与自家 `--tap-target` 比。
+两处刻意的排除写死在文件里：`.hit` 是舞台的兜底命中面、不是一个目标；被面板滚出可视区的控件算
+`scrolledAway`，不算被压住。
+
+改之前（393×852 待机，`away=0`，所以这一格没有滚动带来的假象）：
+
+| 控件 | 盒子 | 实测可命中方块 |
+| --- | --- | --- |
+| `.hud .num[data-hook="break"]` | 49×18 | **0**（连 24×24 都凑不出） |
+| 宽屏 `desk` 的 `.read` ×3 | 47×18／46×18／23×18 | **0** |
+| `.cat`（品类标） | 34×34 | 34 |
+| 档案卡 `.close` | 28×28 | 24 |
+| 档案卡 `[data-hook="pin"]` | 198×32 | 24 |
+
+根因不是"忘了写"，是**两条规则各管一半**：`global.css:134-135` 的 `min-width/min-height: var(--tap-target)`
+只挂在 `.icon-button` 上，HUD 的读数格不是 `.icon-button`（它们长得像字），而档案卡的 `.close`
+在 `ArchiveCard.vue:209-215` 用 `min-width/min-height: 28px` **主动把这条下限压掉了**。
+
+修法是收成一个家：`global.css` 里一条 `[data-reach]::after`（尺寸取 `--tap-target`、居中、不画墨、
+不参与布局），五个控件各加一个 `data-reach`（HudBar 3 处、ArchiveCard 2 处），`.cat` 那份私有的 44px
+副本删掉。改完同一把尺复量：`.cat`／`.num`／`.close`／`.pin`／`.read` 全部到 **44**（44 是量具网格在
+54 边界前的最后一档——按钮脸是 18~34 px，横向撑不满 54 是**故意的**：HUD 那一行总共 40 px 高，
+把格子撑到 54 会顶开环和时钟，第一次尝试就实测顶开 20 px）。
+
+判据：`interaction-states.test.ts` 新增 `gives every thumb-sized control one shared reach, and no second copy of it`
+——它钉三件事：工具存在且尺寸取自 token（把 `var(--tap-target)` 手写回 44px 就红）、
+带属性的控件数是 3+2（多一个少一个都红）、`HudBar.vue` 里不再出现 `.cat::after`（两份家就红）。
+两条谎都现场跑过：硬编 44px ⇒ 红；把注释里那句 `data-reach` 当成属性 ⇒ 计数读出 4 ⇒ 红，
+于是计数改成只认"整行只有这个属性"的写法。
+
+真机套件在这一改动之后 **174/174、RUN=0**（`/tmp/dev-reach.txt`）——这条是必要的：给 18 px 高的格子
+加 54 px 的隐形命中面，最坏的结果是它把舞台的按压抢走（HUD 正压在舞台上），实测没有。
+
+量具自己的两个坑，记下来免得下次重踩：① 它注入页面的那段是一个模板字符串，**注释里出现反引号会
+静默截断整段**（这一版就断过一次，报错长得像页面 bug）；② "中心点被外来层回答"和"控件被面板滚出可视区"
+是两件事——第一版的祖先链判据把设置面板最后一行的三颗语言键报成了"被底栏压住"，
+而同一份逻辑写在旁边几行却报"已滚出"，两次读数在同一个 evaluate 里自相矛盾；
+现在直接点名 `.sheet`，不再走 overflow 链。

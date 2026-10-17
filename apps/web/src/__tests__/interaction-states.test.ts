@@ -123,17 +123,40 @@ describe('interaction states that ship in CSS', () => {
   it('keeps the category face at the drawn size and widens only its reach', () => {
     // Measured, not assumed: pushing the button itself to `--tap-target` made it 54 px on a phone,
     // reflowed the whole row (ring and clock 20 px right) and moved a hard-coded pixel ruler out of
-    // its own window. So the 44 px belongs to a transparent pseudo-element, not to the box.
+    // its own window. So the reach belongs to a transparent pseudo-element, never to the box.
     const hud = stripComments(readFileSync(`${SRC}/components/HudBar.vue`, 'utf8'));
     const face = /\.cat\s*\{([^}]*)\}/.exec(hud);
     expect(face, '.cat needs its own rule').not.toBeNull();
     expect(face?.[1]).toMatch(/width: *34px/);
     expect(face?.[1]).toMatch(/height: *34px/);
     expect(face?.[1]).not.toMatch(/var\(--tap-target\)/);
-    const reach = /\.cat::after\s*\{([^}]*)\}/.exec(hud);
-    expect(reach, 'the thumb reach has to exist as a pseudo-element').not.toBeNull();
-    expect(reach?.[1]).toMatch(/width: *44px/);
-    expect(reach?.[1]).toMatch(/height: *44px/);
+  });
+
+  it('gives every thumb-sized control one shared reach, and no second copy of it', () => {
+    const global = stylesOnly(readFileSync(`${SRC}/styles/global.css`, 'utf8'));
+    const reach = /\[data-reach\]::after\s*\{([^}]*)\}/.exec(stripComments(global));
+    expect(
+      reach,
+      'the reach is one utility, so a fifth control costs one attribute',
+    ).not.toBeNull();
+    expect(reach?.[1]).toMatch(/width: *var\(--tap-target\)/);
+    expect(reach?.[1]).toMatch(/height: *var\(--tap-target\)/);
+    expect(reach?.[1]).toMatch(/position: *absolute/);
+
+    // The controls whose ink is smaller than a thumb, measured by `probe-covered-controls.mjs`:
+    // 18 px tall in the head-up row, 28 px on the archive card's close. Counted as attribute lines,
+    // not as text: the first version of this line read `4`, because a comment in `HudBar.vue` was
+    // explaining the attribute and the counter cannot tell the two apart.
+    const hud = stripComments(readFileSync(`${SRC}/components/HudBar.vue`, 'utf8'));
+    const reaches = (source: string) => source.match(/^\s+data-reach$/gm)?.length ?? 0;
+    expect(reaches(hud)).toBe(3);
+    expect(reaches(stripComments(readFileSync(`${SRC}/components/ArchiveCard.vue`, 'utf8')))).toBe(
+      2,
+    );
+
+    // And the old private copy stays gone: two homes for one square is how the next control ends up
+    // with the wrong size.
+    expect(hud).not.toMatch(/\.cat::after/);
   });
 
   it('applies the reduced-motion promise to the property, not to a list of classes', () => {

@@ -433,6 +433,30 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
 }
 
 /*
+ * A control whose ink is smaller than a thumb gets an invisible square of the app's own target,
+ * centred on it. `min-width/min-height` cannot do this job here: the head-up row measures 40 px
+ * tall on a phone and in a window (`.hud` y=10 h=40, read off the page), so a 54 px box on one of
+ * its cells would push the ring and the clock sideways — the first attempt at exactly that reflowed
+ * the row by 20 px. A pseudo-element paints no ink and takes no layout, and because it belongs to
+ * the same button the hit test answers the control. What a reach is *worth* is measured, not
+ * assumed: `node tests/smoke/probe-covered-controls.mjs <url>` prints the largest square that still
+ * hits each control, and it names any control a reach has ended up covering.
+ */
+[data-reach] {
+  position: relative;
+}
+
+[data-reach]::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--tap-target);
+  height: var(--tap-target);
+  transform: translate(-50%, -50%);
+}
+
+/*
  * A finger is not a cursor (§66). Everything the thumb has to reach gets the larger target, and
  * the sliders get a taller track, because a 22 px knob on a 3 px line is a miss most of the time.
  */
