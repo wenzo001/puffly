@@ -1746,6 +1746,41 @@ const hintCentre = async (page) => {
     puffBack.pressed === 'true' && !puffBack.track,
     JSON.stringify(puffBack),
   );
+  // The data row's other half. Until 2026-10-17 nothing in this suite touched the file picker at
+  // all — the one flow where a player can restore or fail to restore their whole archive — and the
+  // outcome was carried by an `aria-hidden` ✓ / !, so a screen-reader user who picked a file got
+  // nothing back while the erase button two rows over already announced through `aria-live`.
+  const statusRegion = () =>
+    page.evaluate(() => {
+      const el = document.querySelector('.state');
+      return {
+        role: el?.getAttribute('role') ?? '',
+        label: el?.getAttribute('aria-label') ?? '',
+        cls: el ? String(el.className) : '',
+      };
+    });
+  const importQuiet = await statusRegion();
+  await page
+    .locator('input[type="file"]')
+    .setInputFiles({
+      name: 'not-an-archive.json',
+      mimeType: 'application/json',
+      buffer: Buffer.from('{"nope":1}'),
+    })
+    .catch(() => {});
+  await page.waitForTimeout(700);
+  const importRefused = await statusRegion();
+  await page.waitForTimeout(2600);
+  const importSettled = await statusRegion();
+  check(
+    'an import that cannot be read says so out loud, then goes quiet again',
+    importQuiet.label === '' &&
+      importRefused.role === 'status' &&
+      importRefused.label.length > 3 &&
+      importRefused.cls.includes('bad') &&
+      importSettled.label === '',
+    JSON.stringify({ importQuiet, importRefused, importSettled }),
+  );
   // S23's three 替代动作, as controls: each row says what it is, carries the day's count, and moves
   // it under a finger. This is the whole of the 计次 decision's visible half — the ledger itself is
   // judged in `substitutes.test.ts` — and it is what a source-text check cannot see: the wiring from

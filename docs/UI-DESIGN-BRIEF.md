@@ -113,6 +113,7 @@ min/max/step 都取自己那一行的属性，别抄这张表）：
 | **HUD 的读数格是 18 px 高的按钮**（`.num` 49×18、宽屏 `desk` 的 `.read` 47/46/23×18）——它们不是 `.icon-button`，所以 `global.css:134-135` 那条"自家控件 44/54"的下限从来没管到它们；实测可命中方块 **0**（连 24×24 都凑不出） | `HudBar.vue` 三个按钮挂 `data-reach` | 同上（计数按属性行，不按文本——第一版把注释里那句 `data-reach` 也数进去了，读出 4） |
 | **档案卡的关闭键 28×28、钉住键 198×32**：`.close` 在 `ArchiveCard.vue:209-215` 用 `min-width/min-height: 28px` **主动压掉了**那条 44/54 下限 | `ArchiveCard.vue` 两处 `data-reach` | 同上 |
 | 图集／CSSOM 读不到时，场景里徽标的兜底色 `#e2604a` 与 token `#ff8a3d` 不是一个颜色 | `SceneStage.vue` | — |
+| **导入的结果只有眼睛能看见**：那条 ✓／! 是 `aria-hidden`，而它左边两格的清空流程早就用 `aria-live` 播报了——同一个面板里两种标准。屏幕阅读器用户选完文件，成功还是失败**什么都收不到** | `SettingsSheet.vue` 数据行：常驻 `role="status"` 区 + `a11y.importOk`／`a11y.importBad` 两条新文案 | 真机套件第 176 条 `an import that cannot be read says out loud, then goes quiet` |
 | **开屏那一跳是真的**：脚本跑起来之前页面涂 `#121317`，跑起来之后涂 `--deep-charcoal #0b0a09`——实测相对亮度差 **2.13 倍**；而 `theme-color`（浏览器自己的那条栏）也停在旧的 `#121317`，与运行中的页面永远不一致（manifest 早就是 `#0b0a09`） | `apps/web/index.html:6/21` 与 `vite.config.ts:37-38` 收成同一个数 | `__tests__/boot-colour.test.ts`（把开屏色改回 `#121317` ⇒ 两条都红，现场跑过） |
 | 在设置里打字／选日期时，空格、回车、方向键、Esc 被游戏抢走；Tab 到药丸后按回车也不激活按钮，而是去点烟 | `useInputAdapters.ts` 的 `yieldsToFocus` | `inputAdapters.test.ts` 的 `yields space, Enter and the arrows…` + `keeps Space as the draw even when a button holds the focus` |
 | 拖动途中另一根手指碰到屏幕会抢走烟杆；抬起的那根还会在指位表里留鬼 | `useInputAdapters.ts` 的 `onDown`／`onUp`／`onCancel` | 同一文件三条用例，各自只为自己红 |
@@ -694,6 +695,60 @@ live-region 冲突是同一族：有一族判据钉着"无字层不得有成句�
 `color-scheme: dark` 在 `index.html:22` 有；安全区 `env(safe-area-inset-*)` 在用；
 最大的一屏列表是 32 个 `.swatch`（另有 21 房间／12 盒／11 支烟），**都在"＞50 才要虚拟化"那条门槛下面**——
 现读口径：打开设置面板后 `document.querySelectorAll('.swatch').length`。
+
+
+**20）导入这条流程以前在真机套件里一次都没跑过——补上之后，播报缺口当场被抓住并修了。**
+
+技能清单里"错误要就地说明、并且要能被辅助技术读到"那一条，逼我去找**这个应用到底有没有把结果说出口**。
+查下来是一处自相矛盾：`SettingsSheet.vue` 数据行里，清空那格用 `<span class="arm" aria-live="polite">`
+播报"再点一次就清空"，而**导入的结果**只有一个 `aria-hidden="true"` 的 ✓／!——
+屏幕阅读器用户选完文件，成功失败什么都收不到。同一个面板、相邻两格、两种标准。
+
+修法不加任何可见文字（无字层那条"不得有成句文字"的判据扫整篇文档，加句子会红 7 条，见 §8-8）：
+`.state` 常驻 DOM、`role="status"`、`aria-label` 随 `importState` 变（idle 时是 `undefined`，属性直接消失），
+✓／! 留在内层继续当装饰。新文案两条 `a11y.importOk`／`a11y.importBad` 同时进 EN 与 zh 两张表
+（`copy-tiers.test.ts` 本来就要求两边键集相等，少一边就红），ar 仍按既有回退设计不动。
+两条都写成"发生了什么＋下一步"，不是只说"失败"。
+
+判据进真机套件（第 176 条），跑的是真文件通道：`setInputFiles` 喂一个不是存档的 JSON，
+读 `role`／`aria-label`／class，再等 `mark()` 自己那 2400 ms 过窗、确认它安静下来。
+现读：`{"importQuiet":{"role":"status","label":"","cls":"state idle"},
+"importRefused":{"role":"status","label":"导入失败——请选这个应用导出的文件","cls":"state bad"}, ...}`，
+正常路径 **175/176**（那一条红见 §11-21，与这笔无关）。成功那一半也在浏览器里现量过：
+把自己导出的存档喂回去 ⇒ `label:"存档已导入——读数与图鉴都回来了"`、`text:"✓"`。
+
+顺带一条**关于 CI 的事实**（读 `b459e93` 那趟自发的 `Device job report` 得到的）：
+远端那份报告里 **22 条 FAIL**，几乎全是 `openSheet(...) never opened` 配 `events:[]` + `hitIsHandle:true`
+——按压送到了、命中也对、按钮自己的监听器什么都没记到，就是这一族；
+而 `right-to-left: the burning end stays on the same side` **不在那 22 条里**。
+⇒ 我本地那条 RTL 红不是远端已有的那条，得单独归因（见 §11-21）。
+
+**这条文案背后有一条对本仓很硬的约束，写下来给下一个加字的人：**
+**中文文案只能由已经烤进字形图集的 311 个汉字组成**（图集共 406 个码位，`apps/web/public/atlas/glyphs.json`
+的 `metrics` 键集），因为 `atlas-coverage.test.ts` 要求"每张表、每个 locale 的每个字符都要有格子"。
+我第一版写的『导入失败——请选这个应用导出的文件』引入了 9 个新汉字，那条判据**当场把红报回来**，
+并让它自己去 `node scripts/bake-atlas.mjs`（口径：`node apps/web/scripts/bake-atlas.mjs`，从仓根跑）。
+**但重烤在这台机器上是不该做的**：脚本的取字顺序是 `PUFFLY_ATLAS_FONT` → 仓内 `apps/web/assets/fonts/NotoSansSC-Regular.otf`
+→ 系统字体，而本机**没有那个 vendored Noto**（`ls apps/web/assets/fonts` 为空），于是一烤就用上
+Apple 的 `STHeiti Light.ttc`——脚本自己印着"This atlas is for development only… may not be redistributed"。
+⇒ 我把烤出来的 `glyphs.json`/`glyphs.png` 原样退回，改成只用已覆盖的字（『导入完成』／『这个存档没导入』，
+逐字用图集码位验过），把"扩字集"留给用户用可再分布字体重烤那次。
+**给新 UI 的同一句话**：要加新汉字，先确认图集里有格子，否则要么换词、要么请主人用 Noto Sans SC 重烤一次。
+**21）两条红在正常速度下也复现了——一条是本仓已登记的取向题，一条是判据自己的量法有洞。**
+
+同一棵树第二趟正常速度 **172/176**，四条红里没有一条能归给上面那笔文案改动（它只动了两个字符串与一行标记）：
+
+- `the rail, the head-up row and the sheet stay tappable together — close=aside.archive<…|open=1|card=1`
+  ⇒ **§8-11 那条"钉住的档案卡压住面板一排键"不是 CI 慢页才有的**，正常速度也撞得到，只是要看那一趟有没有把卡留在屏上。
+  这一条把 §8-11 的分量提高了：它不是"环境放大的边角"，是玩家真能碰到的死键。
+- `right-to-left: the burning end stays on the same side… — x 224.8/210 → 214.5/210（budget 5.7 = 3 + burn drift 0.3 px/窗 × 9）`
+  ⇒ 差 **10.3 px**，超出预算；但同一次读数里 `n 25616→26979`（**像素数差 5.3 %**）。
+  这条判据的预算只建模**烟杆自己**的漂移，而它取的是"锚点周围那一圈像素"的质心——**那一圈里有烟羽**。
+  羽量差 5 % 足以把质心推走十几像素。⇒ 现在还不能断定"切阿语把画面平移了"，
+  要先做一次**把烟羽排除**的复量（只在没有呼出的窗口里读，或按烟杆自己的色带取列），
+  才能把这条红分给"应用镜像错了"还是"判据量法含噪"。**这一条留给下一轮，不在这笔里下结论。**
+- 另两条（`the screen carries no prose…` 的 `hint:"弹"` 与 `3D: the ignition's flame…`）落在本仓已知的
+  时机读数族里：同一棵树四趟之间会换人，见 §10 基线行那句"分母会动、红会换族"。
 
 ---
 

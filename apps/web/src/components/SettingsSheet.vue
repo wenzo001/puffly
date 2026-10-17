@@ -598,8 +598,27 @@ watch(
       <span class="arm" aria-live="polite">{{
         word(armed ? 'settings.resetArm' : 'settings.reset')
       }}</span>
-      <span v-if="importState !== 'idle'" class="state" :class="importState" aria-hidden="true">
-        {{ importState === 'ok' ? '✓' : '!' }}
+      <!--
+        The import's only outcome signal used to be an `aria-hidden` ✓ / !, so a screen-reader user
+        who picked a file got nothing back — while the *erase* flow two buttons to the left already
+        announces through `aria-live`. This closes that inconsistency without adding visible prose
+        (the no-prose layer forbids sentences on this surface): the region is always in the DOM so a
+        change is announced, its accessible name carries the outcome plus the next step, and the
+        mark stays decorative.
+      -->
+      <span
+        class="state"
+        :class="importState"
+        role="status"
+        :aria-label="
+          importState === 'idle'
+            ? undefined
+            : copy.say(importState === 'ok' ? 'a11y.importOk' : 'a11y.importBad')
+        "
+      >
+        <span v-if="importState !== 'idle'" aria-hidden="true">
+          {{ importState === 'ok' ? '✓' : '!' }}
+        </span>
       </span>
       <input
         ref="fileInput"
