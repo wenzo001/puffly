@@ -113,6 +113,7 @@ min/max/step 都取自己那一行的属性，别抄这张表）：
 | **HUD 的读数格是 18 px 高的按钮**（`.num` 49×18、宽屏 `desk` 的 `.read` 47/46/23×18）——它们不是 `.icon-button`，所以 `global.css:134-135` 那条"自家控件 44/54"的下限从来没管到它们；实测可命中方块 **0**（连 24×24 都凑不出） | `HudBar.vue` 三个按钮挂 `data-reach` | 同上（计数按属性行，不按文本——第一版把注释里那句 `data-reach` 也数进去了，读出 4） |
 | **档案卡的关闭键 28×28、钉住键 198×32**：`.close` 在 `ArchiveCard.vue:209-215` 用 `min-width/min-height: 28px` **主动压掉了**那条 44/54 下限 | `ArchiveCard.vue` 两处 `data-reach` | 同上 |
 | 图集／CSSOM 读不到时，场景里徽标的兜底色 `#e2604a` 与 token `#ff8a3d` 不是一个颜色 | `SceneStage.vue` | — |
+| **开屏那一跳是真的**：脚本跑起来之前页面涂 `#121317`，跑起来之后涂 `--deep-charcoal #0b0a09`——实测相对亮度差 **2.13 倍**；而 `theme-color`（浏览器自己的那条栏）也停在旧的 `#121317`，与运行中的页面永远不一致（manifest 早就是 `#0b0a09`） | `apps/web/index.html:6/21` 与 `vite.config.ts:37-38` 收成同一个数 | `__tests__/boot-colour.test.ts`（把开屏色改回 `#121317` ⇒ 两条都红，现场跑过） |
 | 在设置里打字／选日期时，空格、回车、方向键、Esc 被游戏抢走；Tab 到药丸后按回车也不激活按钮，而是去点烟 | `useInputAdapters.ts` 的 `yieldsToFocus` | `inputAdapters.test.ts` 的 `yields space, Enter and the arrows…` + `keeps Space as the draw even when a button holds the focus` |
 | 拖动途中另一根手指碰到屏幕会抢走烟杆；抬起的那根还会在指位表里留鬼 | `useInputAdapters.ts` 的 `onDown`／`onUp`／`onCancel` | 同一文件三条用例，各自只为自己红 |
 | **建议是"磕灰"或"收烟"时，空格键按下去毫无反应**（键盘对所有动词都发 hold，而引擎的 hold 没有 `ash` 那一行、也不管收走已熄灭的烟） | `useInputAdapters.ts` 里空格改按 `isSustained` 分流 | `inputAdapters.test.ts` 的 `answers the decisive verbs with Space too…` + `keeps the sustained verbs as a hold and one release` |
@@ -156,6 +157,7 @@ min/max/step 都取自己那一行的属性，别抄这张表）：
 | 5 | **宽屏遮挡**（#150）与托盘近侧要不要一条与远侧对称的边。 | 三条修法的取舍，等拍板 |
 | 6 | 面板打开时药丸整个消失（有实测：控制缺席而不是折叠）。新 UI 如果要保留一个"随时能吸一口"的入口，这是要重新设计的核心冲突。 | 已知事实，未定方向 |
 | 9 | **"记录只存在内存里、关掉就全丢"这件事，可见面只有一个半透明的圆点**：`SettingsSheet.vue:216` 是 `<span class="warn" aria-label="…">◍</span>`，`.warn { opacity: 0.6 }`（`:631`），那句话（`a11y.memoryOnly`：英文 'memory only'、中文『只存在内存里』，`copy.ts:99/373`）**只有屏幕阅读器能拿到**。同一行还有一个同形状的 🔇（音频不可用，`:211`）。SPEC 从未规定这个标记怎么呈现，所以这不是"设计就这么定的"，是当初就这么建的。⇒ 两条路：在带字的行里（数据/导出那排）落一句现成文案，或者接受"记号不配字"的语汇但换一个认得出的记号。**前者会动界面的语言（本应用是记号＋数字，§9.2），该你定。** | 未动，等取向 |
+| 15 | **全应用没有标题结构**：源码与运行页面都读到 `h1..h6` **0 个** ⇒ 屏幕阅读器用户没有"跳到下一节"的落脚点。补法两条都动契约：加视觉隐藏的标题＝往无字层塞成句文字（与 §8-8 同族冲突），加可见小标题＝改版式。 | 未动，等取向 |
 | 14 | **自家两个标准在打架：滑块 40 px，而 `--tap-target` 是 44／54**。§66 把 `input[type='range']` 定成 `height: 40px` + 30 px 滑块头（`global.css:444-448`，理由是"22 px 的头压在 3 px 线上按不中"），但可命中方块实测只有 **34**（盒子 822／846×40，三条滑块一样）。抬到 `min-height: var(--tap-target)` 是两行 CSS，代价是设置面板每一行长高 4~14 px（面板本来就靠滚动）⇒ 这是"要不要用滚动换手指"的取舍。 | 未动，等一句话 |
 | 13 | **键盘打开面板时焦点不搬进面板**（实测 `focusMovedInsidePanel:false`，量具 `probe-keyboard-reach.mjs`）。代价是能算出来的：焦点留在底栏那颗 tab，所以再按一次 Enter 就把面板关了——这是键盘用户当前唯一的快速出路；把焦点搬进面板（标准做法，屏幕阅读器会立刻念出面板）会连带拿走这条 toggle 路。两条都站得住，选哪条是取向。 | 未动，等一句话 |
 | 12 | **Sound 那一行的滑块拖的不是音量**：行标签 `settings.sound`，三档循环按钮（🔊够／🔉一点／🔇关）动 `volume+muted`，而同一行那条 0–100 的长滑块绑的是 `settings.ambientVolume`（`SettingsSheet.vue:236-248`）——它管的是环境声底（风／房间），拖它的时候提示音本身不变。截图里两者并排，肉眼分不出归属。要么把这条滑块挪去它自己的行（多一行，但归属清楚），要么把行标签拆成两个词（要新文案），要么接受现状。 | 未动，等一句话 |
@@ -666,6 +668,32 @@ Playwright 的动作性等待拒绝按压 → 重试到超时 → **抛出** →
 其余是 dial／计数／落雪碎片那类时机读数。⇒ **这是第一次在推送之前拿到 CI 环境的数**，
 把它记在这里，是为了下一次推送前有人能复现这句话，而不是又一次靠 CI 去试。
 
+
+
+**19）这一格不是我自己想到的——是融合进来的那份技能清单点出来的，量完确实是个 bug。**
+
+`.qoder/skills/web-design-guidelines/SKILL.md`（AAS 装进来的 7 个之一）的工作流是"先取上游规则、再对着文件逐条查"。
+照它做了：取回 Web Interface Guidelines，把可机械核对的那批逐条查这个应用。**结果分三类。**
+
+一、**查到一处真缺陷，已修**（就是 §6.1 新增那一行）：开屏背景 `#121317` vs 应用背景 `#0b0a09`，
+实测相对亮度 **2.13 倍**之差（`at commit rgb(18,19,23)` → `after boot rgb(11,10,9)`），
+`theme-color` 也停在旧值上，于是浏览器那条栏永远和运行中的页面不同色；manifest 早就是 `#0b0a09` ⇒ 四处三个数。
+修完复测 `at commit rgb(11,10,9)`、`theme #0b0a09`，四处一个数。
+判据 `boot-colour.test.ts` 钉的是"四个地方必须同数"，把开屏色改回 `#121317` 两条都红（现场跑过）。
+
+二、**查到一处结构性的缺，但它撞本仓另一条契约，所以只登记**（§8 第 15 行）：
+**全应用零标题元素**——源码 `grep -rnoE '<h[1-6]' apps/web/src` 命中 **0**，运行中的页面
+`document.querySelectorAll('h1,h2,h3,h4,h5,h6').length` 也读到 **0**。屏幕阅读器用户因此没有
+"跳到下一节"的落脚点。补法要么加视觉隐藏的标题（**那就在无字层里塞进了成句文字**——§8-8 那条
+live-region 冲突是同一族：有一族判据钉着"无字层不得有成句文字"，它扫整篇文档），
+要么给可见的小标题（那是版式决定）。两条都动契约，不自行改。
+
+三、**一批"看起来会缺"的，实测全部已经做对**（负结果，别再重做）：
+`transition: all` **0 处**；只动 `transform/opacity` 之外的属性的 transition **0 处**；
+文案里没有一处 ASCII 三点省略号（`…` 用得对）；**没有 `<img>`、没有 `<select>`**（所以 alt／Windows 原生下拉那两条不适用）；
+`color-scheme: dark` 在 `index.html:22` 有；安全区 `env(safe-area-inset-*)` 在用；
+最大的一屏列表是 32 个 `.swatch`（另有 21 房间／12 盒／11 支烟），**都在"＞50 才要虚拟化"那条门槛下面**——
+现读口径：打开设置面板后 `document.querySelectorAll('.swatch').length`。
 
 ---
 

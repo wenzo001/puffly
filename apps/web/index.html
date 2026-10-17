@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#121317" />
+    <meta name="theme-color" content="#0b0a09" />
     <meta name="description" content="Take a break. Skip the smoke." />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -18,7 +18,10 @@
       #app {
         height: 100%;
         margin: 0;
-        background: #121317;
+        /* The same warm black the app paints once it boots (`--deep-charcoal`), so the handoff
+           is not a colour step: the old #121317 measured 2.13x the luminance of the page it
+           handed over to. `boot-colour.test.ts` keeps these four numbers one number. */
+        background: #0b0a09;
         color-scheme: dark;
       }
     </style>
