@@ -200,6 +200,15 @@ min/max/step 都取自己那一行的属性，别抄这张表）：
 
 - **一条命令扫全部 UI 判据**：`node tests/smoke/ui-sweep.mjs`（没有服务时它自己起 `npm run dev`，跑完关掉）。它把四把尺子跑一遍并汇总：谁压住谁＋手指够不够、键盘这条路、减弱动态效果、无字层。`--strict` 在任何一条被列出时退 1（今天会红，因为 §8-11 那三颗被钉住卡压住的键还在）。
   2026-10-17 现读：`covered 3`、`reachBelow44 14`（另有 `reachBetween44AndTarget 70`——那是"到了 44、没到 54"，算读数不算缺陷）、键盘 `insideClosedPanel 0 / noRing 0`、`stillTravelling 0`、`nothingLeft 0` ⇒ 汇总 **17 条明细**，逐条都落在已登记的族里：**8 条**是钉住卡那一态（3 颗被压住 + 3 颗命中 0 + 2 颗被挤到 34，§8-11）、**7 条**是滑块 40 与 44 打架（§8-14）、**2 条**是宽屏 desk 那排里邻格间距 46 px 装不下 44 的读数格（§11-14 记的那个例外）。
+- **把 CI 那一趟在本地复现出来**（推送之前就能拿到它的数，而不是靠 CI 去试）：
+  ```bash
+  bash tests/smoke/served-build.sh
+  PUBLIC_BASE=/puffly/ npm run build
+  node tests/smoke/serve.mjs apps/web/dist 4173 127.0.0.1 /puffly/ &
+  PUFFLY_CHROME_ARGS="--use-angle=swiftshader --enable-unsafe-swiftshader --disable-gpu" \
+    node tests/smoke/touch-device.mjs http://127.0.0.1:4173/puffly/
+  ```
+  2026-10-17 这样跑出来是 **167/175**（8 条红的族见 §11-18 末段），耗时约 13 分钟。
 - 正常路径基线：真机套件 **175 条**（2026-10-17 加了第 175 条 reduced motion，加之前是 174/174）——**分母会动，别抄这个数**，现算＝跑一遍看最后一行。同一棵树一晚连跑四趟是 **174/174 → 174/175 → 171/175 → 170/175，红在三个互不相干的族之间换人**（第 2 趟红在自己新判据的对照上＝套件自己的按压被拒；第 3 趟 `lighting attempts 4` 一根烟没点着、后面三条全是它的下游；第 4 趟整场 3D 没起来：`visibility: missing`、`nameMax 0`、meshes 0）。⇒ 这三族的红都不能归因给某一笔改动；本地要把任何一条写成"修好了"，必须先同树复跑一趟；有效判决仍是 CI。；软件渲染（无 GPU）代理旗标 `PUFFLY_CHROME_ARGS="--use-angle=swiftshader --enable-unsafe-swiftshader --disable-gpu"`，约 357s 跑完整套。**同一棵树同一旗标曾出现 174→5 红→9 红→174 的轮换**，所以"绿过一次"永远不等于"修好了"。
 - 真机套件**没有单条过滤器**：新增一条真机判据＝跑整套，并在页面内就地做反证。
 - 改了画面上看得见的事实，就要用 `tests/smoke/readme-shots.mjs` 重拍 README 四图并入库。
@@ -629,6 +638,34 @@ DOM 里两样都没有，场景就没有东西可画）。
 一颗控件在无字层里必须还剩记号或表面，词不能是它唯一的墨。
 
 ---
+
+**18）CI 那一趟为什么会"整跑丢掉"：三处没加界的 `page.click` —— 其中把它压垮的那一笔，是我的 `data-reach` 惹的。**
+
+在 CI 的环境下本地复跑（软件 WebGL 代理，命令在 §10），第一趟**跑到第 255 行就死了**：
+未捕获的 `TimeoutError`，来自一句裸的 `await page.click('.sheet[data-open="true"] .close')`。
+Playwright 的动作性等待拒绝按压 → 重试到超时 → **抛出** → 后面一百多条判据一条都不报，
+读数就变成"这一趟没跑完"而不是"这一条红"。这正是 #159 记过的那个形状，只是又换了三个入口。
+
+成因链有三节，中间那节是我的改动接上的：
+① 套件里还留着 **3 处没有 `.catch()` 的 `page.click(selector)`**（`:3474`、`:3527`、`:3579`），
+   而同文件早就有 `tapAt/clickAt` 这套"有界、把拒绝咽下、让下游判据去报"的规矩；
+② 那一刻**钉住的档案卡正压在面板的关闭键上**（§8-11 那条待拍板），日志里拦截者写得很清楚：
+   `button.pin … from <aside class="archive">`；
+③ 而我把卡上 `.close`(28px) 与 `.pin`(32px) 的隐形命中面提到 `--tap-target`（54px）——
+   **原本勉强能挤过去的按压，从此被拒**。所以"红变成丢跑"这一步是我造成的；
+   本地正常速度那几趟全是 174/174，看不见它——只有 CI 那种慢页会踩到。
+
+修法两半，都不动那条待拍板的几何题：三处点击改成 `timeout: 3000 + .catch(() => {})`
+（**判据不放宽**：`opened`／`scrollProof`／`closed` 这些下游读数才是报告者，拒绝照样红，只是不再带走全跑）；
+`openSheet` 里"先把钉住的卡清掉"那一步补一条**送达式**兜底——`clickAt` 拒绝后就按 `.close` 自己的中心
+用 `touchscreen.tap` 原语再按一次，两次尝试都没清掉就打印 `CARD NOT CLEARED <选择器>`。
+
+复跑同一条件同一产物之后：**167/175、跑完、`CARD NOT CLEARED` 出现 0 次**，S10 那 10 条全绿
+（包括死掉的那条 `closing the sheet brings the scene back to the same pixels`）。
+剩下 8 条红的族与本轮改动无关：4 条是"整场 3D 没起来"（`visibility: missing`、`nameMax 0`、meshes 0），
+其余是 dial／计数／落雪碎片那类时机读数。⇒ **这是第一次在推送之前拿到 CI 环境的数**，
+把它记在这里，是为了下一次推送前有人能复现这句话，而不是又一次靠 CI 去试。
+
 
 ---
 

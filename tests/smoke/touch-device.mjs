@@ -912,12 +912,35 @@ async function openSheet(page, id, mouse = false) {
   // leaves the page in the state the sheet blocks assume.
   if ((await page.locator('.archive').count()) > 0) {
     await clickAt(page.locator('.archive .close').first()).catch(() => {});
-    await page
+    let gone = await page
       .waitForFunction(() => document.querySelectorAll('.archive').length === 0, null, {
-        timeout: 4000,
+        timeout: 2500,
         polling: 120,
       })
-      .catch(() => {});
+      .then(() => true)
+      .catch(() => false);
+    // `clickAt` answers false when Playwright refuses to press at all, and on a starved page that is
+    // the normal outcome — which left a pinned card standing over the sheet's own controls, and the
+    // next press aimed at the sheet was then refused by it. Deliver the same centre with the raw
+    // route, which cannot be refused because it makes no stability bet.
+    if (!gone) {
+      const box = await page
+        .locator('.archive .close')
+        .first()
+        .boundingBox()
+        .catch(() => null);
+      if (box !== null && box.width > 0) {
+        await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2).catch(() => {});
+        gone = await page
+          .waitForFunction(() => document.querySelectorAll('.archive').length === 0, null, {
+            timeout: 2500,
+            polling: 120,
+          })
+          .then(() => true)
+          .catch(() => false);
+      }
+    }
+    if (!gone) console.log('CARD NOT CLEARED before', selector);
   }
   /** Is that handle somewhere a finger would actually land — on screen, and nothing else on top? */
   const awake = (sel) =>
@@ -3471,7 +3494,10 @@ try {
 
   await wakeChrome(page);
   const atRest = await deskView();
-  await page.click('[data-entry="skins"]');
+  // Bounded, and a refusal is swallowed on purpose: `opened` below is what reports the miss. An
+  // unbounded `page.click` on a slow page spends the actionability wait and then THROWS, which used
+  // to end the whole run here (the #159 shape: one lost red becomes a lost run).
+  await page.click('[data-entry="skins"]', { timeout: 3000 }).catch(() => {});
   await page.waitForTimeout(1400);
   const opened = await deskView();
   check(
@@ -3524,7 +3550,7 @@ try {
   let scrollProof = await runScrollProof();
   for (let retry = 0; retry < 3 && scrollProof.landed === false; retry += 1) {
     await wakeChrome(page);
-    await page.click('[data-entry="skins"]');
+    await page.click('[data-entry="skins"]', { timeout: 3000 }).catch(() => {});
     await page.waitForTimeout(1200);
     scrollProof = await runScrollProof();
   }
@@ -3576,7 +3602,11 @@ try {
   );
 
   await openSheet(page, 'shelf', true);
-  await page.click('.sheet[data-open="true"] .close');
+  // Same rule as above, and this one is what actually threw on CI's software-WebGL page on
+  // 2026-10-17: a pinned archive card was still standing over the sheet, its own hit area now
+  // widened by `data-reach`, so Playwright refused the press, timed out, and took every check after
+  // it down with it. The `closed` comparison below is the reporter; a refusal must not be a lost run.
+  await page.click('.sheet[data-open="true"] .close', { timeout: 3000 }).catch(() => {});
   await page.waitForTimeout(900);
   // Awake on both sides of the comparison. `atRest` was taken with the chrome up; once the sheet is
   // closed nothing holds it up any more, so 2.6 s of stillness folds the head-up row and its rect
